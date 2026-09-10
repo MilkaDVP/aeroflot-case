@@ -1,0 +1,201 @@
+/*
+ * Палитра и типографика.
+ *
+ * Тёмная тема — основная: диспетчерская работает круглосуточно, и светлый
+ * экран ночью выжигает глаза и мешает видеть перрон в окно.
+ *
+ * Цвет здесь несёт смысл, а не украшает. Каждый цвет статуса означает
+ * ровно одно состояние, и это же значение используется на карте, в панели
+ * и в списке кандидатов — иначе диспетчеру пришлось бы держать в голове
+ * две системы обозначений.
+ */
+
+:root {
+  /* Поверхности: от самой глубокой к самой светлой. */
+  --bg-deep: #0b0f14;
+  --bg-panel: #121820;
+  --bg-raised: #1a222c;
+  --bg-hover: #222c38;
+  --border: #2a3542;
+  --border-strong: #3a4756;
+
+  /* Текст. */
+  --text: #e4ecf4;
+  --text-muted: #8b9bad;
+  --text-dim: #5d6b7a;
+
+  /* Смысловые цвета статусов. */
+  --ok: #35c46a;          /* свободен и имеет допуск */
+  --neutral: #6e7d8d;     /* свободен, но допуска на этот тип ВС нет */
+  --warn: #e3a72c;        /* близко к пределу 15 минут */
+  --danger: #f2564d;      /* превышение регламента / нарушение */
+  --route: #3d8bfd;       /* предложенный маршрут */
+  --busy: #a371f7;        /* занят на другом вызове */
+
+  /* Полупрозрачные варианты для подложек и заливок. */
+  --ok-soft: rgba(53, 196, 106, 0.14);
+  --warn-soft: rgba(227, 167, 44, 0.14);
+  --danger-soft: rgba(242, 86, 77, 0.14);
+  --route-soft: rgba(61, 139, 253, 0.16);
+  --busy-soft: rgba(163, 113, 247, 0.14);
+
+  /* Карта. */
+  --map-bg: #0d1219;
+  --taxiway: #2b3947;
+  --taxiway-strong: #3a4c5e;
+  --stand: #55697d;
+
+  /* Шрифты. Моноширинный — для всех чисел: времени, координат, номеров
+     бортов и отметок. Цифры в таблице должны стоять столбиком. */
+  --font-ui: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
+
+  /* Плотная сетка: это инструмент на всю смену, а не лендинг. */
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap: 12px;
+  --gap-lg: 18px;
+  --radius: 4px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Числа везде моноширинные и с табличными цифрами: иначе при обновлении
+   раз в несколько секунд значения будут дёргаться по горизонтали. */
+.num,
+.mark,
+.board {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--route);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--route);
+  border-color: var(--route);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #5a9dff;
+  border-color: #5a9dff;
+}
+
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  width: 100%;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--route);
+}
+
+label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--gap-xs);
+}
+
+/* Квалификационная отметка показывается так, как её видит настоящий
+   диспетчер в свидетельстве: «B1.1 / A320», а не описательным текстом. */
+.mark {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-deep);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.error {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: var(--gap-sm) var(--gap);
+}
+
+/* Единственная анимация — подсветка нового вызова. Функциональная:
+   диспетчер может смотреть на карту, а не в список. */
+@keyframes call-appear {
+  0% {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+  }
+  100% {
+    background: var(--bg-raised);
+    border-color: var(--border);
+  }
+}

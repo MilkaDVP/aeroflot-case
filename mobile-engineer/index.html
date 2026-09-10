@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>ОТО · Инженер</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- Экран 1. Вход -->
+<section class="screen" id="screen-login">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <h1>Оперативное ТО</h1>
+    <p class="brand-sub">Приложение инженера</p>
+  </div>
+
+  <form id="login-form" class="stack">
+    <label for="login">Логин</label>
+    <input id="login" autocomplete="username" autocapitalize="off" required>
+
+    <label for="password">Пароль</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+
+    <div class="error" id="login-error" hidden></div>
+    <button type="submit" class="big primary" id="login-submit">Войти</button>
+  </form>
+
+  <p class="hint">Демонстрация: <code>sokolov / engineer</code></p>
+</section>
+
+<!-- Экран 2. Выход на смену -->
+<section class="screen" id="screen-shift" hidden>
+  <div class="brand">
+    <h1 id="shift-name">—</h1>
+    <p class="brand-sub" id="shift-marks">—</p>
+  </div>
+
+  <div class="card">
+    <p>
+      Выход на смену переводит вас в статус «свободен» и включает передачу
+      координат. С этого момента диспетчер может назначить вас на вызов.
+    </p>
+  </div>
+
+  <div class="error" id="shift-error" hidden></div>
+
+  <div class="stack">
+    <button class="big primary" id="shift-start">Заступить на смену</button>
+    <button class="big ghost" id="shift-logout">Выйти из учётной записи</button>
+  </div>
+</section>
+
+<!-- Экран 3. Рабочий -->
+<section class="screen work" id="screen-work" hidden>
+
+  <header class="topbar">
+    <span class="status-dot" id="work-status-dot"></span>
+    <span id="work-status">на смене</span>
+    <span class="spacer"></span>
+    <button class="chip" id="geo-mode">GPS</button>
+    <button class="chip" id="work-menu">⋯</button>
+  </header>
+
+  <!-- Вызовов нет: компактная полоса над картой -->
+  <div class="idle" id="idle-block">
+    <div class="idle-mark"></div>
+    <div class="idle-text">
+      <h2>Вызовов нет</h2>
+      <p class="muted">Вызов придёт сюда автоматически</p>
+    </div>
+    <div class="idle-meta">
+      <span class="muted">Координаты</span>
+      <b class="num" id="idle-coords">—</b>
+    </div>
+  </div>
+
+  <!-- Активный вызов -->
+  <div class="call" id="call-block" hidden>
+    <!-- Главное число: сколько осталось до контрольного срока -->
+    <div class="deadline" id="deadline-block">
+      <div class="deadline-value"><span id="deadline-minutes">--</span><small>мин</small></div>
+      <div class="deadline-label" id="deadline-label">до контрольного срока</div>
+    </div>
+
+    <div class="target">
+      <div class="target-main">
+        <span class="stand" id="call-stand">—</span>
+        <span class="board num" id="call-board">—</span>
+      </div>
+      <div class="target-sub">
+        <span id="call-type">—</span> · <span id="call-defect">—</span>
+      </div>
+      <div class="target-metrics">
+        <div><span class="muted">Расчёт</span><b class="num" id="call-eta">—</b></div>
+        <div><span class="muted">По прямой</span><b class="num" id="call-distance">—</b></div>
+        <div><span class="muted">Отметка</span><b class="mark" id="call-mark">—</b></div>
+      </div>
+      <div class="queue-note" id="call-queue" hidden></div>
+    </div>
+  </div>
+
+  <!--
+    Карта видна всегда, а не только при вызове: инженеру нужно понимать,
+    где он находится, и иметь возможность поставить точку до того,
+    как вызов придёт.
+  -->
+  <div class="map-wrap">
+    <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
+    <button class="map-toggle" id="map-toggle">Схема</button>
+    <div class="map-hint" id="map-hint" hidden>Коснитесь карты, чтобы задать координаты</div>
+  </div>
+
+  <div class="error work-error" id="call-error" hidden></div>
+  <button class="big primary action" id="call-action" hidden>—</button>
+</section>
+
+<!-- Настройки местоположения -->
+<div class="sheet-backdrop" id="geo-sheet" hidden>
+  <div class="sheet">
+    <h3>Местоположение</h3>
+
+    <div class="segmented" id="geo-switch">
+      <button data-mode="gps" class="active">GPS устройства</button>
+      <button data-mode="simulation">Имитация</button>
+    </div>
+
+    <p class="muted small" id="geo-explain">
+      Координаты берутся с приёмника телефона.
+    </p>
+
+    <div id="geo-manual" hidden>
+      <label for="geo-lat">Широта</label>
+      <input id="geo-lat" inputmode="decimal" class="num">
+      <label for="geo-lon">Долгота</label>
+      <input id="geo-lon" inputmode="decimal" class="num">
+      <button class="big ghost" id="geo-apply">Поставить точку</button>
+      <p class="muted small">
+        Либо просто коснитесь карты маршрута — это тот же ручной ввод,
+        только пальцем.
+      </p>
+    </div>
+
+    <div class="error" id="geo-error" hidden></div>
+    <button class="big ghost" id="geo-close">Готово</button>
+  </div>
+</div>
+
+<!-- Меню -->
+<div class="sheet-backdrop" id="menu-sheet" hidden>
+  <div class="sheet">
+    <h3 id="menu-name">—</h3>
+    <p class="muted small" id="menu-marks">—</p>
+    <button class="big ghost" id="menu-leave">Уйти со смены</button>
+    <button class="big ghost" id="menu-logout">Выйти из учётной записи</button>
+    <button class="big ghost" id="menu-close">Закрыть</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/api.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/routemap.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

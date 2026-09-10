@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Выбор аэропорта и смены</title>
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%230b0f14"/><circle cx="16" cy="16" r="7" fill="%233d8bfd"/></svg>'>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/auth.css">
+</head>
+<body>
+  <main class="auth-screen">
+    <div class="auth-box wide">
+      <h1 class="auth-title">Контекст смены</h1>
+      <p class="auth-subtitle" id="greeting">—</p>
+
+      <div id="airport-section">
+        <label>Аэропорт</label>
+        <div class="choice-list" id="airports"></div>
+      </div>
+
+      <label>Смена</label>
+      <div class="shift-row" id="shifts">
+        <button type="button" class="choice" data-shift="day">Дневная</button>
+        <button type="button" class="choice" data-shift="night">Ночная</button>
+      </div>
+
+      <div id="error" class="error" hidden style="margin-top: var(--gap)"></div>
+
+      <div class="auth-actions">
+        <button type="button" class="primary" id="continue" disabled>
+          Открыть рабочий экран
+        </button>
+      </div>
+
+      <p class="auth-hint">
+        Диспетчер видит только сотрудников, воздушные суда и вызовы
+        выбранного аэропорта. Сотрудник не на выбранной смене кандидатом
+        не является, независимо от его местоположения.
+      </p>
+    </div>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/select-airport.js"></script>
+</body>
+</html>

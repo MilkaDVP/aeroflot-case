@@ -1,0 +1,10 @@
+.git/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.venv/
+venv/
+# Сырые выгрузки OSM в образ не нужны — там только готовые графы.
+data/airports/raw/
+docs/
