@@ -97,8 +97,19 @@ class TestAuth(ApiTestCase):
         body = response.json()
         self.assertEqual(body["role"], "dispatcher")
         self.assertTrue(body["token"])
-        # Аэропорт один — сервер выбрал его сам, шаг выбора пропускается.
+        # У диспетчера два аэропорта, поэтому сервер не выбирает за него:
+        # шаг выбора аэропорта из §5 обязателен.
+        self.assertIsNone(body["airport_icao"])
+        self.assertEqual(len(body["airports"]), 2)
+
+    def test_единственный_аэропорт_выбирается_сам(self):
+        # У начальника смены аэропорт один — шаг выбора пропускается.
+        response = self.client.post(
+            "/api/auth/login", json={"login": "supervisor", "password": "supervisor"}
+        )
+        body = response.json()
         self.assertEqual(body["airport_icao"], "UUEE")
+        self.assertEqual(len(body["airports"]), 1)
 
     def test_неверный_пароль_отклоняется(self):
         response = self.client.post(
@@ -133,7 +144,9 @@ class TestAuth(ApiTestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_чужой_аэропорт_выбрать_нельзя(self):
-        token = self.login("dispatcher", "dispatcher")
+        # Начальник смены привязан только к Шереметьево: Домодедово
+        # для него чужой аэропорт, даже если знать его код.
+        token = self.login("supervisor", "supervisor")
         response = self.client.post(
             "/api/session/airport",
             json={"airport_icao": "UUDD", "shift": "day"},

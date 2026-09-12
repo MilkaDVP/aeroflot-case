@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Ручные правки поверх выгрузки OpenStreetMap для Домодедово (UUDD).",
+    "Как и для Шереметьево, файл отделён от выгрузки: всё, что здесь, —",
+    "наше дополнение, а не данные OSM.",
+    "",
+    "Техцентры. Координаты взяты из центров реальных ангаров OSM",
+    "(aeroway=hangar) в западной части поля; один из них подписан",
+    "в OSM как Repair Base — это ремонтная база. Названия наши."
+  ],
+
+  "add_nodes": [
+    {
+      "id": "tc_repair",
+      "type": "tech_center",
+      "ref": "ТЦ-Ремзона",
+      "lat": 55.4190080,
+      "lon": 37.8867720,
+      "connect_nearest": { "count": 2, "vehicle_allowed": true }
+    },
+    {
+      "id": "tc_north",
+      "type": "tech_center",
+      "ref": "ТЦ-Север",
+      "lat": 55.4245260,
+      "lon": 37.8799960,
+      "connect_nearest": { "count": 2, "vehicle_allowed": true }
+    }
+  ],
+
+  "set_nodes": [],
+
+  "add_edges": []
+}
