@@ -528,6 +528,9 @@ function setGeoMode(mode) {
 
 function openSheet(id) {
   el(id).hidden = false;
+  // Уведомление висит выше листа и перекрывает его текст, а сообщение
+  // об отказе геопозиции лист показывает и сам — убираем дубль.
+  hideToast();
   if (id === "menu-sheet" && state.user) {
     el("menu-marks").textContent = state.user.full_name;
   }
@@ -580,7 +583,33 @@ function formatMinutes(minutes) {
 
 let toastTimer = null;
 
+/** Открыт ли сейчас какой-нибудь выдвижной лист. */
+function anySheetOpen() {
+  for (const backdrop of document.querySelectorAll(".sheet-backdrop")) {
+    if (!backdrop.hidden) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hideToast() {
+  clearTimeout(toastTimer);
+  el("toast").hidden = true;
+}
+
+/**
+ * Уведомление внизу экрана.
+ *
+ * Пока открыт лист, уведомление не показывается: оно лежит выше листа
+ * и накладывается на его текст, а сообщение об отказе геопозиции лист
+ * дублирует внутри себя отдельной строкой.
+ */
 function showToast(message, isAlert) {
+  if (anySheetOpen()) {
+    return;
+  }
+
   const toast = el("toast");
   toast.hidden = false;
   toast.textContent = message;
