@@ -367,6 +367,31 @@
   }
 }
 
+/* Пеший участок до машины — пунктир в экранных пикселях. Анимация
+   прорисовки у него отключена: она построена на том же штрихе. */
+.route.route-walk {
+  stroke-dasharray: 7 6;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+
+/* Машина парка: квадрат, чтобы не спутать с круглыми метками людей
+   и стоянок. Свободная — синяя, как маршрут; ждущая инженера — жёлтая. */
+.vehicle {
+  fill: var(--bg-deep);
+  stroke: var(--route);
+  stroke-width: 2;
+}
+
+.vehicle.is-reserved {
+  stroke: var(--warn);
+}
+
+.label-vehicle {
+  fill: var(--route);
+  font-size: 10px;
+}
+
 .label {
   font-family: var(--font-mono);
   font-size: 11px;

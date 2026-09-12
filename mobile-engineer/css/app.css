@@ -463,6 +463,30 @@ button:disabled { opacity: 0.5; }
 
 .queue-note[hidden] { display: none; }
 
+/* Указание про машину — синее, как маршрут на машине. */
+.vehicle-note {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--route);
+  background: rgba(61, 139, 253, 0.14);
+}
+
+.vehicle-note[hidden] { display: none; }
+
+/* Пеший участок до машины — пунктир. */
+.route-line.is-walk {
+  stroke-dasharray: 8 7;
+}
+
+.route-vehicle {
+  fill: var(--bg-deep);
+  stroke: var(--route);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
 /* --- Всплывающие панели --- */
 
 .sheet-backdrop {

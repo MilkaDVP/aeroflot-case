@@ -96,7 +96,14 @@ class Call(Base):
     # в записи после продвижения — для разбора, сколько вызов ждал.
     queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Машина, на которой исполнитель едет к этому борту, и узел, где он
+    # её забирает. pickup_node_id пуст, если машина уже была при нём
+    # или он идёт пешком: тогда маршрут из одного участка.
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), nullable=True)
+    pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
     aircraft = relationship("Aircraft", lazy="selectin")
+    vehicle = relationship("Vehicle", lazy="selectin")
     assigned_employee = relationship(
         "Employee", foreign_keys=[assigned_employee_id], lazy="selectin"
     )

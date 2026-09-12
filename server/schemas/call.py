@@ -40,16 +40,41 @@ class CallResponse(BaseModel):
     eta_at: str | None = None
     # Когда вызов поставлен в очередь к занятому инженеру.
     queued_at: str | None = None
+    # Машина, на которой исполнитель едет к борту, и узел, где он её
+    # забирает (пусто — машина уже при нём или он идёт пешком).
+    vehicle_call_sign: str | None = None
+    pickup_node_id: str | None = None
 
 
-class RouteSchema(BaseModel):
-    """Маршрут кандидата для отрисовки на карте."""
+class LegSchema(BaseModel):
+    """Участок маршрута одним способом передвижения."""
 
     node_ids: list[str]
     distance_m: float
     approach_m: float
     mode: str
     minutes: float
+
+
+class RouteSchema(BaseModel):
+    """
+    Маршрут кандидата для отрисовки на карте.
+
+    Через свободную машину маршрут из двух участков: пешком до машины
+    и на машине до борта. Карта рисует их по-разному, иначе диспетчер
+    не отличит «идёт пешком» от «едет».
+    """
+
+    node_ids: list[str]
+    distance_m: float
+    approach_m: float
+    mode: str = Field(description="walk, vehicle или walk_vehicle")
+    minutes: float
+    legs: list[LegSchema] = []
+    vehicle: dict | None = None
+    # Узел, где исполнитель забирает машину; пусто — машина не нужна
+    # или уже при нём.
+    pickup_node_id: str | None = None
 
 
 class CandidateSchema(BaseModel):
@@ -60,6 +85,9 @@ class CandidateSchema(BaseModel):
     mark: str
     valid_until: str
     has_vehicle: bool
+    # Позывной машины, на которой он поедет, и нужно ли её сначала забрать.
+    vehicle_call_sign: str | None = None
+    pickup: bool = False
     minutes: float
     within_regulation: bool
     near_limit: bool

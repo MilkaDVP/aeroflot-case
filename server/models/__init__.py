@@ -10,5 +10,6 @@ from models.airport import Airport
 from models.call import Call
 from models.employee import Employee
 from models.user import AuthSession, User
+from models.vehicle import Vehicle
 
-__all__ = ["Aircraft", "Airport", "AuthSession", "Call", "Employee", "User"]
+__all__ = ["Aircraft", "Airport", "AuthSession", "Call", "Employee", "User", "Vehicle"]

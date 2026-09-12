@@ -13,28 +13,31 @@
 Сотрудник передаётся словарём:
     {
       "id", "full_name", "shift", "status",
-      "lat", "lon", "has_vehicle", "speed_kmh" (необязательно),
+      "lat", "lon", "speed_kmh" (необязательно — скорость ходьбы),
+      "vehicle" (необязательно) — машина парка, на которой он уже едет,
       "qualifications": [{"category", "aircraft_types", "valid_until"}],
       "busy_until" (необязательно, ISO-строка) — когда освободится
     }
 
 Вызов передаётся словарём:
     { "aircraft_type", "defect_code", "stand_node_id" }
+
+Свободные машины парка — списком словарей { "id", "call_sign", "lat",
+"lon", "speed_kmh" }: для пешего кандидата система сравнит «пешком»
+с «дойти до машины и доехать».
 """
 
 import time
 from operator import attrgetter
 
 from constants import (
-    MODE_VEHICLE,
-    MODE_WALK,
     REGULATION_ARRIVAL_LIMIT_MIN,
     REGULATION_WARNING_MIN,
     STATUS_FREE,
     STATUSES_BUSY,
 )
 from algorithm.qualification import find_qualification, required_mark
-from algorithm.routing import route_from_point
+from algorithm.transport import best_plan, drive_distances_to, prepare_vehicles
 from clock import utc_today
 
 REASON_WRONG_SHIFT = "не на этой смене"
@@ -56,11 +59,11 @@ MESSAGE_NO_CANDIDATES = (
 class Candidate:
     """Сотрудник, прошедший фильтры допуска и доступности, с его маршрутом."""
 
-    def __init__(self, employee, qualification, route):
+    def __init__(self, employee, qualification, plan):
         self.employee = employee
         self.qualification = qualification
-        self.route = route
-        self.minutes = route.minutes
+        self.route = plan
+        self.minutes = plan.minutes
         # Укладывается ли в регламент 15 минут.
         self.within_regulation = self.minutes <= REGULATION_ARRIVAL_LIMIT_MIN
         # Жёлтая зона: успевает, но запас меньше трёх минут.
@@ -68,12 +71,15 @@ class Candidate:
 
     def as_dict(self):
         """Представление для API и панели диспетчера."""
+        vehicle = self.route.vehicle
         return {
             "employee_id": self.employee["id"],
             "full_name": self.employee["full_name"],
             "mark": self.qualification["category"],
             "valid_until": self.qualification["valid_until"],
-            "has_vehicle": bool(self.employee.get("has_vehicle")),
+            "has_vehicle": vehicle is not None,
+            "vehicle_call_sign": vehicle["call_sign"] if vehicle else None,
+            "pickup": self.route.pickup,
             "minutes": round(self.minutes, 1),
             "within_regulation": self.within_regulation,
             "near_limit": self.near_limit,
@@ -127,12 +133,7 @@ def build_message(best, aircraft_type):
     )
 
 
-def movement_mode(employee):
-    """Способ передвижения сотрудника: своим ходом или на спецтранспорте."""
-    return MODE_VEHICLE if employee.get("has_vehicle") else MODE_WALK
-
-
-def suggest(graph, call, employees, shift, on_date=None):
+def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
     """
     Подбирает исполнителя на вызов.
 
@@ -145,12 +146,19 @@ def suggest(graph, call, employees, shift, on_date=None):
         call      — вызов (тип ВС, код дефекта, узел стоянки);
         employees — сотрудники этого аэропорта;
         shift     — текущая смена, контекст сессии диспетчера;
-        on_date   — дата проверки срока действия отметок.
+        on_date   — дата проверки срока действия отметок;
+        vehicles  — свободные машины парка.
     """
     started = time.perf_counter()
     on_date = on_date or utc_today()
+    stand_id = call["stand_node_id"]
 
     required = required_mark(call["defect_code"], call["aircraft_type"])
+
+    # Общие для всех кандидатов расчёты по машинам: посадка машин на граф
+    # и один проход Дейкстры на транспорте от стоянки (см. transport.py).
+    prepared = prepare_vehicles(graph, vehicles or [])
+    drive_map = drive_distances_to(graph, stand_id) if prepared else None
 
     candidates = []
     rejected = []
@@ -187,21 +195,14 @@ def suggest(graph, call, employees, shift, on_date=None):
             rejected.append(rejection(employee, REASON_NO_POSITION))
             continue
 
-        # Шаг 4. Маршрут и время в пути.
-        mode = movement_mode(employee)
-        route = route_from_point(
-            graph,
-            employee["lat"],
-            employee["lon"],
-            call["stand_node_id"],
-            mode,
-            employee.get("speed_kmh"),
-        )
-        if route is None:
+        # Шаг 4. Способ добраться и время в пути: своя машина, пешком
+        # или пешком до ближайшей свободной машины и дальше на ней.
+        plan = best_plan(graph, employee, stand_id, prepared, drive_map)
+        if plan is None:
             rejected.append(rejection(employee, REASON_NO_ROUTE))
             continue
 
-        candidates.append(Candidate(employee, qualification, route))
+        candidates.append(Candidate(employee, qualification, plan))
 
     # Шаг 5. Сортировка по времени в пути. Отсева по 15 минутам здесь нет
     # намеренно: превысивших регламент нельзя скрывать от диспетчера,

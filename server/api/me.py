@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from api.calls import to_response as call_to_response
 from auth.dependencies import Context, get_context
 from clock import utc_now
-from constants import STATUS_BUSY, STATUS_EN_ROUTE
+from constants import STATUS_BUSY, STATUS_EN_ROUTE, VEHICLE_RESERVED
 from database import get_db
 from graph_registry import get_graph
 from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
@@ -70,6 +70,9 @@ class CurrentCallResponse(BaseModel):
     # Сколько вызовов ждёт инженера после текущего. Инженер должен знать,
     # что после закрытия его не отпустят, а сразу отправят к следующему борту.
     queued_count: int = 0
+    # Машина для этого вызова. pickup = True — её сначала надо забрать:
+    # телефон показывает, где она стоит, иначе инженер пойдёт пешком.
+    vehicle: dict | None = None
 
 
 def load_own_employee(context, db):
@@ -95,6 +98,21 @@ def route_points(call):
     return points
 
 
+def vehicle_info(call):
+    """Машина вызова для телефона: позывной, где стоит, надо ли её забрать."""
+    vehicle = call.vehicle
+    if vehicle is None:
+        return None
+    lat, lon = vehicle.position()
+    return {
+        "call_sign": vehicle.call_sign,
+        "kind": vehicle.kind,
+        "pickup": vehicle.status == VEHICLE_RESERVED,
+        "lat": lat,
+        "lon": lon,
+    }
+
+
 @router.get(
     "/current-call",
     response_model=CurrentCallResponse | MessageResponse,
@@ -118,6 +136,7 @@ def current_call(context: Context = Depends(get_context), db: Session = Depends(
         route_points=route_points(call),
         eta_minutes=call.eta_minutes,
         queued_count=len(queued_calls_of(db, employee)),
+        vehicle=vehicle_info(call),
     )
 
 

@@ -110,7 +110,8 @@ def make_engineer(
         "status": status,
         "lat": BASE_LAT,
         "lon": BASE_LON + node_index * step_deg,
-        "has_vehicle": has_vehicle,
+        # Своя машина — машина парка, которая уже у сотрудника.
+        "vehicle": own_vehicle(employee_id) if has_vehicle else None,
         "busy_until": busy_until,
         "qualifications": [
             {
@@ -120,6 +121,11 @@ def make_engineer(
             }
         ],
     }
+
+
+def own_vehicle(employee_id):
+    """Машина парка, которая уже у сотрудника: едет с ним, координаты его."""
+    return {"id": 900 + employee_id, "call_sign": f"ТМ-{employee_id}", "speed_kmh": None}
 
 
 class TestScenarios(unittest.TestCase):
@@ -294,7 +300,7 @@ class TestPerformanceOnRealAirport(unittest.TestCase):
                     "status": STATUS_FREE,
                     "lat": position["lat"],
                     "lon": position["lon"],
-                    "has_vehicle": employee_id % 3 == 0,
+                    "vehicle": own_vehicle(employee_id) if employee_id % 3 == 0 else None,
                     "qualifications": [
                         {
                             "category": "B1.1",

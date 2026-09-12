@@ -231,6 +231,12 @@ function renderWork() {
   const queued = state.call.queued_count || 0;
   el("call-queue").hidden = queued === 0;
   el("call-queue").textContent = queued ? `После этого вызова ещё в очереди: ${queued}` : "";
+
+  // Машина — главное указание в пути: без подсказки инженер пойдёт
+  // пешком и опоздает, хотя маршрут посчитан через машину.
+  const vehicle = state.call.vehicle;
+  el("call-vehicle").hidden = !vehicle;
+  el("call-vehicle").textContent = vehicleInstruction(vehicle);
   el("call-eta").textContent =
     call.eta_minutes === null ? "—" : `${formatMinutes(call.eta_minutes)} мин`;
 
@@ -243,6 +249,17 @@ function renderWork() {
 
   updateDistance();
   updateCountdown();
+}
+
+/** Строка про машину: забрать по пути или уже едем на ней. */
+function vehicleInstruction(vehicle) {
+  if (!vehicle) {
+    return "";
+  }
+  if (vehicle.pickup) {
+    return `Заберите машину ${vehicle.call_sign} — она отмечена на карте`;
+  }
+  return `На машине ${vehicle.call_sign}`;
 }
 
 function renderIdle() {
@@ -337,7 +354,14 @@ function targetPoint() {
  */
 function drawRoute() {
   const points = state.call ? state.call.route_points : [];
-  routeMap.render(points, targetPoint(), state.position, state.airportPoint);
+  routeMap.render(
+    points,
+    targetPoint(),
+    state.position,
+    state.airportPoint,
+    state.call ? state.call.vehicle : null,
+    state.call ? state.call.call.pickup_node_id : null
+  );
   el("map-hint").hidden = locator.mode !== "simulation";
 }
 

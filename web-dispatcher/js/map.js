@@ -45,6 +45,7 @@ class AirportMap {
       stands: createGroup("layer-stands"),
       route: createGroup("layer-route"),
       aircraft: createGroup("layer-aircraft"),
+      vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
       labels: createGroup("layer-labels"),
     };
@@ -290,6 +291,50 @@ class AirportMap {
   }
 
   /**
+   * Машины парка.
+   *
+   * Рисуются свободные и ждущие инженера. Машина, которая едет
+   * с инженером, отдельной меткой не рисуется: её место — место
+   * инженера, и она уже видна пунктирным кольцом вокруг его метки.
+   * Две метки в одной точке только мешали бы.
+   */
+  drawVehicles(vehicles) {
+    const layer = this.layers.vehicles;
+    layer.replaceChildren();
+
+    for (const vehicle of vehicles) {
+      if (vehicle.status === "in_use") {
+        continue;
+      }
+      const position = this.projectLatLon(vehicle.lat, vehicle.lon);
+      const marker = this.createMarker(position.x, position.y);
+
+      const shape = document.createElementNS(SVG_NS, "rect");
+      shape.setAttribute("x", -5);
+      shape.setAttribute("y", -5);
+      shape.setAttribute("width", 10);
+      shape.setAttribute("height", 10);
+      shape.setAttribute("rx", 2);
+      shape.setAttribute(
+        "class",
+        vehicle.status === "reserved" ? "vehicle is-reserved" : "vehicle"
+      );
+
+      // Позывной подписан всегда: машин мало, и диспетчеру нужно
+      // видеть, какую из них система предлагает забрать.
+      const label = document.createElementNS(SVG_NS, "text");
+      label.setAttribute("y", -9);
+      label.setAttribute("class", "label label-vehicle");
+      label.textContent = vehicle.call_sign;
+
+      marker.append(shape, label, title(vehicleTooltip(vehicle)));
+      layer.append(marker);
+    }
+
+    this.updateMarkerScale();
+  }
+
+  /**
    * Сотрудники.
    *
    * Цвет метки — это ответ на вопрос «кого можно послать прямо сейчас».
@@ -333,8 +378,14 @@ class AirportMap {
     this.updateMarkerScale();
   }
 
-  /** Маршрут предложенного кандидата. */
-  drawRoute(nodeIds) {
+  /**
+   * Маршрут кандидата или назначенного исполнителя.
+   *
+   * Если по пути надо забрать машину, маршрут рисуется двумя участками:
+   * пеший — пунктиром, на машине — сплошной линией. Иначе диспетчер
+   * не отличил бы «идёт пешком» от «едет».
+   */
+  drawRoute(nodeIds, pickupNodeId) {
     const layer = this.layers.route;
     layer.replaceChildren();
 
@@ -342,6 +393,17 @@ class AirportMap {
       return;
     }
 
+    const split = pickupNodeId ? nodeIds.indexOf(pickupNodeId) : -1;
+    if (split > 0 && split < nodeIds.length - 1) {
+      this.appendRouteLine(nodeIds.slice(0, split + 1), "route route-walk", false);
+      this.appendRouteLine(nodeIds.slice(split), "route", true);
+      return;
+    }
+    this.appendRouteLine(nodeIds, "route", true);
+  }
+
+  /** Одна ломаная маршрута по вершинам графа. */
+  appendRouteLine(nodeIds, className, animated) {
     const points = nodeIds
       .map((id) => this.nodesById.get(id))
       .filter(Boolean)
@@ -353,11 +415,14 @@ class AirportMap {
 
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.join(" "));
-    line.setAttribute("class", "route");
-    // Нормируем длину: анимация прорисовки одинаково работает
-    // и на коротком маршруте, и на трёхкилометровом.
-    line.setAttribute("pathLength", "1");
-    layer.append(line);
+    line.setAttribute("class", className);
+    if (animated) {
+      // Нормируем длину: анимация прорисовки одинаково работает
+      // и на коротком маршруте, и на трёхкилометровом. Пешему участку
+      // нормировка не нужна: у него пунктир в экранных пикселях.
+      line.setAttribute("pathLength", "1");
+    }
+    this.layers.route.append(line);
   }
 
   clearRoute() {
@@ -616,6 +681,14 @@ function spreadOverlapping(employees) {
   }
 
   return offsets;
+}
+
+/** Подсказка к машине: позывной, тип и у кого она сейчас. */
+function vehicleTooltip(vehicle) {
+  if (vehicle.status === "reserved") {
+    return `${vehicle.call_sign} · ${vehicle.kind}\nждёт: ${vehicle.employee_name}`;
+  }
+  return `${vehicle.call_sign} · ${vehicle.kind}\nсвободна`;
 }
 
 function employeeTooltip(employee) {

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import airports, auth, calls, employees, me, reference
+from api import airports, auth, calls, employees, me, reference, vehicles
 from database import create_all
 from graph_registry import preload_all
 
@@ -63,6 +63,7 @@ app.include_router(employees.router)
 app.include_router(calls.router)
 app.include_router(me.router)
 app.include_router(reference.router)
+app.include_router(vehicles.router)
 
 
 @app.get("/api/health", tags=["Служебное"], summary="Проверка живости")

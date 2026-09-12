@@ -6,15 +6,20 @@
 про базу, а связь «сотрудник — отметка — типы ВС» нигде не нужна как
 самостоятельная сущность. Отдельная таблица дала бы три JOIN на каждый
 подбор без единого выигрыша.
+
+Машины здесь нет. Раньше был флаг has_vehicle, но машина — не свойство
+человека, а объект со своим местом и статусом (models/vehicle.py).
+Флаг остался только как выводимое свойство: «едет ли сотрудник на машине
+прямо сейчас» определяется по самой машине.
 """
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from clock import to_iso_utc, utc_now
-from constants import STATUS_OFFLINE
+from constants import STATUS_OFFLINE, VEHICLE_IN_USE
 from database import Base
 
 
@@ -36,9 +41,8 @@ class Employee(Base):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    has_vehicle: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Индивидуальная скорость передвижения. None — берётся нормативная
-    # скорость способа передвижения из constants.py.
+    # Индивидуальная скорость ходьбы. None — нормативная скорость пешехода
+    # из constants.py. Скорость машины — свойство машины, а не человека.
     speed_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Когда освободится, если сейчас занят на вызове.
@@ -46,6 +50,16 @@ class Employee(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now
     )
+
+    # Машина парка, которая сейчас у сотрудника (едет с ним или ждёт его).
+    vehicle = relationship(
+        "Vehicle", back_populates="employee", uselist=False, lazy="selectin"
+    )
+
+    @property
+    def has_vehicle(self):
+        """Едет ли сотрудник на машине прямо сейчас. Выводится из машины."""
+        return self.vehicle is not None and self.vehicle.status == VEHICLE_IN_USE
 
     def as_algorithm_dict(self):
         """
@@ -61,8 +75,10 @@ class Employee(Base):
             "status": self.status,
             "lat": self.lat,
             "lon": self.lon,
-            "has_vehicle": self.has_vehicle,
             "speed_kmh": self.speed_kmh,
+            # Своя машина — та, на которой сотрудник уже едет. Свободные
+            # машины парка алгоритм получает отдельным списком.
+            "vehicle": self.vehicle.as_algorithm_dict() if self.has_vehicle else None,
             "qualifications": self.qualifications or [],
             # С поясом: эта строка доходит до диспетчера как «освободится
             # до 14:11», и без пояса браузер сдвинет её на разницу с UTC.

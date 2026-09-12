@@ -12,8 +12,10 @@
   2. Разная специализация — у стоянки 31 стоит Волков с допуском только
      на B777; на вызов к A320 он не годится, хотя он ближе всех.
   3. Истёкшая отметка — Орлов рядом, но срок действия его отметки прошёл.
-  4. Спецтранспорт — Соколов на машине обгоняет пешего Морозова из того же
-     техцентра, время в пути отличается в четыре с лишним раза.
+  4. Спецтранспорт — Соколов на машине ТМ-01 приедет к стоянке 31 за 6.2 мин.
+     Морозов из того же техцентра без машины: пешком — 27.3 мин, но в трёхстах
+     метрах стоит свободная ТМ-04, и система предлагает дойти до неё —
+     9.5 мин. Это и есть «учёт наличия поблизости спецтранспорта» из §10.
   5. Все с допуском заняты — Гусев работает на стоянке 40 по настоящему
      вызову (VP-BKB, износ тормозов) и освободится позже. Вызов заведён
      в базу намеренно: занятость без вызова — это человек, «занятый»
@@ -29,6 +31,8 @@ from auth.security import hash_password
 from clock import utc_now
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
+    VEHICLE_FREE,
+    VEHICLE_IN_USE,
     SHIFT_DAY,
     SHIFT_NIGHT,
     STATUS_BUSY,
@@ -43,6 +47,7 @@ from models.airport import Airport
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import Call
 from models.employee import Employee
+from models.vehicle import Vehicle
 from models.user import (
     ROLE_ADMIN,
     ROLE_DISPATCHER,
@@ -67,33 +72,34 @@ AIRCRAFT_ON_STANDS = [
     ("VQ-BQX", "A330", "100"),
 ]
 
-# Сотрудники: ФИО, отметка, типы ВС, срок, смена, статус, где стоит,
-# спецтранспорт. Место задаётся либо номером стоянки, либо техцентром.
+# Сотрудники: ФИО, отметка, типы ВС, срок, смена, статус, где стоит.
+# Место задаётся либо номером стоянки, либо техцентром. Машин здесь нет:
+# машина — не свойство сотрудника, она описана отдельно в VEHICLES.
 ENGINEERS = [
     ("Соколов А. В.", "B1.1", ["A320", "A321", "SSJ-100"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад"), True),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад")),
     ("Морозов Д. С.", "B1.1", ["A320", "A321"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад"), False),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад")),
     ("Никитин П. А.", "B2", ["A320", "B737", "B777"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Север"), True),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Север")),
     ("Волков И. Н.", "B1.1", ["B777"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("stand", "31"), False),
+     SHIFT_DAY, STATUS_FREE, ("stand", "31")),
     ("Орлов С. М.", "B1.1", ["A320", "A321"], EXPIRED_AT,
-     SHIFT_DAY, STATUS_FREE, ("stand", "33"), False),
+     SHIFT_DAY, STATUS_FREE, ("stand", "33")),
     ("Кузнецов В. П.", "A1", ["A320", "B737"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("stand", "60"), False),
+     SHIFT_DAY, STATUS_FREE, ("stand", "60")),
     ("Гусев Р. О.", "B1.1", ["A320", "B737"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_BUSY, ("stand", "40"), False),
+     SHIFT_DAY, STATUS_BUSY, ("stand", "40")),
     ("Фомин Н. Д.", "A1", ["A320", "A321", "B737"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Восток"), True),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Восток")),
     ("Зайцев М. А.", "B1.3", ["Ми-8"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Север"), False),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Север")),
     ("Егоров А. А.", "C", ["A320", "A321", "B777"], VALID_UNTIL,
-     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад"), False),
+     SHIFT_DAY, STATUS_FREE, ("tech", "ТЦ-Запад")),
     ("Тарасов Е. И.", "B1.1", ["A320", "A321"], VALID_UNTIL,
-     SHIFT_NIGHT, STATUS_OFFLINE, ("tech", "ТЦ-Запад"), True),
+     SHIFT_NIGHT, STATUS_OFFLINE, ("tech", "ТЦ-Запад")),
     ("Лебедев К. Ю.", "B2", ["A320", "B777"], VALID_UNTIL,
-     SHIFT_NIGHT, STATUS_OFFLINE, ("tech", "ТЦ-Север"), False),
+     SHIFT_NIGHT, STATUS_OFFLINE, ("tech", "ТЦ-Север")),
 ]
 
 # Учётные записи. Пароли простые намеренно: это конкурсный стенд,
@@ -116,6 +122,19 @@ DEMO_CALLS = [
 # Вызов, на котором уже работает Гусев: борт, дефект, исполнитель и сколько
 # минут назад он прибыл на стоянку.
 WORKING_DEMO_CALL = ("VP-BKB", "brake_wear", "Гусев Р. О.", 5)
+
+# Машины парка: позывной, тип, где. («employee», ФИО) — машина сейчас
+# у этого сотрудника и едет с ним; иначе — стоит свободной у узла графа
+# или у стоянки.
+VEHICLES = [
+    ("ТМ-01", "Техпомощь", ("employee", "Соколов А. В.")),
+    ("ТМ-02", "Техпомощь", ("employee", "Никитин П. А.")),
+    ("ТМ-03", "Техпомощь", ("employee", "Фомин Н. Д.")),
+    # Свободная машина в 326 м от ТЦ-Запад: на ней держится демонстрация
+    # «дойти до ближайшей машины» для пешего Морозова (сценарий 4).
+    ("ТМ-04", "Техпомощь", ("node", "n5865221946")),
+    ("ТМ-05", "Техпомощь", ("stand", "60")),
+]
 
 
 def node_coordinates(graph, place):
@@ -145,7 +164,7 @@ def seed_airports(db):
 def seed_employees(db, graph):
     """Сотрудники ОТО с квалификациями и расстановкой по перрону."""
     created = {}
-    for full_name, mark, types, valid_until, shift, status, place, vehicle in ENGINEERS:
+    for full_name, mark, types, valid_until, shift, status, place in ENGINEERS:
         node = node_coordinates(graph, place)
         employee = Employee(
             full_name=full_name,
@@ -154,7 +173,6 @@ def seed_employees(db, graph):
             status=status,
             lat=node["lat"],
             lon=node["lon"],
-            has_vehicle=vehicle,
             qualifications=[
                 {
                     "category": mark,
@@ -273,6 +291,38 @@ def seed_working_call(db, aircraft, employees):
     employee.busy_until = arrived_at + timedelta(minutes=DEFAULT_WORK_DURATION_MIN)
 
 
+def seed_vehicles(db, graph, employees):
+    """Машины парка: одни у сотрудников, другие свободны на перроне."""
+    created = 0
+    for call_sign, kind, (where, ref) in VEHICLES:
+        driver = employees.get(ref) if where == "employee" else None
+        if where == "employee":
+            if driver is None:
+                continue
+            lat, lon = driver.lat, driver.lon
+        else:
+            node = graph.find_stand(ref) if where == "stand" else graph.node(ref)
+            if node is None:
+                continue
+            lat, lon = node["lat"], node["lon"]
+
+        db.add(
+            Vehicle(
+                airport_icao=DEMO_AIRPORT,
+                call_sign=call_sign,
+                kind=kind,
+                lat=lat,
+                lon=lon,
+                status=VEHICLE_IN_USE if driver else VEHICLE_FREE,
+                employee=driver,
+            )
+        )
+        created += 1
+
+    db.commit()
+    return created
+
+
 def seed_if_empty(verbose=True):
     """
     Наполняет базу, если она пуста.
@@ -297,12 +347,13 @@ def seed_if_empty(verbose=True):
         employees = seed_employees(db, graph)
         seed_users(db, employees)
         aircraft = seed_aircraft(db, graph)
+        vehicles = seed_vehicles(db, graph, employees)
         seed_calls(db, aircraft, employees)
 
         if verbose:
             print(
                 f"База наполнена: {len(employees)} сотрудников, "
-                f"{len(aircraft)} бортов, {len(USERS)} учётных записей"
+                f"{len(aircraft)} бортов, {vehicles} машин, {len(USERS)} учётных записей"
             )
         return True
     finally:

@@ -16,6 +16,22 @@ function timeClass(minutes) {
   return "is-ok";
 }
 
+/**
+ * Как кандидат доберётся: пешком, на своей машине или дойдя до свободной.
+ *
+ * «пешком → ТМ-04» — главная подсказка диспетчеру: без неё непонятно,
+ * почему пеший сотрудник вдруг успевает к дальнему борту.
+ */
+function transportLabel(candidate) {
+  if (candidate.pickup) {
+    return `пешком → ${escapeHtml(candidate.vehicle_call_sign)}`;
+  }
+  if (candidate.vehicle_call_sign) {
+    return escapeHtml(candidate.vehicle_call_sign);
+  }
+  return "пешком";
+}
+
 /** Человекочитаемое время: минуты без лишней точности. */
 function formatMinutes(minutes) {
   return minutes >= 10 ? Math.round(minutes) : minutes.toFixed(1);
@@ -153,7 +169,7 @@ function buildEtaBlock(result) {
     <div class="eta-name">${escapeHtml(best.full_name)}</div>
     <div class="eta-sub">
       <span class="mark">${escapeHtml(best.mark)}</span>
-      ${best.has_vehicle ? "спецтранспорт" : "пешком"} ·
+      ${transportLabel(best)} ·
       <span class="num">${Math.round(best.route.distance_m)}</span> м
     </div>
     <div class="eta-message ${result.within_regulation ? "is-ok" : "is-danger"}">
@@ -181,7 +197,7 @@ function buildCandidateRow(candidate, best, selectedEmployeeId, onPick) {
       <span class="candidate-name">${escapeHtml(candidate.full_name)}</span>
       <span class="candidate-sub">
         <span class="mark">${escapeHtml(candidate.mark)}</span>
-        ${candidate.has_vehicle ? "машина" : "пешком"}
+        ${transportLabel(candidate)}
         · <span class="num">${Math.round(candidate.route.distance_m)}</span> м
       </span>
     </span>
@@ -308,7 +324,11 @@ function renderAssignment(container, call) {
   block.innerHTML = `
     <div>${headline}</div>
     <div class="eta-name">${escapeHtml(call.assigned_employee_name || "—")}</div>
-    <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${timing}</div>
+    <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${timing}${
+      call.vehicle_call_sign
+        ? ` · <span class="num">${escapeHtml(call.vehicle_call_sign)}</span>`
+        : ""
+    }</div>
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
     ${
       call.override_reason
@@ -335,17 +355,17 @@ function assignmentVerdict(call, deadline) {
 
 /* --- Строка состояния --- */
 
-function renderShiftStats(employees) {
+function renderShiftStats(employees, vehicles) {
   const free = employees.filter((item) => item.status === "free").length;
   const busy = employees.filter((item) =>
     ["assigned", "en_route", "busy"].includes(item.status)
   ).length;
-  const vehicles = employees.filter((item) => item.has_vehicle).length;
+  const freeVehicles = (vehicles || []).filter((item) => item.status === "free").length;
 
   document.getElementById("stat-total").textContent = employees.length;
   document.getElementById("stat-free").textContent = free;
   document.getElementById("stat-busy").textContent = busy;
-  document.getElementById("stat-vehicle").textContent = vehicles;
+  document.getElementById("stat-vehicle").textContent = freeVehicles;
 }
 
 /**

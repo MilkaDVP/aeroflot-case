@@ -22,7 +22,9 @@ class EmployeeResponse(BaseModel):
     status: str
     lat: float | None
     lon: float | None
+    # Едет ли на машине парка прямо сейчас — выводится из машины.
     has_vehicle: bool
+    vehicle_call_sign: str | None = None
     speed_kmh: float | None
     busy_until: str | None
     updated_at: str
@@ -35,7 +37,6 @@ class EmployeeCreateRequest(BaseModel):
     airport_icao: str
     shift: str
     qualifications: list[QualificationSchema] = []
-    has_vehicle: bool = False
     speed_kmh: float | None = None
     lat: float | None = None
     lon: float | None = None
@@ -47,7 +48,6 @@ class EmployeeUpdateRequest(BaseModel):
     full_name: str | None = None
     shift: str | None = None
     status: str | None = None
-    has_vehicle: bool | None = None
     speed_kmh: float | None = None
     qualifications: list[QualificationSchema] | None = None
 

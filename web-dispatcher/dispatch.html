@@ -68,7 +68,12 @@
         <div class="legend-row">
           <span class="legend-dot"
                 style="background: transparent; border: 1px dashed var(--text)"></span>
-          спецтранспорт
+          едет на машине
+        </div>
+        <div class="legend-row">
+          <span class="legend-dot"
+                style="border-radius: 2px; background: var(--bg-deep); border: 2px solid var(--route)"></span>
+          свободная машина парка
         </div>
       </div>
 
@@ -106,7 +111,7 @@
         <span class="legend-dot" style="background: var(--busy)"></span>
         заняты: <b id="stat-busy">0</b>
       </span>
-      <span class="status-item">со спецтранспортом: <b id="stat-vehicle">0</b></span>
+      <span class="status-item">свободных машин: <b id="stat-vehicle">0</b></span>
       <span class="header-spacer"></span>
       <span class="status-item" id="conn-status">обновление каждые 4 с</span>
     </footer>

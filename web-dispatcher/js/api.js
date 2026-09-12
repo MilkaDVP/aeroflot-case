@@ -125,6 +125,7 @@ const Api = {
 
   aircraft: () => request("GET", "/api/aircraft"),
   defectTypes: () => request("GET", "/api/defect-types"),
+  vehicles: () => request("GET", "/api/vehicles"),
 
   calls: () => request("GET", "/api/calls"),
   createCall: (aircraft_id, defect_code) =>

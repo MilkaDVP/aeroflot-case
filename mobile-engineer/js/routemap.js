@@ -68,7 +68,7 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback) {
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId) {
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -76,6 +76,11 @@ class RouteMap {
     }
     if (position) {
       all.push(position);
+    }
+    // Машину, которую надо забрать, обязательно видно на карте.
+    const pickupVehicle = vehicle && vehicle.pickup ? vehicle : null;
+    if (pickupVehicle) {
+      all.push(pickupVehicle);
     }
     const usingFallback = all.length === 0 && Boolean(fallback);
     if (usingFallback) {
@@ -95,7 +100,10 @@ class RouteMap {
     this.drawTiles();
 
     if (points.length >= 2) {
-      this.drawRoute(points.map((point) => this.project(point)));
+      this.drawLegs(points, pickupNodeId);
+    }
+    if (pickupVehicle) {
+      this.drawVehicle(this.project(pickupVehicle));
     }
     if (target) {
       this.drawTarget(this.project(target));
@@ -257,10 +265,28 @@ class RouteMap {
 
   /* --- Содержимое --- */
 
-  drawRoute(points) {
+  /**
+   * Маршрут одним или двумя участками.
+   *
+   * Если по пути надо забрать машину, пеший участок до неё — пунктиром,
+   * дальше на машине — сплошной линией.
+   */
+  drawLegs(points, pickupNodeId) {
+    const projected = points.map((point) => this.project(point));
+    const split = pickupNodeId ? points.findIndex((point) => point.id === pickupNodeId) : -1;
+
+    if (split > 0 && split < points.length - 1) {
+      this.drawRoute(projected.slice(0, split + 1), "route-line is-walk");
+      this.drawRoute(projected.slice(split), "route-line");
+      return;
+    }
+    this.drawRoute(projected, "route-line");
+  }
+
+  drawRoute(points, className) {
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
-    line.setAttribute("class", "route-line");
+    line.setAttribute("class", className);
     this.contentLayer.append(line);
   }
 
@@ -270,6 +296,19 @@ class RouteMap {
     marker.setAttribute("cy", point.y);
     marker.setAttribute("r", this.view.scaleRef * 0.035);
     marker.setAttribute("class", "route-target");
+    this.contentLayer.append(marker);
+  }
+
+  /** Машина, которую надо забрать: квадрат, как на карте диспетчера. */
+  drawVehicle(point) {
+    const size = this.view.scaleRef * 0.05;
+    const marker = document.createElementNS(SVG_NS, "rect");
+    marker.setAttribute("x", point.x - size / 2);
+    marker.setAttribute("y", point.y - size / 2);
+    marker.setAttribute("width", size);
+    marker.setAttribute("height", size);
+    marker.setAttribute("rx", size * 0.2);
+    marker.setAttribute("class", "route-vehicle");
     this.contentLayer.append(marker);
   }
 

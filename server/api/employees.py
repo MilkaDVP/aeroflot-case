@@ -20,7 +20,7 @@ from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_FREE, STATUS_OFFLINE
 from database import get_db
 from models.employee import Employee
 from models.user import ROLE_ADMIN, ROLE_ENGINEER
-from services.assignment import working_call_of
+from services.assignment import release_vehicle, working_call_of
 from schemas.employee import (
     EmployeeCreateRequest,
     EmployeeResponse,
@@ -52,6 +52,7 @@ def to_response(employee):
         lat=employee.lat,
         lon=employee.lon,
         has_vehicle=employee.has_vehicle,
+        vehicle_call_sign=employee.vehicle.call_sign if employee.vehicle else None,
         speed_kmh=employee.speed_kmh,
         busy_until=to_iso_utc(employee.busy_until),
         updated_at=to_iso_utc(employee.updated_at),
@@ -128,7 +129,6 @@ def create_employee(
         shift=payload.shift,
         status=STATUS_OFFLINE,
         qualifications=[item.model_dump() for item in payload.qualifications],
-        has_vehicle=payload.has_vehicle,
         speed_kmh=payload.speed_kmh,
         lat=payload.lat,
         lon=payload.lon,
@@ -218,6 +218,9 @@ def toggle_shift(
         employee.shift = payload.shift
 
     if not payload.on_shift:
+        # Уходя со смены, инженер оставляет машину там, где стоит: иначе
+        # она числилась бы за человеком, которого на перроне нет.
+        release_vehicle(employee)
         employee.status = STATUS_OFFLINE
     elif working is None:
         employee.status = STATUS_FREE

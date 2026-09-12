@@ -12,6 +12,7 @@ const state = {
   employees: [],
   aircraft: [],
   calls: [],
+  vehicles: [],
   defects: [],
   selectedCall: null,
   suggestion: null,
@@ -74,15 +75,17 @@ async function start() {
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
   try {
-    const [employees, aircraft, calls] = await Promise.all([
+    const [employees, aircraft, calls, vehicles] = await Promise.all([
       Api.employees(),
       Api.aircraft(),
       Api.calls(),
+      Api.vehicles(),
     ]);
 
     state.employees = employees;
     state.aircraft = aircraft;
     state.calls = calls;
+    state.vehicles = vehicles;
 
     // Выбранный вызов мог быть закрыт другим диспетчером.
     if (state.selectedCall) {
@@ -103,9 +106,10 @@ async function refresh() {
 function renderAll() {
   elements.callsCount.textContent = state.calls.length;
   renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
-  renderShiftStats(state.employees);
+  renderShiftStats(state.employees, state.vehicles);
 
   airportMap.drawAircraft(state.aircraft);
+  airportMap.drawVehicles(state.vehicles);
   airportMap.drawEmployees(state.employees, employeeClass);
 }
 
@@ -150,7 +154,7 @@ function showAssignment(call) {
 
   renderAssignment(elements.suggestBody, call);
   if (call.route_node_ids && call.route_node_ids.length > 1) {
-    airportMap.drawRoute(call.route_node_ids);
+    airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
   } else {
     airportMap.clearRoute();
   }
@@ -180,7 +184,10 @@ async function selectCall(call) {
     airportMap.drawEmployees(state.employees, employeeClass);
 
     if (suggestion.best) {
-      airportMap.drawRoute(suggestion.best.route.node_ids);
+      airportMap.drawRoute(
+        suggestion.best.route.node_ids,
+        suggestion.best.route.pickup_node_id
+      );
       elements.assignButton.disabled = !isAssignable(call);
     } else {
       airportMap.clearRoute();
@@ -201,7 +208,7 @@ function pickCandidate(candidate) {
     pickCandidate,
     queueOptions()
   );
-  airportMap.drawRoute(candidate.route.node_ids);
+  airportMap.drawRoute(candidate.route.node_ids, candidate.route.pickup_node_id);
   elements.assignButton.disabled = !isAssignable(state.selectedCall);
 }
 

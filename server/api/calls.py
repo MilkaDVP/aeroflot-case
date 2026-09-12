@@ -40,8 +40,9 @@ from services.assignment import (
     advance_after_close,
     assign_now,
     enqueue,
+    free_vehicles,
     is_busy,
-    route_from_position,
+    plan_route,
 )
 
 router = APIRouter(prefix="/api/calls", tags=["Вызовы"])
@@ -129,6 +130,8 @@ def to_response(call, db=None):
         route_node_ids=call.route_node_ids,
         eta_at=to_iso_utc(call.eta_at),
         queued_at=to_iso_utc(call.queued_at),
+        vehicle_call_sign=call.vehicle.call_sign if call.vehicle else None,
+        pickup_node_id=call.pickup_node_id,
     )
 
 
@@ -141,7 +144,12 @@ def shift_employees(db, context):
 
 
 def run_suggestion(db, context, call):
-    """Запускает подбор по вызову и возвращает результат алгоритма."""
+    """
+    Запускает подбор по вызову и возвращает результат алгоритма.
+
+    В подбор уходят только свободные машины парка: зарезервированную
+    за другим вызовом или едущую с другим инженером предложить нельзя.
+    """
     graph = get_graph(call.airport_icao)
     aircraft = call.aircraft
     payload = {
@@ -149,7 +157,10 @@ def run_suggestion(db, context, call):
         "defect_code": call.defect_code,
         "stand_node_id": call.stand_node_id,
     }
-    return suggest(graph, payload, shift_employees(db, context), context.shift)
+    vehicles = [vehicle.as_algorithm_dict() for vehicle in free_vehicles(db, call.airport_icao)]
+    return suggest(
+        graph, payload, shift_employees(db, context), context.shift, vehicles=vehicles
+    )
 
 
 def check_permit(call, employee):
@@ -273,9 +284,10 @@ def assign_employee(
     """
     Назначение исполнителя на вызов.
 
-    Свободный сотрудник выезжает сразу. Занятый — только по решению
-    начальника смены с причиной: вызов встаёт к нему в очередь и станет
-    текущим, когда тот закончит предыдущие работы.
+    Свободный сотрудник выезжает сразу; если по расчёту ему быстрее дойти
+    до свободной машины парка, она резервируется за ним. Занятый — только
+    по решению начальника смены с причиной: вызов встаёт к нему в очередь
+    и станет текущим, когда тот закончит предыдущие работы.
 
     Назначить можно и не того, кого предложила система, — но только
     начальнику смены, только с причиной и только сотрудника с допуском.
@@ -321,12 +333,14 @@ def assign_employee(
         if context.user.role not in OVERRIDE_ROLES:
             raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_OVERRIDE_FORBIDDEN)
 
-    route = route_from_position(employee, call.stand_node_id, get_graph(call.airport_icao))
-    if route is None:
+    plan, pickup_vehicle = plan_route(
+        db, employee, call.stand_node_id, get_graph(call.airport_icao)
+    )
+    if plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)
 
     call.override_reason = payload.override_reason if is_override else None
-    assign_now(db, call, employee, route)
+    assign_now(db, call, employee, plan, pickup_vehicle)
     db.commit()
     return to_response(call, db)
 
