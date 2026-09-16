@@ -56,10 +56,11 @@ def add_missing_columns(target_engine):
     сервер падал бы на старой базе при первом же запросе.
 
     Ограничение сознательное: добавляются только колонки, допускающие NULL,
-    — их можно дописать в SQLite без значения по умолчанию и без переноса
-    данных. Всё сложнее (переименование, смена типа, NOT NULL) требует
-    полноценных миграций через Alembic, и такая колонка здесь остановит
-    запуск с понятным сообщением, а не испортит данные молча.
+    либо имеющие значение по умолчанию на стороне базы — их можно дописать
+    в SQLite одной командой, не перенося данные. Всё сложнее (переименование,
+    смена типа, NOT NULL без умолчания) требует полноценных миграций через
+    Alembic, и такая колонка здесь остановит запуск с понятным сообщением,
+    а не испортит данные молча.
 
     Возвращает список добавленных колонок вида «таблица.колонка».
     """
@@ -75,18 +76,33 @@ def add_missing_columns(target_engine):
             for column in table.columns:
                 if column.name in existing:
                     continue
-                if not column.nullable:
+                default = column_default_sql(column)
+                if not column.nullable and default is None:
                     raise RuntimeError(
                         f"Колонку {table.name}.{column.name} (NOT NULL) нельзя "
                         "добавить автоматически — нужна миграция"
                     )
                 column_type = column.type.compile(dialect=target_engine.dialect)
+                suffix = "" if column.nullable else f" NOT NULL DEFAULT {default}"
                 connection.execute(
                     text(
                         f'ALTER TABLE "{table.name}" '
-                        f'ADD COLUMN "{column.name}" {column_type}'
+                        f'ADD COLUMN "{column.name}" {column_type}{suffix}'
                     )
                 )
                 added.append(f"{table.name}.{column.name}")
 
     return added
+
+
+def column_default_sql(column):
+    """
+    Значение по умолчанию для ALTER TABLE или None, если его нет.
+
+    Берётся только server_default — умолчание, записанное в саму базу.
+    Питоновский default применяется при вставке через ORM и существующим
+    строкам ничем не поможет.
+    """
+    if column.server_default is None:
+        return None
+    return column.server_default.arg.text

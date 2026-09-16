@@ -46,6 +46,29 @@ class TestAddMissingColumns(unittest.TestCase):
         add_missing_columns(self.engine)
         self.assertEqual(add_missing_columns(self.engine), [])
 
+    def test_колонка_not_null_с_умолчанием_добавляется(self):
+        """
+        airports.source появилась вместе с конструктором аэропортов.
+
+        Она NOT NULL, но с умолчанием на стороне базы: в старой базе все
+        аэропорты встроенные, и это значение верно для каждой строки.
+        Без поддержки умолчания обновление останавливало бы запуск.
+        """
+        with self.engine.begin() as connection:
+            connection.execute(text("ALTER TABLE airports DROP COLUMN source"))
+            connection.execute(
+                text("INSERT INTO airports (icao, name, city) VALUES ('AAAA', 'Т', 'Т')")
+            )
+
+        added = add_missing_columns(self.engine)
+        self.assertIn("airports.source", added)
+
+        with self.engine.begin() as connection:
+            value = connection.execute(
+                text("SELECT source FROM airports WHERE icao = 'AAAA'")
+            ).scalar()
+        self.assertEqual(value, "builtin")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,9 +12,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import airports, auth, calls, employees, me, reference, vehicles
-from database import create_all
-from graph_registry import preload_all
+from api import (
+    admin_airports,
+    airports,
+    auth,
+    calls,
+    employees,
+    me,
+    reference,
+    vehicles,
+)
+from database import SessionLocal, create_all
+from graph_registry import load_from_database, preload_all
 
 # Веб-диспетчер и PWA раздаются отдельными статическими сервисами, поэтому
 # обращения к API идут с другого источника. Для конкурсного стенда список
@@ -35,7 +44,19 @@ async def lifespan(app: FastAPI):
         seed_if_empty()
 
     loaded = preload_all()
+
+    # Аэропорты, добавленные администратором, лежат в базе: их графы тоже
+    # поднимаются в память, иначе после перезапуска они перестали бы
+    # открываться, хотя запись о них есть.
+    db = SessionLocal()
+    try:
+        custom = load_from_database(db)
+    finally:
+        db.close()
+
     print(f"Загружены графы аэропортов: {', '.join(loaded) or 'нет'}")
+    if custom:
+        print(f"Аэропорты из базы: {', '.join(custom)}")
     yield
 
 
@@ -64,6 +85,7 @@ app.include_router(calls.router)
 app.include_router(me.router)
 app.include_router(reference.router)
 app.include_router(vehicles.router)
+app.include_router(admin_airports.router)
 
 
 @app.get("/api/health", tags=["Служебное"], summary="Проверка живости")
