@@ -96,6 +96,17 @@ class Call(Base):
     # в записи после продвижения — для разбора, сколько вызов ждал.
     queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # История снятия исполнителя. Диспетчер снимает назначение, когда
+    # обстановка изменилась: инженер застрял, борт переставили, работы
+    # оказались другого объёма. Запись о снятии остаётся в вызове —
+    # без неё в разборе не отличить «долго искали исполнителя» от
+    # «назначили и передумали».
+    previous_employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id"), nullable=True
+    )
+    unassign_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    unassigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Машина, на которой исполнитель едет к этому борту, и узел, где он
     # её забирает. pickup_node_id пуст, если машина уже была при нём
     # или он идёт пешком: тогда маршрут из одного участка.
@@ -106,6 +117,9 @@ class Call(Base):
     vehicle = relationship("Vehicle", lazy="selectin")
     assigned_employee = relationship(
         "Employee", foreign_keys=[assigned_employee_id], lazy="selectin"
+    )
+    previous_employee = relationship(
+        "Employee", foreign_keys=[previous_employee_id], lazy="selectin"
     )
 
     @property

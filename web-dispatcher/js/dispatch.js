@@ -152,7 +152,7 @@ function showAssignment(call) {
   elements.calcTime.textContent = "";
   elements.assignButton.disabled = true;
 
-  renderAssignment(elements.suggestBody, call);
+  renderAssignment(elements.suggestBody, call, unassignSelected);
   if (call.route_node_ids && call.route_node_ids.length > 1) {
     airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
   } else {
@@ -273,6 +273,41 @@ async function queueOnto(busy) {
     clearSuggestion();
     state.selectedCall = null;
     await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+/**
+ * Снятие исполнителя с выбранного вызова.
+ *
+ * Причина обязательна и на стороне сервера: снятие означает, что борт
+ * ждал зря, и в разборе должно быть видно, чьё это решение. После снятия
+ * вызов сразу открывается заново — уже с новым подбором, чтобы диспетчер
+ * не искал его в списке руками.
+ */
+async function unassignSelected() {
+  const call = state.selectedCall;
+  if (!call) {
+    return;
+  }
+
+  const reason = window.prompt(
+    `Снять ${call.assigned_employee_name || "исполнителя"} с вызова ` +
+      `${call.board_number} (ст. ${call.stand_ref || "—"})?\n\n` +
+      "Вызов вернётся к подбору, и его можно будет назначить другому.\n" +
+      "Укажите причину:"
+  );
+  if (!reason) {
+    return;
+  }
+
+  try {
+    const updated = await Api.unassign(call.id, reason);
+    await refresh();
+    // Список перечитан — берём из него свежую запись вызова.
+    const fresh = state.calls.find((item) => item.id === updated.id) || updated;
+    await selectCall(fresh);
   } catch (error) {
     window.alert(error.detail);
   }
@@ -418,7 +453,14 @@ const BASEMAP_STORAGE = "aeroflot.basemap";
  * привычный ему вид карты после перезагрузки страницы.
  */
 function savedBasemap() {
-  return localStorage.getItem(BASEMAP_STORAGE) || "scheme";
+  const saved = localStorage.getItem(BASEMAP_STORAGE);
+  // Режим мог исчезнуть после обновления: у диспетчера, работавшего
+  // с прежней версией, в хранилище остаётся неизвестное значение,
+  // и без этой проверки карта открылась бы без активной подложки.
+  if (saved && document.querySelector(`#basemap-switch [data-basemap="${saved}"]`)) {
+    return saved;
+  }
+  return "scheme";
 }
 
 function applyBasemap(key) {

@@ -217,7 +217,8 @@ Call (вызов)
   id, airport_id, aircraft_id, stand_id, defect_code,
   required_category, created_at, assigned_employee_id,
   eta_minutes, route_node_ids[], status, override_reason,
-  eta_at, queued_at, vehicle_id, pickup_node_id
+  eta_at, queued_at, vehicle_id, pickup_node_id,
+  previous_employee_id, unassign_reason, unassigned_at
 
   status: "new" | "suggested" | "queued" | "assigned" | "accepted" | "arrived" | "closed"
   queued — вызов стоит в очереди к занятому инженеру (добавлено на этапе 2
@@ -301,6 +302,8 @@ POST   /api/calls                     создать вызов (борт, ст�
 POST   /api/calls/{id}/suggest        подбор → кандидат, маршрут, ETA, альтернативы
 POST   /api/calls/{id}/assign         назначить (при переопределении — с причиной;
                                       занятому — в очередь, только начальник смены)
+POST   /api/calls/{id}/unassign       снять исполнителя (причина обязательна):
+                                      вызов возвращается к подбору
 PATCH  /api/calls/{id}/status         смена статуса
 
 ДЛЯ PWA ИНЖЕНЕРА

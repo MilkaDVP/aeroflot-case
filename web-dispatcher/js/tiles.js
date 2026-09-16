@@ -32,9 +32,10 @@ const MAX_TILES_PER_UPDATE = 240;
 
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const ESRI_TRANSPORTATION =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
+// Подложек две. Слой дорожной сети поверх снимка на перроне бесполезен:
+// он подписывает городские улицы, а рулёжки и стоянки диспетчер видит
+// на самом снимке и в графе.
 const BASEMAPS = {
   scheme: {
     title: "Схема",
@@ -45,11 +46,6 @@ const BASEMAPS = {
     title: "Спутник",
     layers: [ESRI_IMAGERY],
     credit: "Снимок: Esri, Maxar, Earthstar Geographics · Граф: OpenStreetMap",
-  },
-  hybrid: {
-    title: "Спутник + дороги",
-    layers: [ESRI_IMAGERY, ESRI_TRANSPORTATION],
-    credit: "Esri, Maxar, Earthstar Geographics, HERE · Граф: OpenStreetMap",
   },
 };
 

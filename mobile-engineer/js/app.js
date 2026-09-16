@@ -193,7 +193,9 @@ async function refresh() {
   try {
     const payload = await Api.currentCall();
     // Сервер отдаёт либо вызов с маршрутом, либо сообщение «вызовов нет».
+    const previous = state.call ? state.call.call : null;
     state.call = payload && payload.call ? payload : null;
+    noticeIfTaken(previous);
     renderWork();
   } catch (error) {
     if (error.status === 401) {
@@ -202,6 +204,22 @@ async function refresh() {
     }
     showToast(error.detail, true);
   }
+}
+
+/**
+ * Сообщение, если вызов у инженера забрали.
+ *
+ * Диспетчер может снять исполнителя, пока тот в пути. Без сообщения вызов
+ * просто исчезает с экрана — инженер решит, что приложение сломалось,
+ * и поедет к борту, на который его уже не ждут.
+ */
+function noticeIfTaken(previous) {
+  if (!previous || state.call) {
+    return;
+  }
+  // Свои действия инженера (завершение работ) обрабатываются отдельно
+  // и до опроса обнуляют state.call сами.
+  showToast(`Вызов ${previous.board_number} снят диспетчером`, true);
 }
 
 function renderWork() {

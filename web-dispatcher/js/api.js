@@ -133,6 +133,8 @@ const Api = {
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   assign: (callId, employee_id, override_reason) =>
     request("POST", `/api/calls/${callId}/assign`, { employee_id, override_reason }),
+  unassign: (callId, reason) =>
+    request("POST", `/api/calls/${callId}/unassign`, { reason }),
   setCallStatus: (callId, status) =>
     request("PATCH", `/api/calls/${callId}/status`, { status }),
 };

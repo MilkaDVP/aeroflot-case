@@ -44,6 +44,11 @@ class CallResponse(BaseModel):
     # забирает (пусто — машина уже при нём или он идёт пешком).
     vehicle_call_sign: str | None = None
     pickup_node_id: str | None = None
+    # С кого сняли назначение, когда и почему. Остаётся в вызове после
+    # переназначения: диспетчеру видно, что борт уже ждал другого.
+    previous_employee_name: str | None = None
+    unassign_reason: str | None = None
+    unassigned_at: str | None = None
 
 
 class LegSchema(BaseModel):
@@ -141,6 +146,17 @@ class AssignRequest(BaseModel):
 
     employee_id: int
     override_reason: str | None = None
+
+
+class UnassignRequest(BaseModel):
+    """
+    Снятие исполнителя с вызова.
+
+    Причина обязательна: снятие означает, что борт ждал зря, и в разборе
+    инцидента должно быть видно, чьё это решение и почему.
+    """
+
+    reason: str = Field(min_length=3)
 
 
 class CallStatusRequest(BaseModel):

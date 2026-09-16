@@ -38,7 +38,9 @@ from constants import (
     VEHICLE_RESERVED,
 )
 from graph_registry import get_graph
+from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import STATUS_ASSIGNED as CALL_ASSIGNED
+from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import WORKING_CALL_STATUSES, Call
 from models.vehicle import Vehicle
@@ -243,7 +245,7 @@ def replan_queue(db, employee):
         employee.busy_until = cursor_time
 
 
-def advance_after_close(db, employee, closed_call, was_working):
+def advance_after_close(db, employee, closed_call, was_working, park_at_stand=True):
     """
     Продвигает очередь после закрытия вызова.
 
@@ -252,6 +254,10 @@ def advance_after_close(db, employee, closed_call, was_working):
     при нём. Очередь пуста — сотрудник освобождается, машина остаётся
     у борта. Закрыт (отменён) вызов из очереди — сотрудник по-прежнему
     занят, пересчитывается только цепочка.
+
+    park_at_stand=False нужен при снятии назначения: инженер до борта
+    не доехал, и оставлять машину у этой стоянки нельзя — она остаётся
+    там, где он находится фактически.
     """
     db.flush()
 
@@ -262,7 +268,7 @@ def advance_after_close(db, employee, closed_call, was_working):
     graph = get_graph(employee.airport_icao)
     queue = queued_calls_of(db, employee)
     if not queue:
-        release_vehicle(employee, graph, closed_call.stand_node_id)
+        release_vehicle(employee, graph, closed_call.stand_node_id if park_at_stand else None)
         employee.status = STATUS_FREE
         employee.busy_until = None
         return
@@ -282,6 +288,50 @@ def advance_after_close(db, employee, closed_call, was_working):
         next_call.route_node_ids = route.node_ids
 
     replan_queue(db, employee)
+
+
+def unassign(db, call, reason):
+    """
+    Снятие исполнителя с вызова: вызов возвращается к подбору.
+
+    Отличие от закрытия принципиальное: работа не выполнена, поэтому вызов
+    не уходит в историю, а снова становится неназначенным и его можно
+    отдать другому. Сотрудник освобождается (или берётся за следующий
+    вызов очереди), зарезервированная под него машина возвращается в парк.
+
+    Расчёт прошлого назначения стирается: маршрут, время прибытия и машина
+    относились к снятому исполнителю, и показывать их рядом с новым
+    означало бы врать диспетчеру.
+    """
+    employee = call.assigned_employee
+    was_working = call.status in WORKING_CALL_STATUSES
+    # Машину оставляем у борта, только если инженер туда доехал.
+    park_at_stand = call.status == CALL_ARRIVED
+
+    # Через связь, а не через внешний ключ: сессия не перечитывает объекты
+    # после коммита, и previous_employee остался бы пустым в ответе.
+    call.previous_employee = employee
+    call.unassign_reason = reason
+    call.unassigned_at = utc_now()
+
+    call.assigned_employee = None
+    call.vehicle = None
+    call.pickup_node_id = None
+    call.route_node_ids = None
+    call.eta_minutes = None
+    call.eta_at = None
+    call.queued_at = None
+    call.override_reason = None
+
+    # Прошлое предложение тоже стирается: оно указывало на снятого, и без
+    # сброса назначение любого другого выглядело бы как переопределение
+    # решения системы — с требованием причины и роли начальника смены.
+    # Вызов возвращается в состояние «подбор не проводился».
+    call.suggested_employee_id = None
+    call.status = CALL_NEW
+
+    if employee is not None:
+        advance_after_close(db, employee, call, was_working, park_at_stand)
 
 
 def mark_arrived(db, employee, call):

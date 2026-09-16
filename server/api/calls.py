@@ -35,6 +35,7 @@ from schemas.call import (
     CallResponse,
     CallStatusRequest,
     SuggestResponse,
+    UnassignRequest,
 )
 from services.assignment import (
     advance_after_close,
@@ -43,6 +44,7 @@ from services.assignment import (
     free_vehicles,
     is_busy,
     plan_route,
+    unassign,
 )
 
 router = APIRouter(prefix="/api/calls", tags=["Вызовы"])
@@ -77,6 +79,12 @@ ERROR_QUEUE_PROMOTES_ITSELF = (
     "Вызов в очереди становится текущим сам, когда исполнитель закроет "
     "предыдущий вызов"
 )
+ERROR_NOT_ASSIGNED = "У вызова нет исполнителя: снимать нечего"
+ERROR_CLOSED_CALL = "Вызов закрыт. Снять исполнителя с закрытого вызова нельзя"
+ERROR_UNASSIGN_NEEDS_REASON = (
+    "Снятие исполнителя меняет ход обслуживания борта. Укажите причину (reason)"
+)
+ERROR_UNASSIGNED_REASON = "снят с этого вызова: {reason}"
 
 # Кто вправе назначить не того, кого предложила система, и поставить вызов
 # в очередь к занятому. Обычный диспетчер такого права не имеет — это прямо
@@ -106,6 +114,7 @@ def to_response(call, db=None):
     """Модель вызова в схему ответа, с подстановкой данных борта."""
     aircraft = call.aircraft
     assigned = call.assigned_employee
+    previous = call.previous_employee
     defect = DEFECT_TYPES.get(call.defect_code, {})
 
     return CallResponse(
@@ -132,6 +141,9 @@ def to_response(call, db=None):
         queued_at=to_iso_utc(call.queued_at),
         vehicle_call_sign=call.vehicle.call_sign if call.vehicle else None,
         pickup_node_id=call.pickup_node_id,
+        previous_employee_name=previous.full_name if previous else None,
+        unassign_reason=call.unassign_reason,
+        unassigned_at=to_iso_utc(call.unassigned_at),
     )
 
 
@@ -141,6 +153,29 @@ def shift_employees(db, context):
         db.query(Employee).filter(Employee.airport_icao == context.airport_icao).all()
     )
     return [employee.as_algorithm_dict() for employee in employees]
+
+
+def candidates_for(db, context, call):
+    """
+    Кто участвует в подборе по этому вызову.
+
+    Снятый с него исполнитель исключается: диспетчер уже решил, что этот
+    сотрудник сюда не поедет, и предлагать его снова означало бы спорить
+    с человеком, который видит обстановку. В отказах он остаётся —
+    с причиной снятия, чтобы решение можно было пересмотреть.
+    """
+    employees = shift_employees(db, context)
+    if call.previous_employee_id is None:
+        return employees, None
+
+    removed = None
+    remaining = []
+    for employee in employees:
+        if employee["id"] == call.previous_employee_id:
+            removed = employee
+        else:
+            remaining.append(employee)
+    return remaining, removed
 
 
 def run_suggestion(db, context, call):
@@ -158,9 +193,20 @@ def run_suggestion(db, context, call):
         "stand_node_id": call.stand_node_id,
     }
     vehicles = [vehicle.as_algorithm_dict() for vehicle in free_vehicles(db, call.airport_icao)]
-    return suggest(
-        graph, payload, shift_employees(db, context), context.shift, vehicles=vehicles
-    )
+    employees, removed = candidates_for(db, context, call)
+    result = suggest(graph, payload, employees, context.shift, vehicles=vehicles)
+
+    if removed is not None:
+        result.rejected.append(
+            {
+                "employee_id": removed["id"],
+                "full_name": removed["full_name"],
+                "reason": ERROR_UNASSIGNED_REASON.format(
+                    reason=call.unassign_reason or "без указания причины"
+                ),
+            }
+        )
+    return result
 
 
 def check_permit(call, employee):
@@ -341,6 +387,44 @@ def assign_employee(
 
     call.override_reason = payload.override_reason if is_override else None
     assign_now(db, call, employee, plan, pickup_vehicle)
+    db.commit()
+    return to_response(call, db)
+
+
+@router.post(
+    "/{call_id}/unassign", response_model=CallResponse, summary="Снять исполнителя"
+)
+def unassign_employee(
+    call_id: int,
+    payload: UnassignRequest,
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+    db: Session = Depends(get_db),
+):
+    """
+    Снятие исполнителя: вызов возвращается к подбору, можно назначить другого.
+
+    Нужно, когда обстановка изменилась уже после назначения: инженер
+    задержался на предыдущем борте, машина не завелась, вылет перенесли.
+    Закрывать такой вызов нельзя — работа не сделана, борт по-прежнему ждёт.
+
+    Сотрудник освобождается или берётся за следующий вызов своей очереди,
+    зарезервированная под него машина возвращается в парк, расчёт прошлого
+    назначения стирается. В вызове остаётся запись, с кого и почему сняли.
+    """
+    call = load_call(db, context, call_id)
+
+    if call.status == CALL_CLOSED:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_CLOSED_CALL)
+    if call.assigned_employee_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NOT_ASSIGNED)
+
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_UNASSIGN_NEEDS_REASON
+        )
+
+    unassign(db, call, reason)
     db.commit()
     return to_response(call, db)
 

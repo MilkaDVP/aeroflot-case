@@ -585,6 +585,32 @@
   color: var(--text-muted);
 }
 
+/* Отметка о прошлом исполнителе: борт ждал дважды — это предупреждение,
+   а не рядовая подробность. */
+.assignment-reason.is-unassigned {
+  color: var(--warn);
+}
+
+/* Снятие исполнителя — обратимое, но заметное действие: обычная кнопка
+   в рамке, без заливки, чтобы её не нажимали вместо «Назначить». */
+.unassign-button {
+  width: 100%;
+  margin-top: var(--gap);
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.unassign-button:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .section-title {
   font-size: 10px;
   text-transform: uppercase;

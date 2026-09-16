@@ -304,7 +304,7 @@ function sectionTitle(text) {
  * ложная тревога. Диспетчеру здесь нужно другое: кто едет, когда будет
  * на месте и успевает ли к контрольному сроку.
  */
-function renderAssignment(container, call) {
+function renderAssignment(container, call, onUnassign) {
   container.replaceChildren();
 
   const deadline = new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
@@ -335,8 +335,40 @@ function renderAssignment(container, call) {
         ? `<div class="assignment-reason">Причина решения: ${escapeHtml(call.override_reason)}</div>`
         : ""
     }
+    ${unassignedNote(call)}
   `;
   container.append(block);
+
+  // Снятие доступно, пока работа не закрыта: обстановка на перроне меняется
+  // быстрее, чем едет инженер.
+  if (onUnassign) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "unassign-button";
+    button.textContent = "Снять исполнителя";
+    button.addEventListener("click", onUnassign);
+    container.append(button);
+  }
+}
+
+/**
+ * Отметка о прошлом исполнителе, если вызов уже переназначали.
+ *
+ * Диспетчер, принимающий смену, должен видеть, что борт ждал дважды:
+ * без этого время ожидания выглядит меньше, чем было на самом деле.
+ */
+function unassignedNote(call) {
+  if (!call.previous_employee_name) {
+    return "";
+  }
+  return (
+    `<div class="assignment-reason is-unassigned">Снят ${escapeHtml(
+      call.previous_employee_name
+    )}` +
+    (call.unassigned_at ? ` в <span class="num">${formatClock(call.unassigned_at)}</span>` : "") +
+    (call.unassign_reason ? `: ${escapeHtml(call.unassign_reason)}` : "") +
+    `</div>`
+  );
 }
 
 /** Успевает ли исполнитель к контрольному сроку — цвет и формулировка. */
