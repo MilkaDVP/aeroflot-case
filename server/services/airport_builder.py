@@ -19,7 +19,6 @@ from services.osm_import import (
     compute_ref_point,
     haversine_m,
     largest_connected_component,
-    project_edges,
     project_nodes,
 )
 
@@ -103,8 +102,32 @@ def build_graph_payload(airport, nodes, edges):
     ]
     by_id = {node["id"]: node for node in prepared_nodes}
 
+    previous = airport.graph or {}
+    known = previous_edges(previous, by_id)
+
     prepared_edges = []
     for edge in edges:
+        kept = known.get(frozenset((edge.from_id, edge.to_id)))
+        if kept is not None:
+            # Связь была в графе и её точки не сдвигались: сохраняем
+            # настоящую длину и изгиб. У выгруженной из OSM рулёжки длина
+            # больше хорды, и пересчёт по прямой занизил бы время в пути.
+            points = list(kept.get("points", []))
+            if kept["from_id"] != edge.from_id:
+                # Изгиб хранится в направлении from → to; связь пришла
+                # в обратную сторону — разворачиваем и его.
+                points.reverse()
+            prepared_edges.append(
+                {
+                    "from_id": edge.from_id,
+                    "to_id": edge.to_id,
+                    "distance_m": kept["distance_m"],
+                    "vehicle_allowed": edge.vehicle_allowed,
+                    "points": points,
+                }
+            )
+            continue
+
         source = by_id[edge.from_id]
         target = by_id[edge.to_id]
         prepared_edges.append(
@@ -127,16 +150,40 @@ def build_graph_payload(airport, nodes, edges):
         "icao": airport.icao,
         "name": airport.name,
         "city": airport.city,
-        "ref_point": None,
-        "source": "Составлен вручную в интерфейсе администратора",
+        # Опорная точка сохраняется прежней: от неё посчитаны метровые
+        # координаты изгибов у сохранённых рёбер, и с новой точкой они
+        # съехали бы в сторону от своих рулёжек.
+        "ref_point": previous.get("ref_point") or compute_ref_point(prepared_nodes),
+        "source": previous.get("source") or "Составлен вручную в интерфейсе администратора",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "nodes": prepared_nodes,
         "edges": prepared_edges,
     }
-    payload["ref_point"] = compute_ref_point(prepared_nodes)
     project_nodes(payload["nodes"], payload["ref_point"])
-    project_edges(payload["edges"], payload["ref_point"])
     return payload
+
+
+def previous_edges(previous, by_id):
+    """
+    Рёбра прежнего графа, которые можно перенести без пересчёта.
+
+    Переносится ребро, у которого обе точки остались на тех же координатах:
+    иначе прежняя длина уже не соответствует положению точек.
+    """
+    old_nodes = {node["id"]: node for node in previous.get("nodes", [])}
+    kept = {}
+    for edge in previous.get("edges", []):
+        ends = (edge["from_id"], edge["to_id"])
+        if all(same_place(old_nodes.get(node_id), by_id.get(node_id)) for node_id in ends):
+            kept[frozenset(ends)] = edge
+    return kept
+
+
+def same_place(old, new):
+    """Стоит ли точка там же, где стояла (с точностью до округления)."""
+    if old is None or new is None:
+        return False
+    return abs(old["lat"] - new["lat"]) < 1e-6 and abs(old["lon"] - new["lon"]) < 1e-6
 
 
 def check_connectivity(nodes, edges):

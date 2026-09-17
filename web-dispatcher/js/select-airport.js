@@ -30,6 +30,7 @@ async function init() {
     greeting.textContent = `${user.full_name} — ${roleTitle(user.role)}`;
 
     renderAirports(user.airports);
+    document.getElementById("admin-link-row").hidden = user.role !== "admin";
 
     // Аэропорт один — шаг выбора не нужен, остаётся только смена.
     if (user.airports.length === 1) {

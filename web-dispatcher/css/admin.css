@@ -1,0 +1,493 @@
+/*
+ * Экран администратора: списки, формы и редактор карты.
+ *
+ * Тема и переменные — из theme.css. Собственных цветов здесь нет:
+ * смысловая раскраска одна на весь проект (§9).
+ */
+
+.admin {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-base);
+  color: var(--text);
+}
+
+/* Общий стиль label из темы — блочный и с отступом снизу, он рассчитан
+   на формы. В шапке подпись стоит в строку со списком. */
+.admin .header-context {
+  align-items: center;
+}
+
+.admin .header-context label {
+  display: inline;
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+
+.header-select {
+  margin-left: 6px;
+  padding: 4px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.link-button {
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.link-button:hover {
+  border-color: var(--route);
+  color: var(--route);
+}
+
+/* --- Вкладки --- */
+
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.admin-tabs button {
+  padding: 10px 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-tabs button.active {
+  background: var(--bg-base);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* --- Страницы и карточки --- */
+
+.admin-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+/* display: flex у страницы перебивает атрибут hidden (у него стиль браузера
+   с низшим приоритетом). Без этого правила «скрытые» вкладки оставались
+   на экране и делили высоту между собой: карте редактора доставалось
+   92 пикселя, и клик мимо неё попадал в панель инструментов. */
+.admin-page[hidden] {
+  display: none;
+}
+
+/* Страница редактора не прокручивается: карта занимает весь остаток. */
+#page-editor {
+  overflow: hidden;
+}
+
+.admin-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.6fr);
+  gap: var(--gap);
+  padding: var(--gap);
+  align-items: start;
+}
+
+.admin-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.admin-card h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.admin-card h2.with-gap {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Списки --- */
+
+.admin-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-row-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.item-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.item-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.item-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.item-actions button {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.item-actions button:hover:not(:disabled) {
+  border-color: var(--route);
+  color: var(--route);
+}
+
+.item-actions button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.item-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge.is-builtin {
+  background: var(--busy-soft);
+  color: var(--busy);
+}
+
+.badge.is-custom {
+  background: var(--route-soft);
+  color: var(--route);
+}
+
+.badge.is-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge.is-busy {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* --- Формы --- */
+
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.admin-form label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.admin-form input,
+.admin-form select {
+  padding: 9px 11px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.admin-form input:focus,
+.admin-form select:focus {
+  outline: none;
+  border-color: var(--route);
+}
+
+.admin-form label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Флажок не должен получать оформление текстового поля: с отступами
+   и рамкой он растягивался на полстроки и выталкивал подпись вбок. */
+.admin-form label.checkbox input {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.admin-form button {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.admin-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Поля внутри строки без подписей (логин и пароль) — той же высоты,
+   что и остальные поля формы. */
+.admin-row > input {
+  min-width: 0;
+}
+
+.admin-note {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.admin-note.is-ok {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.admin-note.is-error {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Ожидание ответа от OpenStreetMap: выгрузка идёт до минуты, и молчащая
+   кнопка выглядела бы как зависание. */
+.admin-note.is-pending {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+/* --- Редактор карты --- */
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px var(--gap);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.editor-bar button {
+  padding: 7px 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-bar button.primary {
+  background: var(--route);
+  border-color: var(--route);
+  color: #fff;
+}
+
+.editor-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.editor-tools {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.editor-tools button.active {
+  border-color: var(--route);
+  color: var(--route);
+  background: var(--route-soft);
+}
+
+.editor-autolink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.editor-counts {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.editor-hint {
+  padding: 8px var(--gap);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.editor-map-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* --- Точки и связи редактора --- */
+
+/* Цвета те же, что на карте диспетчера: стоянка — зелёная, техцентр —
+   синий, служебный узел — приглушённый. */
+.editor-node circle {
+  fill: var(--ok);
+  stroke: var(--bg-base);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.editor-node.is-tech_center circle {
+  fill: var(--route);
+}
+
+/* Перекрёсток светлее обычного приглушённого цвета: на тёмном снимке
+   серая точка без обводки терялась, и было не видно, куда сходятся связи. */
+.editor-node.is-junction circle {
+  fill: var(--text-muted);
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
+/* Точка, от которой тянется связь: следующий клик замкнёт рулёжку. */
+.editor-node.is-linking circle {
+  fill: var(--warn);
+  stroke: var(--warn);
+  stroke-width: 3;
+}
+
+.editor-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--bg-base);
+  stroke-width: 3;
+}
+
+.editor-edge {
+  stroke: var(--route);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.editor-edge.is-erasable {
+  cursor: pointer;
+  stroke-dasharray: 6 4;
+}
+
+.editor-edge.is-erasable:hover {
+  stroke: var(--danger);
+}
+
+/* --- Узкие экраны --- */
+
+@media (max-width: 900px) {
+  .admin-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-bar {
+    flex-wrap: wrap;
+  }
+}

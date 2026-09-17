@@ -27,10 +27,18 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from operator import itemgetter
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Публичные серверы Overpass с одинаковыми данными OSM. Основной регулярно
+# обрывает соединение (SSL EOF, 429), поэтому при сбое запрос уходит
+# на следующее зеркало, а не повторяется в тот же отказавший сервер.
+OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
 OVERPASS_TIMEOUT_S = 180
-REQUEST_RETRIES = 3
-RETRY_PAUSE_S = 5
+# Полных обходов списка зеркал.
+REQUEST_RETRIES = 2
+RETRY_PAUSE_S = 3
 
 EARTH_RADIUS_M = 6371008.8
 
@@ -133,25 +141,33 @@ def request_overpass(query, on_retry=None):
     попадает в лог, и решать это должен вызывающий код.
     """
     payload = urllib.parse.urlencode({"data": query}).encode("utf-8")
-    request = urllib.request.Request(
-        OVERPASS_URL,
-        data=payload,
-        headers={"User-Agent": "aeroflot-dispatch-case/1.0 (offline map prep)"},
-    )
 
     last_error = None
     for attempt in range(1, REQUEST_RETRIES + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=OVERPASS_TIMEOUT_S + 30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError) as error:
-            last_error = error
-            if on_retry is not None:
-                on_retry(f"попытка {attempt}/{REQUEST_RETRIES} не удалась: {error}")
-            if attempt < REQUEST_RETRIES:
-                time.sleep(RETRY_PAUSE_S * attempt)
+        for url in OVERPASS_URLS:
+            try:
+                return fetch_json(url, payload)
+            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as error:
+                # ValueError — зеркало ответило не JSON (страница перегрузки).
+                last_error = error
+                if on_retry is not None:
+                    host = urllib.parse.urlparse(url).netloc
+                    on_retry(f"{host}: попытка {attempt}/{REQUEST_RETRIES} не удалась: {error}")
+        if attempt < REQUEST_RETRIES:
+            time.sleep(RETRY_PAUSE_S * attempt)
 
     raise RuntimeError(f"Overpass API недоступен: {last_error}")
+
+
+def fetch_json(url, payload):
+    """Один запрос к одному серверу Overpass."""
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"User-Agent": "aeroflot-dispatch-case/1.0 (offline map prep)"},
+    )
+    with urllib.request.urlopen(request, timeout=OVERPASS_TIMEOUT_S + 30) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def find_aerodrome(icao, on_retry=None):

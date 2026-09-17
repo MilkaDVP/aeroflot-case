@@ -15,11 +15,13 @@ from auth.dependencies import (
     require_airport,
     require_roles,
 )
+from auth.security import hash_password
 from clock import to_iso_utc, utc_now
 from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_FREE, STATUS_OFFLINE
 from database import get_db
+from models.airport import Airport
 from models.employee import Employee
-from models.user import ROLE_ADMIN, ROLE_ENGINEER
+from models.user import ROLE_ADMIN, ROLE_ENGINEER, User
 from services.assignment import release_vehicle, working_call_of
 from schemas.employee import (
     EmployeeCreateRequest,
@@ -34,6 +36,9 @@ router = APIRouter(prefix="/api/employees", tags=["Сотрудники"])
 ERROR_NOT_FOUND = "Сотрудник не найден"
 ERROR_NOT_SELF = "Инженер может изменять только собственную карточку"
 ERROR_BAD_SHIFT = "Смена должна быть day или night"
+ERROR_NO_AIRPORT = "Аэропорт {icao} не заведён в системе"
+ERROR_LOGIN_PAIR = "Логин и пароль задаются вместе: одного без другого недостаточно"
+ERROR_LOGIN_TAKEN = "Логин {login} уже занят"
 ERROR_LEAVE_WITH_CALL = (
     "Нельзя уйти со смены с незакрытым вызовом: завершите его "
     "или попросите диспетчера передать вызов другому"
@@ -119,21 +124,56 @@ def create_employee(
     context: Context = Depends(require_roles(ROLE_ADMIN)),
     db: Session = Depends(get_db),
 ):
-    """Создание карточки сотрудника. Только администратор."""
+    """
+    Регистрация сотрудника. Только администратор.
+
+    Можно сразу поставить на смену — тогда сотрудник участвует в подборе,
+    не заходя в приложение. И можно выдать логин и пароль — тогда он сам
+    войдёт в приложение инженера и будет получать вызовы на телефон.
+    """
     if payload.shift not in (SHIFT_DAY, SHIFT_NIGHT):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_SHIFT)
 
+    airport = db.get(Airport, payload.airport_icao.upper())
+    if airport is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            ERROR_NO_AIRPORT.format(icao=payload.airport_icao.upper()),
+        )
+
+    login = (payload.login or "").strip()
+    password = payload.password or ""
+    if bool(login) != bool(password):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_LOGIN_PAIR)
+    if login and db.query(User).filter(User.login == login).first() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_LOGIN_TAKEN.format(login=login))
+
     employee = Employee(
-        full_name=payload.full_name,
-        airport_icao=payload.airport_icao,
+        full_name=payload.full_name.strip(),
+        airport_icao=airport.icao,
         shift=payload.shift,
-        status=STATUS_OFFLINE,
+        status=STATUS_FREE if payload.on_shift else STATUS_OFFLINE,
         qualifications=[item.model_dump() for item in payload.qualifications],
         speed_kmh=payload.speed_kmh,
         lat=payload.lat,
         lon=payload.lon,
     )
     db.add(employee)
+
+    if login:
+        # Учётная запись создаётся вместе с карточкой и привязывается к ней:
+        # по этой связи приложение инженера находит «свой» вызов.
+        db.flush()
+        user = User(
+            login=login,
+            password_hash=hash_password(password),
+            role=ROLE_ENGINEER,
+            full_name=employee.full_name,
+            employee_id=employee.id,
+        )
+        user.airports.append(airport)
+        db.add(user)
+
     db.commit()
     return to_response(employee)
 

@@ -42,6 +42,9 @@ class AirportGraphResponse(BaseModel):
     ref_point: dict
     nodes: list[NodeSchema]
     edges: list[EdgeSchema]
+    # Происхождение графа: builtin и osm — данные OpenStreetMap, manual —
+    # размечен администратором. Нужно для честной подписи под картой.
+    source: str = "builtin"
 
 
 class AirportImportRequest(BaseModel):
@@ -115,6 +118,20 @@ class AirportSummary(BaseModel):
     # Можно ли редактировать: встроенные графы лежат в файлах репозитория
     # и правятся скриптом выгрузки, а не через интерфейс.
     editable: bool
+
+
+class AircraftCreateRequest(BaseModel):
+    """
+    Постановка борта на стоянку. Доступно только администратору.
+
+    Стоянка указывается узлом графа: только так вызов на этот борт получит
+    маршрут. Тип ВС — из справочника: по нему определяется подкатегория
+    допуска, и неизвестный тип дал бы неверный подбор.
+    """
+
+    board_number: str = Field(min_length=1, description="Бортовой номер, например RA-89001")
+    aircraft_type: str = Field(description="Тип ВС из справочника, например A320")
+    stand_node_id: str
 
 
 class AircraftResponse(BaseModel):

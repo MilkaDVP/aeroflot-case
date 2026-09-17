@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Администрирование</title>
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%230b0f14"/><circle cx="16" cy="16" r="7" fill="%23e3a72c"/></svg>'>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/dispatch.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <div class="admin">
+
+    <header class="header">
+      <span class="header-title">Администрирование</span>
+      <div class="header-context">
+        <!-- Сотрудники, машины и борта заводятся в аэропорту сессии.
+             Переключатель здесь, чтобы наполнить только что созданный
+             аэропорт, не уходя на экран выбора. -->
+        <label for="ctx-airport">Аэропорт</label>
+        <select id="ctx-airport" class="header-select"></select>
+      </div>
+      <div class="header-spacer"></div>
+      <span class="muted" id="ctx-user">—</span>
+      <a class="link-button" href="select-airport.html">К рабочему экрану</a>
+      <button id="logout">Выход</button>
+    </header>
+
+    <nav class="admin-tabs" id="tabs">
+      <button type="button" data-tab="airports" class="active">Аэропорты</button>
+      <button type="button" data-tab="employees">Сотрудники</button>
+      <button type="button" data-tab="vehicles">Спецтранспорт</button>
+      <button type="button" data-tab="aircraft">Борта</button>
+    </nav>
+
+    <!-- ======================= Аэропорты ======================= -->
+    <section class="admin-page" id="page-airports">
+      <div class="admin-columns">
+
+        <div class="admin-card">
+          <h2>Аэропорты системы</h2>
+          <p class="muted small">
+            Встроенные лежат в файлах репозитория и правятся скриптом выгрузки.
+            Добавленные здесь хранятся в базе и доступны сразу.
+          </p>
+          <div class="admin-list" id="airports-list">
+            <div class="empty">Загрузка…</div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h2>Добавить по коду ИКАО</h2>
+          <p class="muted small">
+            Сервер выгрузит настоящий граф аэропорта из OpenStreetMap: границы
+            лётного поля находятся по самому коду. Нужен доступ в интернет —
+            один раз, в момент добавления.
+          </p>
+          <form class="admin-form" id="import-form">
+            <label for="import-icao">Код ИКАО</label>
+            <input id="import-icao" maxlength="4" placeholder="ULLI" required>
+            <label class="checkbox">
+              <input type="checkbox" id="import-service-roads">
+              добавить служебные проезды перрона
+            </label>
+            <button type="submit" class="primary" id="import-submit">Выгрузить</button>
+          </form>
+          <div class="admin-note" id="import-note" hidden></div>
+
+          <h2 class="with-gap">Создать вручную</h2>
+          <p class="muted small">
+            Пустой аэропорт, который вы разметите точками на карте. Координаты
+            задают участок, над которым откроется редактор.
+          </p>
+          <form class="admin-form" id="create-form">
+            <label for="create-icao">Код</label>
+            <input id="create-icao" maxlength="8" placeholder="TST1" required>
+            <label for="create-name">Название</label>
+            <input id="create-name" placeholder="Учебный аэродром" required>
+            <label for="create-city">Город</label>
+            <input id="create-city" placeholder="Москва">
+            <div class="admin-row">
+              <div>
+                <label for="create-lat">Широта</label>
+                <input id="create-lat" class="num" value="55.4000" required>
+              </div>
+              <div>
+                <label for="create-lon">Долгота</label>
+                <input id="create-lon" class="num" value="37.9000" required>
+              </div>
+            </div>
+            <button type="submit" class="primary" id="create-submit">Создать</button>
+          </form>
+          <div class="admin-note" id="create-note" hidden></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ======================= Редактор карты ======================= -->
+    <section class="admin-page" id="page-editor" hidden>
+      <div class="editor-bar">
+        <button type="button" id="editor-back">← К списку</button>
+        <span class="editor-title" id="editor-title">—</span>
+
+        <div class="editor-tools" id="editor-tools">
+          <button type="button" data-mode="stand" class="active">Стоянка</button>
+          <button type="button" data-mode="tech_center">Техцентр</button>
+          <button type="button" data-mode="junction">Перекрёсток</button>
+          <button type="button" data-mode="link">Соединить</button>
+          <button type="button" data-mode="erase">Удалить</button>
+        </div>
+
+        <label class="editor-autolink" title="Новая стоянка и техцентр сразу соединяются с ближайшей точкой">
+          <input type="checkbox" id="editor-autolink" checked>
+          к ближайшей точке
+        </label>
+
+        <span class="editor-counts" id="editor-counts">точек 0 · связей 0</span>
+        <div class="header-spacer"></div>
+        <button type="button" id="editor-clear">Очистить</button>
+        <button type="button" class="primary" id="editor-save">Сохранить</button>
+      </div>
+
+      <div class="editor-hint" id="editor-hint">
+        Кликните по карте, чтобы поставить стоянку.
+      </div>
+
+      <div class="map-area editor-map-area">
+        <svg class="map" id="editor-map" preserveAspectRatio="xMidYMid meet"></svg>
+
+        <div class="basemap-switch" id="editor-basemap">
+          <button type="button" data-basemap="satellite" class="active">Спутник</button>
+          <button type="button" data-basemap="scheme">Схема</button>
+        </div>
+
+        <div class="map-notice" id="editor-notice" hidden></div>
+        <div class="map-credit" id="editor-credit"></div>
+
+        <div class="map-legend">
+          <div class="legend-row">
+            <span class="legend-dot" style="background: var(--ok)"></span> стоянка
+          </div>
+          <div class="legend-row">
+            <span class="legend-dot" style="background: var(--route)"></span> техцентр
+          </div>
+          <div class="legend-row">
+            <span class="legend-dot" style="background: var(--text-muted)"></span> перекрёсток
+          </div>
+        </div>
+
+        <div class="map-zoom">
+          <button type="button" id="editor-zoom-out">−</button>
+          <button type="button" id="editor-zoom-in">+</button>
+          <button type="button" id="editor-fit">Вся карта</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= Сотрудники ======================= -->
+    <section class="admin-page" id="page-employees" hidden>
+      <div class="admin-columns">
+
+        <div class="admin-card">
+          <h2>Сотрудники аэропорта <span id="employees-airport">—</span></h2>
+          <div class="admin-list" id="employees-list">
+            <div class="empty">Загрузка…</div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h2>Зарегистрировать сотрудника</h2>
+          <p class="muted small">
+            Квалификация определяет, на какие работы и типы ВС его можно
+            назначить. Отметка с истёкшим сроком в подбор не проходит.
+          </p>
+          <form class="admin-form" id="employee-form">
+            <label for="emp-name">ФИО</label>
+            <input id="emp-name" placeholder="Соколов А. В." required>
+
+            <div class="admin-row">
+              <div>
+                <label for="emp-shift">Смена</label>
+                <select id="emp-shift">
+                  <option value="day">дневная</option>
+                  <option value="night">ночная</option>
+                </select>
+              </div>
+              <div>
+                <label for="emp-mark">Отметка</label>
+                <select id="emp-mark">
+                  <option value="A1">A1 — линейное ТО, самолёты</option>
+                  <option value="B1.1" selected>B1.1 — планер и двигатели</option>
+                  <option value="B1.3">B1.3 — вертолёты</option>
+                  <option value="B2">B2 — авионика</option>
+                  <option value="C">C — базовое ТО</option>
+                </select>
+              </div>
+            </div>
+
+            <label for="emp-types">Типы ВС (через запятую)</label>
+            <input id="emp-types" placeholder="A320, A321, SSJ-100" required>
+
+            <label for="emp-valid">Отметка действует до</label>
+            <input id="emp-valid" class="num" value="2027-12-31" required>
+
+            <label for="emp-place">Где находится</label>
+            <select id="emp-place"></select>
+
+            <label class="checkbox">
+              <input type="checkbox" id="emp-on-shift" checked>
+              сразу на смене — участвует в подборе без входа в приложение
+            </label>
+
+            <label for="emp-login">Логин для приложения инженера (необязательно)</label>
+            <div class="admin-row">
+              <input id="emp-login" placeholder="логин" autocomplete="off">
+              <input id="emp-password" type="password" placeholder="пароль"
+                     autocomplete="new-password">
+            </div>
+
+            <button type="submit" class="primary" id="employee-submit">
+              Зарегистрировать
+            </button>
+          </form>
+          <div class="admin-note" id="employee-note" hidden></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ======================= Спецтранспорт ======================= -->
+    <section class="admin-page" id="page-vehicles" hidden>
+      <div class="admin-columns">
+
+        <div class="admin-card">
+          <h2>Парк аэропорта <span id="vehicles-airport">—</span></h2>
+          <p class="muted small">
+            Занятую машину вывести из парка нельзя: на ней едет или к ней идёт
+            инженер.
+          </p>
+          <div class="admin-list" id="vehicles-list">
+            <div class="empty">Загрузка…</div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h2>Поставить машину в парк</h2>
+          <form class="admin-form" id="vehicle-form">
+            <label for="veh-sign">Позывной</label>
+            <input id="veh-sign" placeholder="ТМ-06" required>
+            <label for="veh-kind">Тип</label>
+            <input id="veh-kind" value="Техпомощь">
+            <label for="veh-place">Где стоит</label>
+            <select id="veh-place"></select>
+            <button type="submit" class="primary" id="vehicle-submit">Поставить</button>
+          </form>
+          <div class="admin-note" id="vehicle-note" hidden></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ======================= Борта ======================= -->
+    <section class="admin-page" id="page-aircraft" hidden>
+      <div class="admin-columns">
+
+        <div class="admin-card">
+          <h2>Борта на стоянках <span id="aircraft-airport">—</span></h2>
+          <p class="muted small">
+            Вызов регистрируется на борт. Без бортов в новом аэропорту подбор
+            проверить нельзя.
+          </p>
+          <div class="admin-list" id="aircraft-list">
+            <div class="empty">Загрузка…</div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h2>Поставить борт на стоянку</h2>
+          <form class="admin-form" id="aircraft-form">
+            <label for="ac-board">Бортовой номер</label>
+            <input id="ac-board" placeholder="RA-89001" required>
+            <label for="ac-type">Тип ВС</label>
+            <!-- Типы приходят из справочника сервера: по типу определяется
+                 подкатегория допуска, и список в двух местах разошёлся бы. -->
+            <select id="ac-type"></select>
+            <label for="ac-stand">Стоянка</label>
+            <select id="ac-stand"></select>
+            <button type="submit" class="primary" id="aircraft-submit">Поставить</button>
+          </form>
+          <div class="admin-note" id="aircraft-note" hidden></div>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/tiles.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

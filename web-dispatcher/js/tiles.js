@@ -40,13 +40,22 @@ const BASEMAPS = {
   scheme: {
     title: "Схема",
     layers: [],
-    credit: "Граф: OpenStreetMap (ODbL)",
+    credit: "",
   },
   satellite: {
     title: "Спутник",
     layers: [ESRI_IMAGERY],
-    credit: "Снимок: Esri, Maxar, Earthstar Geographics · Граф: OpenStreetMap",
+    credit: "Снимок: Esri, Maxar, Earthstar Geographics",
   },
+};
+
+// Подпись графа зависит от его происхождения. Аэропорт, размеченный
+// администратором вручную, к OpenStreetMap отношения не имеет, и ссылка
+// на OSM под ним была бы ложной атрибуцией.
+const GRAPH_CREDITS = {
+  builtin: "Граф: OpenStreetMap (ODbL)",
+  osm: "Граф: OpenStreetMap (ODbL)",
+  manual: "Граф: размечен вручную",
 };
 
 /* --- Web Mercator --- */
@@ -86,7 +95,9 @@ class TileLayer {
   }
 
   get credit() {
-    return BASEMAPS[this.basemap].credit;
+    const source = (this.map.graph && this.map.graph.source) || "builtin";
+    const parts = [BASEMAPS[this.basemap].credit, GRAPH_CREDITS[source] || ""];
+    return parts.filter((part) => part.length > 0).join(" · ");
   }
 
   /** Переключает подложку. Схема очищает слой и ничего не грузит. */

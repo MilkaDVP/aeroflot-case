@@ -6,8 +6,9 @@
 FROM nginx:alpine
 
 COPY web-dispatcher/nginx.conf /etc/nginx/conf.d/default.conf
-COPY web-dispatcher/index.html web-dispatcher/select-airport.html \
-     web-dispatcher/dispatch.html /usr/share/nginx/html/
+# Все страницы разом, а не по именам: перечисление уже приводило к тому,
+# что новый экран отдавался как 404, хотя лежал в репозитории.
+COPY web-dispatcher/*.html /usr/share/nginx/html/
 COPY web-dispatcher/css/ /usr/share/nginx/html/css/
 COPY web-dispatcher/js/ /usr/share/nginx/html/js/
 

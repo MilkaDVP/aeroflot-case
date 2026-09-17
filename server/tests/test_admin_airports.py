@@ -170,6 +170,17 @@ class TestAdminAirports(ApiTestCase):
         self.assertGreater(edge["distance_m"], 0)
         self.assertIsNotNone(body["nodes"][0]["x"])
 
+    def test_граф_сообщает_своё_происхождение(self):
+        """Под нарисованным аэропортом не должно стоять «Граф: OpenStreetMap»."""
+        self.create_empty()
+        self.save_graph("TSTA")
+
+        manual = self.client.get("/api/airports/TSTA", headers=auth_header(self.admin))
+        builtin = self.client.get("/api/airports/UUEE", headers=auth_header(self.admin))
+
+        self.assertEqual(manual.json()["source"], "manual")
+        self.assertEqual(builtin.json()["source"], "builtin")
+
     def test_длина_ребра_считается_по_координатам(self):
         self.create_empty()
         self.save_graph("TSTA")
@@ -182,6 +193,51 @@ class TestAdminAirports(ApiTestCase):
         }
         # t1 → j1: примерно 160 метров по координатам из NODES.
         self.assertAlmostEqual(by_pair[("t1", "j1")]["distance_m"], 160, delta=20)
+
+    def test_правка_выгруженного_графа_сохраняет_длины_рулёжек(self):
+        """
+        Импортированный из OSM аэропорт дорисовывают в редакторе — у Пулково,
+        например, в OSM нет ни одной стоянки. Сохранение не должно пересчитать
+        настоящие изогнутые рулёжки по прямой: длина хорды меньше, и время
+        в пути оказалось бы заниженным.
+        """
+        curved = dict(FAKE_OSM_GRAPH)
+        curved["edges"] = [dict(FAKE_OSM_GRAPH["edges"][0], distance_m=400.0,
+                                points=[[50.0, -20.0], [90.0, -80.0]])]
+        with patch("api.admin_airports.import_airport",
+                   return_value=(curved, FAKE_AERODROME)):
+            self.client.post("/api/admin/airports/import", json={"icao": "ZZZZ"},
+                             headers=auth_header(self.admin))
+        self.created.append("ZZZZ")
+
+        graph = self.client.get("/api/airports/ZZZZ", headers=auth_header(self.admin)).json()
+        nodes = [{key: node[key] for key in ("id", "type", "ref", "lat", "lon")}
+                 for node in graph["nodes"]]
+        # Дорисовываем стоянку и связываем её с существующей точкой.
+        nodes.append({"id": "p1", "type": "stand", "ref": "11",
+                      "lat": 55.4015, "lon": 37.9030})
+        edges = [
+            # Прежняя рулёжка приходит в обратном направлении.
+            {"from_id": "n2", "to_id": "n1", "vehicle_allowed": True},
+            {"from_id": "n2", "to_id": "p1", "vehicle_allowed": True},
+        ]
+        response = self.client.put("/api/admin/airports/ZZZZ/graph",
+                                   json={"nodes": nodes, "edges": edges},
+                                   headers=auth_header(self.admin))
+        self.assertEqual(response.status_code, 200, response.text)
+
+        saved = self.client.get("/api/airports/ZZZZ", headers=auth_header(self.admin)).json()
+        by_pair = {(e["from_id"], e["to_id"]): e for e in saved["edges"]}
+
+        old = by_pair[("n2", "n1")]
+        self.assertEqual(old["distance_m"], 400.0)
+        # Изгиб развёрнут вместе с направлением связи.
+        self.assertEqual(old["points"], [[90.0, -80.0], [50.0, -20.0]])
+        # Опорная точка прежняя — иначе изгибы съехали бы с рулёжек.
+        self.assertEqual(saved["ref_point"], FAKE_OSM_GRAPH["ref_point"])
+        # Новая связь — по прямой.
+        self.assertLess(by_pair[("n2", "p1")]["distance_m"], 200)
+        self.assertEqual(saved["source"], "osm")
 
     # --- Проверки графа ---
 

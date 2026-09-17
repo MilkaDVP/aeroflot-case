@@ -62,7 +62,7 @@ class ApiTestCase(unittest.TestCase):
     def tearDownClass(cls):
         cls.client_context.__exit__(None, None, None)
 
-    def login(self, login, password, shift="day"):
+    def login(self, login, password, shift="day", airport="UUEE"):
         """Вход и выбор контекста. Возвращает токен."""
         response = self.client.post(
             "/api/auth/login", json={"login": login, "password": password}
@@ -72,7 +72,7 @@ class ApiTestCase(unittest.TestCase):
 
         self.client.post(
             "/api/session/airport",
-            json={"airport_icao": "UUEE", "shift": shift},
+            json={"airport_icao": airport, "shift": shift},
             headers=auth_header(token),
         )
         return token

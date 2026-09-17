@@ -137,4 +137,22 @@ const Api = {
     request("POST", `/api/calls/${callId}/unassign`, { reason }),
   setCallStatus: (callId, status) =>
     request("PATCH", `/api/calls/${callId}/status`, { status }),
+
+  /* --- Администрирование --- */
+
+  adminAirports: () => request("GET", "/api/admin/airports"),
+  importAirport: (icao, service_roads) =>
+    request("POST", "/api/admin/airports/import", { icao, service_roads }),
+  createAirport: (payload) => request("POST", "/api/admin/airports", payload),
+  saveAirportGraph: (icao, nodes, edges) =>
+    request("PUT", `/api/admin/airports/${icao}/graph`, { nodes, edges }),
+  deleteAirport: (icao) => request("DELETE", `/api/admin/airports/${icao}`),
+
+  aircraftTypes: () => request("GET", "/api/aircraft-types"),
+  createAircraft: (payload) => request("POST", "/api/aircraft", payload),
+  deleteAircraft: (aircraftId) => request("DELETE", `/api/aircraft/${aircraftId}`),
+
+  createEmployee: (payload) => request("POST", "/api/employees", payload),
+  createVehicle: (payload) => request("POST", "/api/vehicles", payload),
+  deleteVehicle: (vehicleId) => request("DELETE", `/api/vehicles/${vehicleId}`),
 };

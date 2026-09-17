@@ -27,6 +27,11 @@ const LABEL_VISIBLE_SCALE = 2.6;
 // Запас вокруг данных, чтобы крайние стоянки не липли к краю экрана.
 const VIEW_PADDING_M = 120;
 
+// Половина стороны участка, который показывается для аэропорта без точек:
+// полтора километра в каждую сторону от опорной точки — обычный размер
+// перрона, с него удобно начинать разметку.
+const EMPTY_VIEW_HALF_M = 1500;
+
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 30;
 
@@ -47,6 +52,9 @@ class AirportMap {
       aircraft: createGroup("layer-aircraft"),
       vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
+      // Слой редактора: точки и связи, которые администратор наносит
+      // на карту. На рабочем экране диспетчера остаётся пустым.
+      editor: createGroup("layer-editor"),
       labels: createGroup("layer-labels"),
     };
 
@@ -134,6 +142,25 @@ class AirportMap {
   }
 
   /**
+   * Только система координат и вид, без рисования графа.
+   *
+   * Нужна редактору: граф там рисует сам редактор, из своей рабочей копии.
+   * Если бы карта рисовала ещё и сохранённую версию, удалённая точка
+   * оставалась бы на экране до сохранения, и было бы непонятно,
+   * что уже убрано, а что нет.
+   */
+  frame(graph) {
+    this.graph = graph;
+    this.nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+    this.layers.taxiways.replaceChildren();
+    this.layers.stands.replaceChildren();
+    this.layers.labels.replaceChildren();
+
+    this.fitView(graph.nodes);
+    this.measureBaseScale();
+  }
+
+  /**
    * Подбирает viewBox под рабочую зону аэропорта.
    *
    * Считаем охват по стоянкам и техцентрам, а не по всем узлам графа.
@@ -143,6 +170,25 @@ class AirportMap {
    * не деваются — до них доезжают панорамированием.
    */
   fitView(allNodes) {
+    // Пустой граф — это новый аэропорт, который ещё только размечают.
+    // Охват считать не по чему, поэтому показываем участок вокруг опорной
+    // точки: без этого viewBox получил бы Infinity, и клик по карте давал
+    // бы нечисловые координаты.
+    if (!allNodes.length) {
+      this.baseView = {
+        minX: -EMPTY_VIEW_HALF_M,
+        minY: -EMPTY_VIEW_HALF_M,
+        width: EMPTY_VIEW_HALF_M * 2,
+        height: EMPTY_VIEW_HALF_M * 2,
+      };
+      this.svg.setAttribute(
+        "viewBox",
+        `${-EMPTY_VIEW_HALF_M} ${-EMPTY_VIEW_HALF_M} ` +
+          `${EMPTY_VIEW_HALF_M * 2} ${EMPTY_VIEW_HALF_M * 2}`
+      );
+      return;
+    }
+
     const operational = allNodes.filter((node) => node.type !== "junction");
     const nodes = operational.length >= 2 ? operational : allNodes;
 
@@ -444,6 +490,26 @@ class AirportMap {
     return {
       x: (lon - reference.lon) * toRad * EARTH_RADIUS_M * Math.cos(reference.lat * toRad),
       y: (reference.lat - lat) * toRad * EARTH_RADIUS_M,
+    };
+  }
+
+  /**
+   * Обратное преобразование: метры карты в широту и долготу.
+   *
+   * Нужно редактору аэропорта: администратор указывает точку пальцем
+   * по снимку, а храним мы географические координаты — только они
+   * не зависят от того, какой участок и в каком масштабе был на экране.
+   */
+  unprojectXY(x, y) {
+    const EARTH_RADIUS_M = 6371008.8;
+    const reference = this.graph.ref_point;
+    const toDeg = 180 / Math.PI;
+
+    return {
+      lat: reference.lat - (y / EARTH_RADIUS_M) * toDeg,
+      lon:
+        reference.lon +
+        (x / (EARTH_RADIUS_M * Math.cos((reference.lat * Math.PI) / 180))) * toDeg,
     };
   }
 

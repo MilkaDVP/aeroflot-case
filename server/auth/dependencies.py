@@ -80,6 +80,34 @@ def require_roles(*roles):
     return RoleGuard(roles)
 
 
+class AirportRoleGuard:
+    """
+    Пропускает перечисленные роли и требует выбранного аэропорта.
+
+    Нужна там, где операция и ограничена ролью, и относится к конкретному
+    аэропорту — например, постановка машины в парк. Без второй проверки
+    администратор, не выбравший аэропорт, получил бы невнятную ошибку
+    вместо указания сначала выбрать аэропорт.
+
+    Классом, а не функцией с вложенной функцией: стандарт проекта (§11)
+    запрещает вложенные функции.
+    """
+
+    def __init__(self, roles):
+        self.guard = RoleGuard(roles)
+
+    def __call__(self, context: Context = Depends(get_context)):
+        checked = self.guard(context)
+        if not checked.airport_icao:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_AIRPORT)
+        return checked
+
+
+def require_roles_in_airport(*roles):
+    """Зависимость: нужная роль и выбранный аэропорт сессии."""
+    return AirportRoleGuard(roles)
+
+
 def require_airport(context: Context = Depends(get_context)):
     """
     Требует выбранного аэропорта.

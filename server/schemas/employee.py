@@ -31,15 +31,26 @@ class EmployeeResponse(BaseModel):
 
 
 class EmployeeCreateRequest(BaseModel):
-    """Создание сотрудника. Доступно только администратору."""
+    """
+    Регистрация сотрудника. Доступно только администратору.
 
-    full_name: str
+    Учётная запись для приложения инженера необязательна: сотрудник без неё
+    виден диспетчеру и участвует в подборе, но сам войти в систему не может.
+    """
+
+    full_name: str = Field(min_length=1)
     airport_icao: str
     shift: str
     qualifications: list[QualificationSchema] = []
     speed_kmh: float | None = None
     lat: float | None = None
     lon: float | None = None
+    # Сразу на смене — чтобы проверить подбор, не заходя в приложение
+    # инженера. Иначе новый сотрудник «не на смене» и в подбор не попадает.
+    on_shift: bool = False
+    # Логин и пароль для входа в приложение инженера. Заполняются вместе.
+    login: str | None = None
+    password: str | None = None
 
 
 class EmployeeUpdateRequest(BaseModel):
