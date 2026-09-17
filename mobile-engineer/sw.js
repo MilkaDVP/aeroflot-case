@@ -7,11 +7,22 @@
  * Он может выехать к борту, который уже обслужен, или не увидеть,
  * что вызов переназначен другому.
  *
- * Стратегия для оболочки — «сначала кэш»: приложение обязано
- * открыться на перроне, где связь пропадает.
+ * Стратегия для оболочки — «сначала сеть, при её отказе кэш». Раньше было
+ * «сначала кэш»: приложение открывалось мгновенно, но после обновления
+ * инженер видел прежнюю версию, а новая применялась лишь со следующего
+ * запуска — исправления просто не доходили до телефона. Теперь при связи
+ * загружается свежая оболочка, а на перроне без связи приложение
+ * открывается из кэша: сеть ждём не дольше NETWORK_TIMEOUT_MS.
  */
 
-const CACHE_NAME = "oto-engineer-v1";
+// Номер версии меняется вместе со сменой стратегии: activate удалит
+// кэш прежней версии, и старая оболочка не всплывёт при отказе сети.
+const CACHE_NAME = "oto-engineer-v2";
+
+// Сколько ждать сеть, прежде чем открыть оболочку из кэша. На перроне
+// связь не пропадает мгновенно, а «висит»: без предела приложение
+// не открылось бы вовсе.
+const NETWORK_TIMEOUT_MS = 3000;
 
 const SHELL = [
   "index.html",
@@ -84,20 +95,36 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) {
-        // Обновляем кэш в фоне, чтобы следующий запуск был свежим.
-        fetch(request)
-          .then((response) => {
-            if (response.ok) {
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, response));
-            }
-          })
-          .catch(() => {});
-        return cached;
-      }
-      return fetch(request);
-    })
-  );
+  event.respondWith(networkFirst(request));
 });
+
+/**
+ * Свежий файл из сети с сохранением в кэш; при отказе или долгом ответе —
+ * копия из кэша.
+ */
+async function networkFirst(request) {
+  try {
+    const response = await fetchWithTimeout(request, NETWORK_TIMEOUT_MS);
+    if (response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+    }
+    return response;
+  } catch (error) {
+    const cached = await caches.match(request);
+    if (cached) {
+      return cached;
+    }
+    throw error;
+  }
+}
+
+/** fetch, который сдаётся через заданное время. */
+function fetchWithTimeout(request, timeoutMs) {
+  return Promise.race([
+    fetch(request),
+    new Promise((resolve, reject) => {
+      setTimeout(() => reject(new Error("сеть не ответила вовремя")), timeoutMs);
+    }),
+  ]);
+}
