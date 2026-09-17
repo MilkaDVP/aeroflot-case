@@ -12,4 +12,12 @@ COPY web-dispatcher/*.html /usr/share/nginx/html/
 COPY web-dispatcher/css/ /usr/share/nginx/html/css/
 COPY web-dispatcher/js/ /usr/share/nginx/html/js/
 
+# Метка сборки в адресах скриптов и стилей (js/api.js?v=__BUILD__).
+# Заголовок no-cache не помогает браузеру, который уже держит старую копию
+# без заголовков: он не спросит сервер, пока считает её свежей. Новый адрес
+# обходит такой кэш гарантированно, а HTML не кэшируется вовсе — новая
+# метка доходит сразу. Шаг стоит последним: любая правка файлов выше
+# пересобирает его и даёт новую метку.
+RUN sed -i "s/__BUILD__/$(date +%s)/g" /usr/share/nginx/html/*.html
+
 EXPOSE 80

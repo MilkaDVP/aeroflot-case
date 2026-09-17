@@ -111,7 +111,10 @@ async function networkFirst(request) {
     }
     return response;
   } catch (error) {
-    const cached = await caches.match(request);
+    // Параметр версии (?v=…) при поиске не учитываем: при установке
+    // оболочка кэшируется по адресам без него, а страница просит файлы
+    // с меткой сборки. Иначе без связи приложение не нашло бы свои скрипты.
+    const cached = await caches.match(request, { ignoreSearch: true });
     if (cached) {
       return cached;
     }

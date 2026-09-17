@@ -12,4 +12,8 @@ COPY mobile-engineer/css/ /usr/share/nginx/html/css/
 COPY mobile-engineer/js/ /usr/share/nginx/html/js/
 COPY mobile-engineer/icons/ /usr/share/nginx/html/icons/
 
+# Метка сборки в адресах скриптов и стилей — см. web-dispatcher/Dockerfile:
+# старая копия из кэша браузера не совпадёт с новым адресом.
+RUN sed -i "s/__BUILD__/$(date +%s)/g" /usr/share/nginx/html/index.html
+
 EXPOSE 80
