@@ -1,0 +1,54 @@
+# Развёртывание проекта одной командой: docker compose up
+#
+#   http://localhost:8080       — рабочее место диспетчера
+#   http://localhost:8081       — PWA инженера (открывать с телефона)
+#   http://localhost:8000/docs  — автодокументация API
+#
+# С телефона адреса те же, но вместо localhost — адрес компьютера в сети,
+# и серверу нужно указать его явно: http://192.168.x.x:8081/?api=http://192.168.x.x:8000
+
+services:
+  server:
+    build:
+      # Контекст — корень репозитория: в образ попадают и код сервера,
+      # и подготовленные графы аэропортов.
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: aeroflot-server
+    ports:
+      - "8000:8000"
+    environment:
+      # Наполнение тестовыми данными при первом запуске: жюри должно
+      # увидеть работающую систему сразу, а не пустые экраны.
+      SEED_ON_START: "1"
+    volumes:
+      # База переживает пересоздание контейнера.
+      - server-data:/app/data
+    restart: unless-stopped
+
+  web-dispatcher:
+    build:
+      context: .
+      dockerfile: web-dispatcher/Dockerfile
+    container_name: aeroflot-web
+    ports:
+      - "8080:80"
+    # Зависимость только на порядок запуска: браузер обращается к API
+    # напрямую, поэтому статика поднимется и без готового сервера.
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  mobile-engineer:
+    build:
+      context: .
+      dockerfile: mobile-engineer/Dockerfile
+    container_name: aeroflot-mobile
+    ports:
+      - "8081:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  server-data:

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Рабочий экран диспетчера</title>
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%230b0f14"/><circle cx="16" cy="16" r="7" fill="%233d8bfd"/></svg>'>
+  <link rel="stylesheet" href="css/theme.css?v=__BUILD__">
+  <link rel="stylesheet" href="css/dispatch.css?v=__BUILD__">
+</head>
+<body>
+  <div class="workspace">
+
+    <header class="header">
+      <span class="header-title">Диспетчеризация ОТО</span>
+      <div class="header-context">
+        <span>Аэропорт <b id="ctx-airport">—</b></span>
+        <span>Смена <b id="ctx-shift">—</b></span>
+      </div>
+      <div class="header-spacer"></div>
+      <span class="clock" id="clock">--:--:--</span>
+      <span class="muted" id="ctx-user">—</span>
+      <button id="logout">Выход</button>
+    </header>
+
+    <!-- Вызовы -->
+    <section class="panel panel-calls">
+      <div class="panel-head">
+        <span>Активные вызовы</span>
+        <span class="num" id="calls-count">0</span>
+      </div>
+      <div class="panel-body" id="calls-list">
+        <div class="empty">Загрузка…</div>
+      </div>
+      <div class="panel-foot">
+        <button class="primary" id="new-call" style="width:100%">
+          Зарегистрировать вызов
+        </button>
+      </div>
+    </section>
+
+    <!-- Карта -->
+    <section class="map-area">
+      <svg class="map" id="map" preserveAspectRatio="xMidYMid meet"></svg>
+
+      <!-- Подложка: схема работает без интернета, снимок требует сети -->
+      <div class="basemap-switch" id="basemap-switch">
+        <button type="button" data-basemap="scheme" class="active">Схема</button>
+        <button type="button" data-basemap="satellite">Спутник</button>
+      </div>
+
+      <div class="map-notice" id="map-notice" hidden></div>
+      <div class="map-credit" id="map-credit"></div>
+
+      <div class="map-legend">
+        <div class="legend-row">
+          <span class="legend-dot" style="background: var(--ok)"></span>
+          свободен, допуск есть
+        </div>
+        <div class="legend-row">
+          <span class="legend-dot" style="background: var(--neutral)"></span>
+          свободен, допуска нет
+        </div>
+        <div class="legend-row">
+          <span class="legend-dot" style="background: var(--busy)"></span>
+          занят на вызове
+        </div>
+        <div class="legend-row">
+          <span class="legend-dot"
+                style="background: transparent; border: 1px dashed var(--text)"></span>
+          едет на машине
+        </div>
+        <div class="legend-row">
+          <span class="legend-dot"
+                style="border-radius: 2px; background: var(--bg-deep); border: 2px solid var(--route)"></span>
+          свободная машина парка
+        </div>
+      </div>
+
+      <!-- Имитация координат: ТЗ прямо допускает ввод местоположения
+           нажатием на карту. Кнопка включает режим, в котором клик
+           по сотруднику и затем по карте переставляет его. -->
+      <div class="map-tools">
+        <button type="button" id="move-mode">Переместить сотрудника</button>
+        <span class="map-tools-hint" id="move-hint" hidden></span>
+      </div>
+
+      <div class="map-controls">
+        <button id="zoom-out">−</button>
+        <button id="zoom-in">+</button>
+        <button id="zoom-reset">Весь аэропорт</button>
+      </div>
+    </section>
+
+    <!-- Подбор -->
+    <section class="panel panel-suggest">
+      <div class="panel-head">
+        <span>Подбор исполнителя</span>
+        <span class="num dim" id="calc-time"></span>
+      </div>
+      <div class="panel-body" id="suggest-body">
+        <div class="empty">Выберите вызов в списке слева</div>
+      </div>
+      <div class="panel-foot">
+        <button class="primary" id="assign" style="width:100%" disabled>
+          Назначить
+        </button>
+      </div>
+    </section>
+
+    <!-- Состояние смены -->
+    <footer class="status-bar">
+      <span class="status-item">Сотрудников на смене: <b id="stat-total">0</b></span>
+      <span class="status-item">
+        <span class="legend-dot" style="background: var(--ok)"></span>
+        свободны: <b id="stat-free">0</b>
+      </span>
+      <span class="status-item">
+        <span class="legend-dot" style="background: var(--busy)"></span>
+        заняты: <b id="stat-busy">0</b>
+      </span>
+      <span class="status-item">свободных машин: <b id="stat-vehicle">0</b></span>
+      <span class="header-spacer"></span>
+      <span class="status-item" id="conn-status">обновление каждые 4 с</span>
+    </footer>
+  </div>
+
+  <script src="js/config.js?v=__BUILD__"></script>
+  <script src="js/api.js?v=__BUILD__"></script>
+  <script src="js/tiles.js?v=__BUILD__"></script>
+  <script src="js/map.js?v=__BUILD__"></script>
+  <script src="js/panels.js?v=__BUILD__"></script>
+  <script src="js/dispatch.js?v=__BUILD__"></script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+/*
+ * Экран входа и экран выбора аэропорта.
+ *
+ * Тот же визуальный язык, что и рабочий экран, минимум элементов,
+ * без «маркетингового» оформления: это служебный вход в рабочий
+ * инструмент, а не главная страница продукта.
+ */
+
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap-lg);
+}
+
+.auth-box {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px;
+}
+
+.auth-box.wide {
+  max-width: 520px;
+}
+
+.auth-title {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.auth-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: var(--gap-xs);
+  margin-bottom: var(--gap-lg);
+}
+
+.auth-field {
+  margin-bottom: var(--gap);
+}
+
+.auth-actions {
+  margin-top: var(--gap-lg);
+}
+
+.auth-actions button {
+  width: 100%;
+}
+
+.auth-hint {
+  margin-top: var(--gap-lg);
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.auth-hint code {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* Выбор аэропорта: карточки, а не выпадающий список — аэропортов мало,
+   а промахнуться контекстом смены дорого. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-lg);
+}
+
+.choice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  padding: var(--gap) var(--gap-lg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.choice:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.choice.selected {
+  border-color: var(--route);
+  background: var(--route-soft);
+}
+
+.choice-code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--route);
+  min-width: 52px;
+}
+
+.choice-city {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.shift-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-sm);
+}
+
+.shift-row .choice {
+  justify-content: center;
+  text-align: center;
+}
