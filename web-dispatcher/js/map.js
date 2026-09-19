@@ -290,7 +290,16 @@ class AirportMap {
         shape.setAttribute("r", 3.5);
         shape.setAttribute("class", "stand");
         marker.append(shape, title(`Стоянка ${node.ref}`));
-        marker.addEventListener("click", () => {
+        marker.addEventListener("click", (event) => {
+          // В режиме перемещения клик по стоянке означает «поставить
+          // сюда человека», а не «завести вызов на этот борт». Иначе
+          // самое естественное место для перестановки — стоянка —
+          // оказалось бы единственным, куда переставить нельзя.
+          if (this.onGroundClick) {
+            event.stopPropagation();
+            this.onGroundClick({ lat: node.lat, lon: node.lon });
+            return;
+          }
           if (this.onStandClick) {
             this.onStandClick(node);
           }
@@ -452,11 +461,14 @@ class AirportMap {
     if (!this.onGroundClick || !this.graph) {
       return;
     }
-    if (event.target.closest(".marker")) {
+    // Значок сотрудника — это выбор человека, у него свой обработчик.
+    // Остальные значки (борта, машины, подписи) перекрывают карту, и клик
+    // по ним должен работать как клик по месту под ними.
+    if (event.target.closest(".employee-marker")) {
       return;
     }
 
-    const point = this.toMapCoords(event.clientX, event.clientY);
+    const point = this.toGraphCoords(event.clientX, event.clientY);
     this.onGroundClick(this.unprojectXY(point.x, point.y));
   }
 
@@ -607,6 +619,22 @@ class AirportMap {
       x: rect.minX + (clientX - rect.box.left) / this.basePxPerMetre,
       y: rect.minY + (clientY - rect.box.top) / this.basePxPerMetre,
     };
+  }
+
+  /**
+   * Точка экрана в координатах графа — с учётом зума и сдвига карты.
+   *
+   * toMapCoords даёт координаты в системе viewBox, то есть ДО применения
+   * transform к слоям. Содержимое же нарисовано внутри viewport, и на
+   * экране точка графа g оказывается в g * scale + translate. Значит
+   * обратный пересчёт обязан делить на масштаб и вычитать сдвиг — иначе
+   * на приближённой или сдвинутой карте клик попадает не туда, куда
+   * показывает курсор.
+   */
+  toGraphCoords(clientX, clientY) {
+    const point = this.toMapCoords(clientX, clientY);
+    const { x, y, scale } = this.transform;
+    return { x: (point.x - x) / scale, y: (point.y - y) / scale };
   }
 
   /** Центр экрана в координатах карты. При вписанном viewBox он постоянен. */

@@ -109,7 +109,9 @@ class GraphEditor {
       return;
     }
 
-    const point = this.map.toMapCoords(event.clientX, event.clientY);
+    // Координаты графа, а не viewBox: иначе на приближённой карте точка
+    // встанет в стороне от места, куда кликнул администратор.
+    const point = this.map.toGraphCoords(event.clientX, event.clientY);
     const position = this.map.unprojectXY(point.x, point.y);
     const nearest = this.autolink ? this.nearestNode(point) : null;
     const node = this.addNode(this.mode, position.lat, position.lon);
