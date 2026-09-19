@@ -122,6 +122,12 @@ const Api = {
 
   employees: (shift) =>
     request("GET", shift ? `/api/employees?shift=${shift}` : "/api/employees"),
+  // Имитация координат с рабочего экрана: задание разрешает задавать
+  // местоположение нажатием на карту вместо настоящего GPS.
+  sendLocation: (employeeId, lat, lon) =>
+    request("POST", `/api/employees/${employeeId}/location`, { lat, lon }),
+  updateEmployee: (employeeId, payload) =>
+    request("PATCH", `/api/employees/${employeeId}`, payload),
 
   aircraft: () => request("GET", "/api/aircraft"),
   defectTypes: () => request("GET", "/api/defect-types"),

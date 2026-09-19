@@ -76,6 +76,14 @@
         </div>
       </div>
 
+      <!-- Имитация координат: ТЗ прямо допускает ввод местоположения
+           нажатием на карту. Кнопка включает режим, в котором клик
+           по сотруднику и затем по карте переставляет его. -->
+      <div class="map-tools">
+        <button type="button" id="move-mode">Переместить сотрудника</button>
+        <span class="map-tools-hint" id="move-hint" hidden></span>
+      </div>
+
       <div class="map-controls">
         <button id="zoom-out">−</button>
         <button id="zoom-in">+</button>

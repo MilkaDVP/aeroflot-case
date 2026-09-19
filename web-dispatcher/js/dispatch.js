@@ -18,6 +18,9 @@ const state = {
   suggestion: null,
   // Кандидат, выбранный диспетчером вручную. null — согласие с системой.
   pickedEmployeeId: null,
+  // Режим имитации координат: включён ли и кого переставляем.
+  moveMode: false,
+  movingEmployeeId: null,
 };
 
 const elements = {
@@ -365,6 +368,65 @@ elements.assignButton.addEventListener("click", async () => {
 document.getElementById("new-call").addEventListener("click", () => openCallForm(null));
 
 /** Клик по стоянке на карте открывает форму с уже выбранным бортом. */
+/* --- Имитация координат: перемещение сотрудника по карте --- */
+
+/**
+ * Зачем это на рабочем экране.
+ *
+ * Настоящие координаты приходят с телефонов инженеров. Но проверить
+ * работу подбора, бегая по перрону с телефоном, невозможно, и задание
+ * прямо разрешает имитировать местоположение нажатием на карту.
+ * Режим выключен по умолчанию: случайный клик по карте не должен
+ * двигать людей.
+ */
+function toggleMoveMode() {
+  state.moveMode = !state.moveMode;
+  state.movingEmployeeId = null;
+
+  document.getElementById("move-mode").classList.toggle("active", state.moveMode);
+  airportMap.onEmployeeClick = state.moveMode ? pickEmployeeToMove : null;
+  airportMap.onGroundClick = state.moveMode ? moveEmployeeTo : null;
+  showMoveHint(
+    state.moveMode ? "Выберите сотрудника на карте" : null
+  );
+}
+
+function pickEmployeeToMove(employee) {
+  state.movingEmployeeId = employee.id;
+  showMoveHint(`${employee.full_name}: укажите новое место на карте`);
+}
+
+async function moveEmployeeTo(position) {
+  if (state.movingEmployeeId === null) {
+    showMoveHint("Сначала выберите сотрудника на карте");
+    return;
+  }
+
+  const employee = state.employees.find((item) => item.id === state.movingEmployeeId);
+  try {
+    await Api.sendLocation(state.movingEmployeeId, position.lat, position.lon);
+    state.movingEmployeeId = null;
+    await refresh();
+
+    // Подбор пересчитывается сразу: смысл имитации в том, чтобы видеть,
+    // как перестановка людей меняет решение системы.
+    if (state.selectedCall && isAssignable(state.selectedCall)) {
+      await selectCall(state.selectedCall);
+    }
+    showMoveHint(`${employee ? employee.full_name : "Сотрудник"} перемещён`);
+  } catch (error) {
+    showMoveHint(error.detail);
+  }
+}
+
+function showMoveHint(message) {
+  const hint = document.getElementById("move-hint");
+  hint.hidden = !message;
+  hint.textContent = message || "";
+}
+
+document.getElementById("move-mode").addEventListener("click", toggleMoveMode);
+
 function openCallFormForStand(node) {
   const aircraft = state.aircraft.find((item) => item.stand_node_id === node.id);
   openCallForm(aircraft ? aircraft.id : null);

@@ -110,6 +110,18 @@ SCENARIOS = [
         "checks": "дневные сотрудники не рассматриваются, ночные не на смене",
     },
     {
+        "title": "Несколько вызовов подряд",
+        "airport": "UUEE",
+        "board": "VP-BZQ",
+        "defect": "hydraulic_leak",
+        "shift": "day",
+        # Второй вызов приходит, пока выбранный по первому уже едет.
+        "then_board": "VP-BES",
+        "then_defect": "hydraulic_leak",
+        "checks": "на второй вызов система не предлагает того, кто уже едет "
+        "на первый",
+    },
+    {
         "title": "Домодедово: дальняя стоянка",
         "airport": "UUDD",
         "board": "VQ-BDU",
@@ -235,6 +247,8 @@ def run_scenario(db, scenario):
 
     result = suggest(graph, payload, employees, scenario["shift"], vehicles=vehicles)
 
+    follow = follow_up(db, scenario, graph, employees, vehicles, aircraft, result)
+
     return {
         "scenario": scenario,
         "board": board,
@@ -242,14 +256,62 @@ def run_scenario(db, scenario):
         "stand_ref": graph.node(board.stand_node_id)["ref"],
         "result": result,
         # Время расчёта берётся то же, что уходит в API: его измеряет suggest.
-        "elapsed_ms": result.elapsed_ms,
+        "elapsed_ms": max(result.elapsed_ms, follow["result"].elapsed_ms if follow else 0),
         "intuitive": intuitive_choice(graph, employees, scenario["shift"], board, mark),
+        "follow": follow,
+    }
+
+
+def follow_up(db, scenario, graph, employees, vehicles, aircraft, first):
+    """
+    Второй вызов, пришедший пока исполнитель первого ещё в пути.
+
+    Проверяет внештатную ситуацию из задания — несколько вызовов подряд.
+    Выбранный по первому вызову становится занятым, его машина уходит
+    из парка вместе с ним, и на второй вызов система обязана предложить
+    другого.
+    """
+    if "then_board" not in scenario or first.best is None:
+        return None
+
+    taken = first.best.employee["full_name"]
+    employees = mark_busy(employees, [taken])
+    if first.best.route.vehicle is not None:
+        # Машина уехала с исполнителем: второму её предлагать нельзя.
+        reserved = first.best.route.vehicle["id"]
+        vehicles = [vehicle for vehicle in vehicles if vehicle["id"] != reserved]
+
+    board = aircraft[scenario["then_board"]]
+    payload = {
+        "aircraft_type": board.aircraft_type,
+        "defect_code": scenario["then_defect"],
+        "stand_node_id": board.stand_node_id,
+    }
+    return {
+        "board": board.board_number,
+        "stand_ref": graph.node(board.stand_node_id)["ref"],
+        "busy": taken,
+        "result": suggest(graph, payload, employees, scenario["shift"], vehicles=vehicles),
     }
 
 
 def system_cell(row):
     """Колонка «решение системы»."""
-    best = row["result"].best
+    text = decision_text(row["result"])
+    if row.get("follow") is None:
+        return text
+
+    # Сценарий с двумя вызовами подряд: показываем оба решения, иначе
+    # непонятно, кого система выбрала на второй вызов и почему другого.
+    return (
+        f"1-й вызов: {text}<br>2-й вызов ({row['follow']['board']}): "
+        f"{decision_text(row['follow']['result'])}"
+    )
+
+
+def decision_text(result):
+    """Кого выбрала система в одном подборе."""
+    best = result.best
     if best is None:
         return "— (нет кандидатов)"
 

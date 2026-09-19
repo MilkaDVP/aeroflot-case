@@ -412,6 +412,46 @@
   font-weight: 600;
 }
 
+/* Инструменты имитации — сверху слева: снизу слева легенда, снизу справа
+   кнопки масштаба, сверху справа переключатель подложки. Это единственный
+   свободный угол, и кнопка ни на что не наезжает. */
+.map-tools {
+  position: absolute;
+  left: var(--gap);
+  top: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.map-tools button {
+  padding: 7px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Включённый режим виден издалека: пока он активен, клик по карте
+   означает не выбор стоянки, а перестановку человека. */
+.map-tools button.active {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.map-tools-hint {
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .map-controls {
   position: absolute;
   right: var(--gap);

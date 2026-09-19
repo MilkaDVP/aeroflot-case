@@ -16,6 +16,8 @@ const state = {
   editing: null,
   // Граф аэропорта сессии — нужен формам как список мест.
   graph: null,
+  // Карточка, открытая на правку; null — форма работает на регистрацию.
+  editingEmployee: null,
 };
 
 let editorMap = null;
@@ -119,6 +121,7 @@ function bindEvents() {
   el("import-form").addEventListener("submit", onImportSubmit);
   el("create-form").addEventListener("submit", onCreateSubmit);
   el("employee-form").addEventListener("submit", onEmployeeSubmit);
+  el("employee-cancel").addEventListener("click", cancelEmployeeEdit);
   el("vehicle-form").addEventListener("submit", onVehicleSubmit);
   el("aircraft-form").addEventListener("submit", onAircraftSubmit);
 
@@ -532,8 +535,92 @@ function renderEmployees(employees) {
         ${escapeHtml(statusTitle(employee.status))}
       </div>
     `;
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "Изменить";
+    edit.addEventListener("click", () => startEmployeeEdit(employee));
+    actions.append(edit);
+    row.append(actions);
+
     container.append(row);
   }
+}
+
+/**
+ * Правка карточки сотрудника в той же форме, что и регистрация.
+ *
+ * Отдельная форма редактирования была бы вторым местом с теми же полями
+ * и теми же ошибками. Логин и пароль при правке скрыты: учётная запись
+ * заводится один раз вместе с карточкой.
+ */
+function startEmployeeEdit(employee) {
+  state.editingEmployee = employee;
+  const mark = employee.qualifications[0] || null;
+
+  el("emp-name").value = employee.full_name;
+  el("emp-shift").value = employee.shift;
+  if (mark) {
+    el("emp-mark").value = mark.category;
+    el("emp-types").value = mark.aircraft_types.join(", ");
+    el("emp-valid").value = mark.valid_until;
+  }
+  el("emp-on-shift").checked = employee.status !== "offline";
+  el("emp-place").value = nearestPlaceId(employee) || el("emp-place").value;
+
+  el("employee-form-title").textContent = `Изменить: ${employee.full_name}`;
+  el("employee-submit").textContent = "Сохранить изменения";
+  el("employee-cancel").hidden = false;
+  el("employee-login-row").hidden = true;
+  // Занятого сотрудника нельзя «снять со смены» правкой карточки: у него
+  // открытый вызов, и освобождать его должен диспетчер снятием вызова.
+  el("emp-on-shift").disabled = isBusyStatus(employee.status);
+  setNote("employee-note", editHint(employee), "");
+}
+
+function editHint(employee) {
+  if (isBusyStatus(employee.status)) {
+    return "Сотрудник занят на вызове: снять его со смены здесь нельзя";
+  }
+  return "Меняются квалификация, смена, место и присутствие на смене";
+}
+
+function isBusyStatus(status) {
+  return ["assigned", "en_route", "busy"].includes(status);
+}
+
+/** Точка графа, в которой сейчас стоит сотрудник, — по совпадению координат. */
+function nearestPlaceId(employee) {
+  if (state.graph === null || employee.lat === null) {
+    return null;
+  }
+  let best = null;
+  let bestDistance = Infinity;
+  for (const node of state.graph.nodes || []) {
+    if (node.type !== "tech_center" && node.type !== "stand") {
+      continue;
+    }
+    const distance =
+      Math.abs(node.lat - employee.lat) + Math.abs(node.lon - employee.lon);
+    if (distance < bestDistance) {
+      best = node.id;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function cancelEmployeeEdit() {
+  state.editingEmployee = null;
+  el("employee-form").reset();
+  el("employee-form-title").textContent = "Зарегистрировать сотрудника";
+  el("employee-submit").textContent = "Зарегистрировать";
+  el("employee-cancel").hidden = true;
+  el("employee-login-row").hidden = false;
+  el("emp-on-shift").disabled = false;
+  el("employee-note").hidden = true;
 }
 
 function statusTitle(status) {
@@ -545,6 +632,34 @@ function statusTitle(status) {
     offline: "не на смене",
   };
   return titles[status] || status;
+}
+
+/**
+ * Сохранение правок карточки.
+ *
+ * Координаты идут отдельной ручкой — той же, что шлёт телефон инженера:
+ * место сотрудника меняется одним способом, кто бы его ни менял.
+ * Статус занятого не трогаем: его освобождает снятие вызова, а не правка
+ * карточки, иначе вызов остался бы без исполнителя.
+ */
+async function saveEmployeeEdit(payload) {
+  const employee = state.editingEmployee;
+  const changes = {
+    full_name: payload.full_name,
+    shift: payload.shift,
+    qualifications: payload.qualifications,
+  };
+  if (!isBusyStatus(employee.status)) {
+    changes.status = payload.on_shift ? "free" : "offline";
+  }
+
+  const updated = await Api.updateEmployee(employee.id, changes);
+  if (employee.lat !== payload.lat || employee.lon !== payload.lon) {
+    await Api.sendLocation(employee.id, payload.lat, payload.lon);
+  }
+
+  cancelEmployeeEdit();
+  setNote("employee-note", `${updated.full_name}: изменения сохранены`, "is-ok");
 }
 
 async function onEmployeeSubmit(event) {
@@ -586,14 +701,18 @@ async function onEmployeeSubmit(event) {
 
   el("employee-submit").disabled = true;
   try {
-    const employee = await Api.createEmployee(payload);
-    const access = payload.login
-      ? ` Вход в приложение инженера: ${payload.login}.`
-      : "";
-    setNote("employee-note", `${employee.full_name} зарегистрирован.${access}`, "is-ok");
-    el("emp-name").value = "";
-    el("emp-login").value = "";
-    el("emp-password").value = "";
+    if (state.editingEmployee !== null) {
+      await saveEmployeeEdit(payload);
+    } else {
+      const employee = await Api.createEmployee(payload);
+      const access = payload.login
+        ? ` Вход в приложение инженера: ${payload.login}.`
+        : "";
+      setNote("employee-note", `${employee.full_name} зарегистрирован.${access}`, "is-ok");
+      el("emp-name").value = "";
+      el("emp-login").value = "";
+      el("emp-password").value = "";
+    }
     await loadEmployees();
   } catch (error) {
     setNote("employee-note", error.detail, "is-error");

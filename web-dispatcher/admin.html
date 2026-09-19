@@ -168,7 +168,7 @@
         </div>
 
         <div class="admin-card">
-          <h2>Зарегистрировать сотрудника</h2>
+          <h2 id="employee-form-title">Зарегистрировать сотрудника</h2>
           <p class="muted small">
             Квалификация определяет, на какие работы и типы ВС его можно
             назначить. Отметка с истёкшим сроком в подбор не проходит.
@@ -211,16 +211,21 @@
               сразу на смене — участвует в подборе без входа в приложение
             </label>
 
-            <label for="emp-login">Логин для приложения инженера (необязательно)</label>
-            <div class="admin-row">
-              <input id="emp-login" placeholder="логин" autocomplete="off">
-              <input id="emp-password" type="password" placeholder="пароль"
-                     autocomplete="new-password">
+            <!-- При правке карточки учётная запись не трогается: она
+                 заводится один раз вместе с сотрудником. -->
+            <div id="employee-login-row">
+              <label for="emp-login">Логин для приложения инженера (необязательно)</label>
+              <div class="admin-row">
+                <input id="emp-login" placeholder="логин" autocomplete="off">
+                <input id="emp-password" type="password" placeholder="пароль"
+                       autocomplete="new-password">
+              </div>
             </div>
 
             <button type="submit" class="primary" id="employee-submit">
               Зарегистрировать
             </button>
+            <button type="button" id="employee-cancel" hidden>Отмена</button>
           </form>
           <div class="admin-note" id="employee-note" hidden></div>
         </div>

@@ -102,6 +102,36 @@ class TestScenarioReport(ApiTestCase):
         self.assertGreater(best.minutes, REGULATION_ARRIVAL_LIMIT_MIN)
         self.assertFalse(row["result"].within_regulation)
 
+    def test_second_call_goes_to_another_engineer(self):
+        """
+        Сценарий «несколько вызовов подряд» — внештатная ситуация из §10.
+
+        Пока исполнитель первого вызова едет, приходит второй. Система
+        обязана предложить другого: занятый уже в пути, и его машина
+        уехала вместе с ним.
+        """
+        row = self.rows["Несколько вызовов подряд"]
+        first = row["result"].best
+        follow = row["follow"]
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(follow, "второй вызов должен быть рассчитан")
+
+        second = follow["result"].best
+        self.assertIsNotNone(second, "на второй вызов тоже нашёлся исполнитель")
+        self.assertNotEqual(second.employee["id"], first.employee["id"])
+
+        # Занятый не может оказаться среди кандидатов второго подбора.
+        candidate_ids = {item.employee["id"] for item in follow["result"].candidates}
+        self.assertNotIn(first.employee["id"], candidate_ids)
+
+        # И его машина второму не предлагается.
+        if first.route.vehicle is not None:
+            taken = first.route.vehicle["call_sign"]
+            second_vehicle = second.route.vehicle
+            if second_vehicle is not None:
+                self.assertNotEqual(second_vehicle["call_sign"], taken)
+
     def test_no_candidates_is_explained(self):
         """Сценарий 6: без допуска система молчать не должна."""
         row = self.rows["Внештатная: допуска нет ни у кого"]

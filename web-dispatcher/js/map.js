@@ -69,6 +69,12 @@ class AirportMap {
     // Сколько экранных пикселей приходится на метр местности при зуме 1.
     this.basePxPerMetre = 1;
     this.onStandClick = null;
+    // Клик по значку сотрудника и клик по свободному месту карты.
+    // Нужны для имитации координат: жюри переставляет сотрудника мышью
+    // и сразу видит, как меняется подбор.
+    this.onEmployeeClick = null;
+    this.onGroundClick = null;
+    this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
 
     this.tiles = null;
     // Догрузка тайлов откладывается до конца жеста: во время
@@ -417,11 +423,41 @@ class AirportMap {
       shape.setAttribute("r", 5);
       shape.setAttribute("class", `employee ${classifier(employee)}`);
       marker.append(shape, title(employeeTooltip(employee)));
+      marker.classList.add("employee-marker");
+      // По этому признаку метку находят обработчики и автопроверки:
+      // искать человека по подписи ненадёжно.
+      marker.dataset.employeeId = employee.id;
+      marker.addEventListener("click", (event) => {
+        if (this.onEmployeeClick) {
+          // Иначе тот же клик дойдёт до карты и будет понят как
+          // «поставить сюда точку».
+          event.stopPropagation();
+          this.onEmployeeClick(employee);
+        }
+      });
 
       layer.append(marker);
     }
 
     this.updateMarkerScale();
+  }
+
+  /**
+   * Клик по карте мимо значков — в географических координатах.
+   *
+   * Клики по стоянкам и сотрудникам обрабатываются их собственными
+   * обработчиками и сюда не доходят.
+   */
+  handleGroundClick(event) {
+    if (!this.onGroundClick || !this.graph) {
+      return;
+    }
+    if (event.target.closest(".marker")) {
+      return;
+    }
+
+    const point = this.toMapCoords(event.clientX, event.clientY);
+    this.onGroundClick(this.unprojectXY(point.x, point.y));
   }
 
   /**
