@@ -23,13 +23,16 @@
 
 from datetime import timedelta
 
+from algorithm.geo import haversine_m
 from algorithm.routing import Route, route_from_point, shortest_path
 from algorithm.transport import plan_for
 from clock import utc_now
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
+    LOCATION_GPS,
     MODE_VEHICLE,
     MODE_WALK,
+    PICKUP_RADIUS_M,
     STATUS_ASSIGNED,
     STATUS_FREE,
     STATUSES_BUSY,
@@ -378,3 +381,45 @@ def parking_point(employee, graph, stand_node_id):
         if node is not None:
             return node["lat"], node["lon"]
     return employee.lat, employee.lon
+
+
+def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
+    """
+    Новые координаты сотрудника.
+
+    Время измерения для GPS — момент приёма минус возраст фиксации, который
+    сообщил телефон: повторная отправка старой точки при живой связи не должна
+    делать её свежей. Точку, поставленную вручную, считаем измеренной сейчас.
+    Отдельно запоминается, когда телефон выходил на связь, — это позволяет
+    отличить «потерян GPS» от «пропала связь».
+    """
+    now = now or utc_now()
+    age = timedelta(seconds=fix_age_s) if source == LOCATION_GPS and fix_age_s else timedelta(0)
+
+    employee.lat = lat
+    employee.lon = lon
+    employee.location_source = source
+    employee.location_at = now - age
+    employee.seen_at = now
+    employee.updated_at = now
+
+    pick_up_if_near(employee)
+
+
+def pick_up_if_near(employee):
+    """
+    Инженер дошёл до зарезервированной машины — значит, сел в неё.
+
+    Раньше машина числилась «ждущей» до самого прибытия к борту. Пока
+    по ней ничего не считалось, это было безвредно, но живой прогноз
+    прибытия заставлял бы человека, уже едущего на машине, мысленно
+    возвращаться к месту её стоянки и пугал бы диспетчера ложным
+    «не успевает».
+    """
+    vehicle = employee.vehicle
+    if vehicle is None or vehicle.status != VEHICLE_RESERVED:
+        return
+    if None in (employee.lat, employee.lon, vehicle.lat, vehicle.lon):
+        return
+    if haversine_m(employee.lat, employee.lon, vehicle.lat, vehicle.lon) <= PICKUP_RADIUS_M:
+        vehicle.status = VEHICLE_IN_USE

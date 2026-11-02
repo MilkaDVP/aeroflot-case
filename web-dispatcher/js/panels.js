@@ -59,6 +59,10 @@ function renderCalls(container, calls, selectedId, onSelect) {
     const item = document.createElement("div");
     item.className = "call";
     item.classList.add(callStateClass(call));
+    const controlCls = controlClass(call);
+    if (controlCls) {
+      item.classList.add(controlCls);
+    }
     if (call.id === selectedId) {
       item.classList.add("selected");
     }
@@ -78,6 +82,7 @@ function renderCalls(container, calls, selectedId, onSelect) {
         <span class="mark">${escapeHtml(call.required_mark)}</span>
         <span class="num">${formatClock(call.created_at)}</span>
         <span>${escapeHtml(statusTitle(call.status))}</span>
+        ${controlBadge(call)}
       </div>
       ${assignee}
     `;
@@ -263,6 +268,51 @@ function buildBusyRow(busy, queueOptions) {
 }
 
 /** Класс карточки вызова: новый, в очереди или назначенный. */
+/* --- Контроль регламента --- */
+
+// Короткие подписи уровней контроля для отметки на вызове.
+const CONTROL_LABELS = {
+  ok: "успевает",
+  warn: "впритык",
+  late: "не успевает",
+  overdue: "срок истёк",
+  unassigned: "без исполнителя",
+  no_signal: "нет сигнала",
+  pending: "",
+  arrived: "",
+  closed: "",
+};
+
+/** Цвет вызова в списке по оценке сервера: красный — тревога, жёлтый — впритык. */
+function controlClass(call) {
+  if (!call.control) {
+    return "";
+  }
+  if (call.control.alert) {
+    return "is-alert";
+  }
+  return call.control.level === "warn" ? "is-warn" : "";
+}
+
+/**
+ * Отметка на вызове: состояние и минуты до контрольного срока.
+ *
+ * Минуты показываются у каждого незавершённого вызова, а не только у
+ * тревожных: «ост. 11 мин» у нового вызова — то, что подгоняет назначение.
+ */
+function controlBadge(call) {
+  const control = call.control;
+  if (!control || control.level === "arrived" || control.level === "closed") {
+    return "";
+  }
+  const label = CONTROL_LABELS[control.level];
+  return (
+    `<span class="control-badge level-${escapeHtml(control.level)}">` +
+    (label ? `${escapeHtml(label)} · ` : "") +
+    `<span class="num">${escapeHtml(minutesLeftText(control))}</span></span>`
+  );
+}
+
 function callStateClass(call) {
   if (call.status === "queued") {
     return "is-queued";
@@ -321,17 +371,17 @@ function sectionTitle(text) {
 function renderAssignment(container, call, onUnassign) {
   container.replaceChildren();
 
-  const deadline = new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
-  const verdict = assignmentVerdict(call, deadline);
+  const control = call.control;
+  const deadlineIso = control ? control.deadline_at
+    : new Date(new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000).toISOString();
+  const verdict = assignmentVerdict(call, control);
+  // Главная цифра — живой прогноз прибытия, а не расчёт на момент
+  // назначения: план мог устареть, пока инженер ехал.
+  const forecast = control && control.forecast_at ? control.forecast_at : call.eta_at;
 
   const headline = call.status === "arrived"
     ? `<span class="eta-value is-ok">✓</span>`
-    : `<span class="eta-value ${verdict.cls}">${formatClock(call.eta_at)}</span>`;
-
-  const timing = call.status === "arrived"
-    ? `на месте с <span class="num">${formatClock(call.eta_at)}</span>`
-    : `прибытие ~<span class="num">${formatClock(call.eta_at)}</span>` +
-      ` · срок <span class="num">${formatClock(new Date(deadline).toISOString())}</span>`;
+    : `<span class="eta-value ${verdict.cls}">${formatClock(forecast)}</span>`;
 
   const block = document.createElement("div");
   block.className = "eta-block";
@@ -342,12 +392,21 @@ function renderAssignment(container, call, onUnassign) {
       call.defect_ata ? ` · ATA ${escapeHtml(call.defect_ata)}` : ""
     }</div>
     ${descriptionLine(call)}
-    <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${timing}${
+    <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${assignmentTiming(
+      call,
+      forecast,
+      deadlineIso
+    )}${
       call.vehicle_call_sign
         ? ` · <span class="num">${escapeHtml(call.vehicle_call_sign)}</span>`
         : ""
     }</div>
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
+    ${
+      control && control.advice
+        ? `<div class="assignment-advice">${escapeHtml(control.advice)}</div>`
+        : ""
+    }
     ${
       call.override_reason
         ? `<div class="assignment-reason">Причина решения: ${escapeHtml(call.override_reason)}</div>`
@@ -389,14 +448,51 @@ function unassignedNote(call) {
   );
 }
 
-/** Успевает ли исполнитель к контрольному сроку — цвет и формулировка. */
-function assignmentVerdict(call, deadline) {
+/**
+ * Строка времени в карточке: прогноз, план и контрольный срок.
+ *
+ * План показывается, только если прогноз от него заметно ушёл: тогда
+ * диспетчеру важно видеть, что инженер отстаёт от расчёта при назначении.
+ */
+function assignmentTiming(call, forecast, deadlineIso) {
+  if (call.status === "arrived") {
+    return `на месте с <span class="num">${formatClock(call.eta_at)}</span>`;
+  }
+  let text = `прогноз ~<span class="num">${formatClock(forecast)}</span>`;
+  const delay = call.control ? call.control.delay_min : null;
+  if (delay !== null && delay !== undefined && Math.abs(delay) >= 1 && call.eta_at) {
+    text += ` · план ~<span class="num">${formatClock(call.eta_at)}</span>`;
+  }
+  return text + ` · срок <span class="num">${formatClock(deadlineIso)}</span>`;
+}
+
+/**
+ * Цвет и формулировка оценки.
+ *
+ * Формулировку даёт сервер: он пересчитывает прогноз по текущим координатам
+ * исполнителя и знает, можно ли им верить. Без оценки сервера — запасной
+ * расчёт по времени, записанному при назначении.
+ */
+function assignmentVerdict(call, control) {
+  if (control) {
+    const classes = {
+      ok: "is-ok",
+      arrived: "is-ok",
+      warn: "is-warn",
+      late: "is-danger",
+      overdue: "is-danger",
+      no_signal: "is-danger",
+      unassigned: "is-danger",
+    };
+    return { cls: classes[control.level] || "", text: control.reason };
+  }
   if (call.status === "arrived") {
     return { cls: "is-ok", text: "Исполнитель на месте" };
   }
   if (!call.eta_at) {
     return { cls: "", text: "Время прибытия не рассчитано" };
   }
+  const deadline = new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
   if (new Date(call.eta_at).getTime() <= deadline) {
     return { cls: "is-ok", text: "Успевает к контрольному сроку" };
   }

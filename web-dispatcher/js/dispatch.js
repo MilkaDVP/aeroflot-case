@@ -64,6 +64,7 @@ async function start() {
     airportMap.render(state.graph);
     applyBasemap(savedBasemap());
 
+    initAlerts();
     await refresh();
     startClock();
     pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
@@ -97,6 +98,14 @@ async function refresh() {
     }
 
     renderAll();
+
+    // Прогноз по назначенному вызову меняется вместе с координатами
+    // исполнителя, поэтому его карточка обновляется на каждом опросе.
+    // Панель подбора для неназначенного вызова не трогаем: в ней диспетчер
+    // мог выбрать другого кандидата, и опрос не должен сбрасывать его выбор.
+    if (state.selectedCall && !isAssignable(state.selectedCall)) {
+      renderAssignment(elements.suggestBody, state.selectedCall, unassignSelected);
+    }
     elements.connStatus.textContent = `обновлено ${new Date().toLocaleTimeString("ru-RU")}`;
   } catch (error) {
     elements.connStatus.textContent = error.detail || "нет связи с сервером";
@@ -105,6 +114,7 @@ async function refresh() {
 
 function renderAll() {
   elements.callsCount.textContent = state.calls.length;
+  renderAlerts(state.calls, selectCall);
   renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
   renderShiftStats(state.employees, state.vehicles);
 
@@ -121,6 +131,26 @@ function renderAll() {
  * становятся только те, кто действительно может ехать на этот борт.
  */
 function employeeClass(employee) {
+  const base = employeeStatusClass(employee);
+  return isPositionStale(employee) ? `${base} is-stale` : base;
+}
+
+/**
+ * Устарели ли GPS-координаты сотрудника.
+ *
+ * Только для настоящего GPS: точку, поставленную вручную, не обновляют
+ * намеренно. Устаревшая метка бледнеет — диспетчер видит, что человек
+ * уже не там, где точка, ещё до того, как сработает тревога по вызову.
+ */
+function isPositionStale(employee) {
+  if (employee.location_source !== "gps" || !employee.location_at) {
+    return false;
+  }
+  const ageS = (Date.now() - new Date(employee.location_at).getTime()) / 1000;
+  return ageS > CONFIG.positionStaleS;
+}
+
+function employeeStatusClass(employee) {
   if (employee.status === "offline") {
     return "is-offline";
   }

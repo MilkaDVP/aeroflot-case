@@ -13,6 +13,30 @@ class CallCreateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=500)
 
 
+class CallControl(BaseModel):
+    """
+    Контроль регламента по вызову на момент ответа.
+
+    Прогноз прибытия пересчитывается от текущих координат исполнителя при
+    каждом запросе. alert — красное уведомление диспетчеру: срок будет
+    сорван, уже сорван, исполнителя нет или его координатам нельзя верить.
+    """
+
+    level: str = Field(
+        description="ok, warn, late, overdue, unassigned, no_signal, pending, arrived, closed"
+    )
+    alert: bool
+    reason: str
+    advice: str | None = None
+    deadline_at: str
+    minutes_left: float
+    forecast_at: str | None = None
+    margin_min: float | None = None
+    # Отставание прогноза от плана, записанного при назначении.
+    delay_min: float | None = None
+    position_age_s: int | None = None
+
+
 class CallResponse(BaseModel):
     """Вызов в списке активных и в карточке."""
 
@@ -55,6 +79,7 @@ class CallResponse(BaseModel):
     previous_employee_name: str | None = None
     unassign_reason: str | None = None
     unassigned_at: str | None = None
+    control: CallControl | None = None
 
 
 class LegSchema(BaseModel):

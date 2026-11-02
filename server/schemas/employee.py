@@ -28,6 +28,10 @@ class EmployeeResponse(BaseModel):
     speed_kmh: float | None
     busy_until: str | None
     updated_at: str
+    # Свежесть координат: карта показывает устаревшую точку иначе, чем живую.
+    location_at: str | None = None
+    location_source: str | None = None
+    seen_at: str | None = None
 
 
 class EmployeeCreateRequest(BaseModel):
@@ -68,6 +72,13 @@ class LocationRequest(BaseModel):
 
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
+    # gps — приёмник телефона, simulation — имитация в приложении,
+    # manual — перестановка на карте диспетчером или администратором.
+    source: str = Field(default="manual", description="gps, simulation или manual")
+    # Сколько секунд назад телефон получил эту фиксацию. Передаётся возраст,
+    # а не время: часы телефона могут расходиться с сервером на минуты,
+    # а разность двух моментов на одном устройстве от этого не зависит.
+    fix_age_s: float | None = Field(default=None, ge=0, le=86400)
 
 
 class ShiftRequest(BaseModel):

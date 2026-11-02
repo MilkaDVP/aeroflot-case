@@ -560,3 +560,20 @@ button:disabled { opacity: 0.5; }
 
 .toast[hidden] { display: none; }
 .toast.is-alert { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+
+/* Прогноз сервера под обратным отсчётом: успеваете ли вы оттуда, где вы сейчас. */
+.deadline-forecast {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+.deadline-forecast.is-alert {
+  color: #fff;
+  background: var(--danger);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+
+.deadline-forecast[hidden] { display: none; }

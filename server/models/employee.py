@@ -41,6 +41,15 @@ class Employee(Base):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Когда координаты измерены, когда телефон последний раз выходил на связь
+    # и откуда точка взялась. Это три разных вопроса: GPS может потерять
+    # сигнал при живой связи, связь — пропасть при работающем GPS, а точку,
+    # поставленную вручную, не обновляют намеренно. Прогноз прибытия
+    # доверяет координатам только с учётом всех трёх.
+    location_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    location_source: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # Индивидуальная скорость ходьбы. None — нормативная скорость пешехода
     # из constants.py. Скорость машины — свойство машины, а не человека.
     speed_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)

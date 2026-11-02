@@ -17,6 +17,9 @@
         <span>Смена <b id="ctx-shift">—</b></span>
       </div>
       <div class="header-spacer"></div>
+      <!-- Тревога по регламенту видна, даже когда открыт другой вызов -->
+      <button type="button" class="alert-pill" id="alert-pill" hidden></button>
+      <button type="button" class="sound-toggle" id="sound-toggle"></button>
       <span class="clock" id="clock">--:--:--</span>
       <span class="muted" id="ctx-user">—</span>
       <button id="logout">Выход</button>
@@ -28,6 +31,7 @@
         <span>Активные вызовы</span>
         <span class="num" id="calls-count">0</span>
       </div>
+      <div class="alert-box" id="alert-box" hidden></div>
       <div class="panel-body" id="calls-list">
         <div class="empty">Загрузка…</div>
       </div>
@@ -129,6 +133,7 @@
   <script src="js/tiles.js?v=__BUILD__"></script>
   <script src="js/map.js?v=__BUILD__"></script>
   <script src="js/panels.js?v=__BUILD__"></script>
+  <script src="js/alerts.js?v=__BUILD__"></script>
   <script src="js/callform.js?v=__BUILD__"></script>
   <script src="js/dispatch.js?v=__BUILD__"></script>
 </body>

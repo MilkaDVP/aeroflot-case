@@ -198,7 +198,8 @@
 .call-meta {
   margin-top: var(--gap-xs);
   display: flex;
-  gap: var(--gap-sm);
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-sm);
   align-items: center;
   font-size: 11px;
   color: var(--text-muted);
@@ -960,4 +961,174 @@
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* --- Контроль регламента: тревоги --- */
+
+.eta-message.is-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.eta-value.is-warn {
+  color: var(--warn);
+}
+
+/* Счётчик тревог в шапке: виден, даже когда открыт другой вызов. */
+.alert-pill {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+  padding: 4px 12px;
+  animation: alert-pulse 1.4s ease-in-out infinite;
+}
+
+.alert-pill[hidden] {
+  display: none;
+}
+
+.sound-toggle {
+  font-size: 11px;
+  padding: 4px 10px;
+  color: var(--text-muted);
+}
+
+.sound-toggle.is-off {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+/* Пульсирует рамка, а не фон: тревога должна бросаться в глаза,
+   но текст причины должен оставаться читаемым. */
+@keyframes alert-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(242, 86, 77, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(242, 86, 77, 0);
+  }
+}
+
+.alert-box {
+  flex-shrink: 0;
+  max-height: 46%;
+  overflow-y: auto;
+  padding: var(--gap-sm);
+  border-bottom: 1px solid var(--danger);
+  background: var(--danger-soft);
+}
+
+.alert-box[hidden] {
+  display: none;
+}
+
+.alert-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--danger);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  margin-bottom: var(--gap-xs);
+  animation: alert-pulse 1.4s ease-in-out infinite;
+}
+
+.alert-item:last-child {
+  margin-bottom: 0;
+}
+
+.alert-item-top,
+.alert-item-board {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  white-space: nowrap;
+}
+
+.alert-item-board {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.alert-kind {
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.alert-left {
+  margin-left: auto;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.alert-reason {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.alert-advice,
+.assignment-advice {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.assignment-advice {
+  margin-top: var(--gap-sm);
+  text-align: center;
+}
+
+/* Вызов в списке по оценке сервера. */
+.call.is-alert {
+  border-color: var(--danger);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.call.is-warn {
+  border-left-color: var(--warn);
+}
+
+.control-badge {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+}
+
+.control-badge.level-ok {
+  color: var(--ok);
+  border-color: rgba(53, 196, 106, 0.4);
+}
+
+.control-badge.level-warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.control-badge.level-late,
+.control-badge.level-overdue,
+.control-badge.level-unassigned,
+.control-badge.level-no_signal {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Метка сотрудника, чьи GPS-координаты устарели: точка на карте уже
+   не там, где человек, — это должно быть видно без наведения мыши. */
+.employee.is-stale {
+  fill-opacity: 0.35;
+  stroke: var(--danger);
+  stroke-dasharray: 2 2;
 }

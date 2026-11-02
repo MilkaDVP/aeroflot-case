@@ -25,6 +25,7 @@ let locator = null;
 let routeMap = null;
 let pollTimer = null;
 let countdownTimer = null;
+let heartbeatTimer = null;
 
 // Действие инженера: что показывает кнопка и что уходит на сервер.
 // Порядок в жизненном цикле вызова: назначен -> принял -> прибыл -> завершил.
@@ -45,6 +46,7 @@ async function start() {
   routeMap = new RouteMap(el("route-map"), onMapTap);
   locator = new Locator(onPosition, onGeoError);
   bindEvents();
+  watchMapSize();
 
   if (!Session.token) {
     showScreen("login");
@@ -70,6 +72,28 @@ async function start() {
  * оно и делалось как PWA. Частая причина отказа — открытие по http
  * не с localhost: браузер считает такой адрес небезопасным контекстом.
  */
+/**
+ * Перерисовка карты при изменении её размера.
+ *
+ * Карта вписывает снимок и маршрут в свой текущий размер. Но размер
+ * меняется уже после отрисовки: в карточке вызова появляются сообщение
+ * экипажа, строка про машину, плашка прогноза — и карта сжимается.
+ * Старые пропорции оставляли по краям полосы без снимка. Наблюдатель
+ * за размером закрывает это целиком, включая поворот телефона.
+ */
+function watchMapSize() {
+  if (!("ResizeObserver" in window)) {
+    return;
+  }
+  new ResizeObserver(onMapResize).observe(el("route-map"));
+}
+
+function onMapResize() {
+  if (state.user && !el("screen-work").hidden) {
+    drawRoute();
+  }
+}
+
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     state.offlineReady = false;
@@ -185,6 +209,7 @@ function enterWork() {
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
   countdownTimer = setInterval(updateCountdown, 1000);
+  heartbeatTimer = setInterval(sendHeartbeat, CONFIG.locationIntervalMs);
 }
 
 /* --- Опрос вызова --- */
@@ -273,6 +298,7 @@ function renderWork() {
 
   updateDistance();
   updateCountdown();
+  renderForecast(call.control);
 }
 
 /** Строка про машину: забрать по пути или уже едем на ней. */
@@ -341,9 +367,58 @@ function updateCountdown() {
     return;
   }
 
-  block.className = leftMin <= 3 ? "deadline is-warn" : "deadline";
+  block.className = `deadline ${countdownClass(leftMin, call.control)}`;
   value.textContent = Math.floor(leftMin);
   label.textContent = "до контрольного срока";
+}
+
+/**
+ * Цвет обратного отсчёта.
+ *
+ * Учитывается не только оставшееся время, но и прогноз сервера: зелёные
+ * «5 мин» над красным «вы опоздаете» противоречили друг другу, а на ходу
+ * человек видит прежде всего крупную цифру — и она успокаивала.
+ */
+function countdownClass(leftMin, control) {
+  const level = control ? control.level : null;
+  if (level === "late" || level === "no_signal") {
+    return "is-danger";
+  }
+  if (level === "warn" || leftMin <= 3) {
+    return "is-warn";
+  }
+  return "";
+}
+
+/**
+ * Прогноз сервера под обратным отсчётом.
+ *
+ * Обратный отсчёт говорит, сколько осталось, а прогноз — успеваете ли вы
+ * при том, где вы сейчас. Если нет, инженер должен узнать это от
+ * приложения раньше, чем по рации от диспетчера.
+ */
+function renderForecast(control) {
+  const box = el("deadline-forecast");
+  const text = forecastText(control);
+  box.hidden = !text;
+  box.textContent = text || "";
+  box.className = control && control.alert ? "deadline-forecast is-alert" : "deadline-forecast";
+}
+
+function forecastText(control) {
+  if (!control) {
+    return "";
+  }
+  if (control.level === "late" && control.margin_min !== null) {
+    return `По прогнозу вы опоздаете на ${Math.ceil(-control.margin_min)} мин. Диспетчер это видит`;
+  }
+  if (control.level === "warn" && control.margin_min !== null) {
+    return `Впритык: запас ${Math.max(0, Math.floor(control.margin_min))} мин`;
+  }
+  if (control.level === "no_signal") {
+    return "Нет сигнала GPS: диспетчер видит вашу последнюю точку";
+  }
+  return "";
 }
 
 function updateDistance() {
@@ -437,12 +512,42 @@ function onPosition(position) {
     renderIdle();
   }
 
-  const now = Date.now();
-  if (now - state.sentAt >= CONFIG.locationIntervalMs) {
-    state.sentAt = now;
-    Api.sendLocation(state.user.employee_id, position.lat, position.lon).catch(() => {
-      // Молча: связь на перроне пропадает, следующая отправка пройдёт.
-    });
+  if (Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+    sendPosition(position);
+  }
+}
+
+/**
+ * Отправка точки на сервер вместе с её источником и возрастом.
+ *
+ * По источнику сервер решает, может ли точка устареть: имитацию не
+ * обновляют намеренно, а GPS-фиксация, которой больше полутора минут, — уже
+ * повод для тревоги у диспетчера.
+ */
+function sendPosition(position) {
+  state.sentAt = Date.now();
+  const fixAgeS = Math.max(0, (Date.now() - position.measuredAt) / 1000);
+  Api.sendLocation(
+    state.user.employee_id,
+    position.lat,
+    position.lon,
+    position.source,
+    Math.round(fixAgeS)
+  ).catch(() => {
+    // Молча: связь на перроне пропадает, следующая отправка пройдёт.
+  });
+}
+
+/**
+ * Повторная отправка последней точки, даже если GPS ничего нового не дал.
+ *
+ * Стоящий на месте телефон новых фиксаций почти не получает, и без этого
+ * сервер решил бы, что телефон пропал. Возраст фиксации при повторе растёт —
+ * так сервер отличает «на связи, но GPS потерян» от «на связи и стоит».
+ */
+function sendHeartbeat() {
+  if (locator.last && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+    sendPosition(locator.last);
   }
 }
 
@@ -467,13 +572,13 @@ function onMapTap(point) {
 }
 
 function applySimulated(lat, lon) {
+  // Имитация — рабочий режим для демонстрации, поэтому координаты
+  // уходят на сервер немедленно, без ожидания интервала. Сброс — до
+  // установки точки: locator сразу передаёт её в onPosition.
+  state.sentAt = 0;
   locator.simulate(lat, lon);
   el("geo-lat").value = lat.toFixed(6);
   el("geo-lon").value = lon.toFixed(6);
-  // Имитация — рабочий режим для демонстрации, поэтому координаты
-  // уходят на сервер немедленно, без ожидания интервала.
-  state.sentAt = 0;
-  onPosition({ lat, lon, accuracy: null });
 }
 
 function bindEvents() {
@@ -596,6 +701,7 @@ async function logout() {
 function stopWork() {
   clearInterval(pollTimer);
   clearInterval(countdownTimer);
+  clearInterval(heartbeatTimer);
   locator.stopGps();
 }
 

@@ -41,6 +41,7 @@ from auth.security import hash_password
 from clock import utc_now
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
+    LOCATION_MANUAL,
     SHIFT_DAY,
     SHIFT_NIGHT,
     STATUS_BUSY,
@@ -232,6 +233,10 @@ def seed_employees(db, graph, icao, engineers):
             status=status,
             lat=node["lat"],
             lon=node["lon"],
+            # Расстановка тестовых данных — ручная: телефонов у этих людей
+            # нет, и тревога «нет сигнала GPS» по ним была бы ложной.
+            location_source=LOCATION_MANUAL,
+            location_at=utc_now(),
             qualifications=[
                 {
                     "category": mark,

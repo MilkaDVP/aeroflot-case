@@ -47,7 +47,7 @@ class Locator {
     this.stopGps();
     this.watchId = navigator.geolocation.watchPosition(
       (position) => this.publish(position.coords.latitude, position.coords.longitude,
-                                 position.coords.accuracy),
+                                 position.coords.accuracy, position.timestamp),
       (error) => this.onError(describeGeoError(error)),
       GEO_OPTIONS
     );
@@ -71,11 +71,24 @@ class Locator {
   simulate(lat, lon) {
     this.stopGps();
     this.simulated = { lat, lon };
-    this.publish(lat, lon, null);
+    this.publish(lat, lon, null, Date.now());
   }
 
-  publish(lat, lon, accuracy) {
-    this.last = { lat, lon, accuracy };
+  /**
+   * Новая точка.
+   *
+   * measuredAt — момент фиксации по часам телефона. Серверу уходит не он,
+   * а возраст фиксации: часы телефона могут расходиться с сервером на
+   * минуты, а разность двух моментов на одном устройстве от этого не зависит.
+   */
+  publish(lat, lon, accuracy, measuredAt) {
+    this.last = {
+      lat,
+      lon,
+      accuracy,
+      measuredAt: measuredAt || Date.now(),
+      source: this.simulated ? "simulation" : "gps",
+    };
     this.onPosition(this.last);
   }
 }

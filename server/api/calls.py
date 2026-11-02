@@ -46,6 +46,7 @@ from services.assignment import (
     plan_route,
     unassign,
 )
+from services.deadline import assess
 from services.defects import find as find_defect
 
 router = APIRouter(prefix="/api/calls", tags=["Вызовы"])
@@ -114,8 +115,13 @@ def stand_ref_of(call):
     return node["ref"] if node else None
 
 
-def to_response(call, db=None):
-    """Модель вызова в схему ответа, с подстановкой данных борта."""
+def to_response(call, db=None, now=None):
+    """
+    Модель вызова в схему ответа, с подстановкой данных борта.
+
+    now передаётся при выдаче списка: все вызовы оцениваются на один
+    и тот же момент, иначе соседние строки расходились бы на миллисекунды.
+    """
     aircraft = call.aircraft
     assigned = call.assigned_employee
     previous = call.previous_employee
@@ -151,6 +157,7 @@ def to_response(call, db=None):
         previous_employee_name=previous.full_name if previous else None,
         unassign_reason=call.unassign_reason,
         unassigned_at=to_iso_utc(call.unassigned_at),
+        control=assess(call, now).as_dict(),
     )
 
 
@@ -278,7 +285,8 @@ def list_calls(
     # Второй ключ — идентификатор: вызовы, созданные в одну миллисекунду,
     # иначе шли бы в порядке, зависящем от разрешения системных часов.
     calls = query.order_by(Call.created_at.desc(), Call.id.desc()).all()
-    return [to_response(call, db) for call in calls]
+    now = utc_now()
+    return [to_response(call, db, now) for call in calls]
 
 
 @router.post(

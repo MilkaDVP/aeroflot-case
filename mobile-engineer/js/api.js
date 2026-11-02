@@ -129,6 +129,12 @@ const Api = {
 
   setShift: (employeeId, onShift) =>
     request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift }),
-  sendLocation: (employeeId, lat, lon) =>
-    request("POST", `/api/employees/${employeeId}/location`, { lat, lon }),
+  // source — gps или simulation, fixAgeS — сколько секунд назад точка измерена.
+  sendLocation: (employeeId, lat, lon, source, fixAgeS) =>
+    request("POST", `/api/employees/${employeeId}/location`, {
+      lat,
+      lon,
+      source,
+      fix_age_s: fixAgeS,
+    }),
 };

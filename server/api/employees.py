@@ -17,12 +17,19 @@ from auth.dependencies import (
 )
 from auth.security import hash_password
 from clock import to_iso_utc, utc_now
-from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_FREE, STATUS_OFFLINE
+from constants import (
+    LOCATION_MANUAL,
+    LOCATION_SOURCES,
+    SHIFT_DAY,
+    SHIFT_NIGHT,
+    STATUS_FREE,
+    STATUS_OFFLINE,
+)
 from database import get_db
 from models.airport import Airport
 from models.employee import Employee
 from models.user import ROLE_ADMIN, ROLE_ENGINEER, User
-from services.assignment import release_vehicle, working_call_of
+from services.assignment import record_position, release_vehicle, working_call_of
 from schemas.employee import (
     EmployeeCreateRequest,
     EmployeeResponse,
@@ -37,6 +44,7 @@ ERROR_NOT_FOUND = "Сотрудник не найден"
 ERROR_NOT_SELF = "Инженер может изменять только собственную карточку"
 ERROR_BAD_SHIFT = "Смена должна быть day или night"
 ERROR_NO_AIRPORT = "Аэропорт {icao} не заведён в системе"
+ERROR_BAD_SOURCE = "Источник координат должен быть gps, simulation или manual, а не {source}"
 ERROR_LOGIN_PAIR = "Логин и пароль задаются вместе: одного без другого недостаточно"
 ERROR_LOGIN_TAKEN = "Логин {login} уже занят"
 ERROR_LEAVE_WITH_CALL = (
@@ -61,6 +69,9 @@ def to_response(employee):
         speed_kmh=employee.speed_kmh,
         busy_until=to_iso_utc(employee.busy_until),
         updated_at=to_iso_utc(employee.updated_at),
+        location_at=to_iso_utc(employee.location_at),
+        location_source=employee.location_source,
+        seen_at=to_iso_utc(employee.seen_at),
     )
 
 
@@ -158,6 +169,10 @@ def create_employee(
         lat=payload.lat,
         lon=payload.lon,
     )
+    if payload.lat is not None and payload.lon is not None:
+        # Точку новому сотруднику ставит администратор — это ручная расстановка.
+        employee.location_source = LOCATION_MANUAL
+        employee.location_at = utc_now()
     db.add(employee)
 
     if login:
@@ -213,17 +228,23 @@ def update_location(
     db: Session = Depends(get_db),
 ):
     """
-    Приём координат от PWA инженера.
+    Приём координат: от PWA инженера или ручная перестановка на карте.
 
-    Источник координат серверу безразличен: настоящий GPS или режим
-    имитации для демонстрации — по условиям задания допустимо и то, и другое.
+    По условиям задания допустимы и настоящий GPS, и ручной ввод, но
+    серверу источник уже не безразличен: от него зависит, может ли точка
+    устареть. Прогноз прибытия по GPS-фиксации, которой больше
+    полутора минут, ненадёжен, а точку, поставленную вручную, не обновляют намеренно.
     """
     employee = load_employee(db, context, employee_id)
     ensure_own_card(context, employee)
 
-    employee.lat = payload.lat
-    employee.lon = payload.lon
-    employee.updated_at = utc_now()
+    if payload.source not in LOCATION_SOURCES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ERROR_BAD_SOURCE.format(source=payload.source),
+        )
+
+    record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
     db.commit()
     return to_response(employee)
 

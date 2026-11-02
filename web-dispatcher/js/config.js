@@ -31,4 +31,7 @@ const CONFIG = {
   // не влияют, кроме цвета.
   regulationLimitMin: 15,
   regulationWarnMin: 12,
+  // Возраст GPS-фиксации, после которого метка на карте бледнеет.
+  // Тот же порог, что у сервера (POSITION_STALE_S), — только для вида.
+  positionStaleS: 90,
 };
