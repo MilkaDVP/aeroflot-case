@@ -242,7 +242,9 @@ def list_calls(
     if not include_closed:
         query = query.filter(Call.status.in_(ACTIVE_CALL_STATUSES))
 
-    calls = query.order_by(Call.created_at.desc()).all()
+    # Второй ключ — идентификатор: вызовы, созданные в одну миллисекунду,
+    # иначе шли бы в порядке, зависящем от разрешения системных часов.
+    calls = query.order_by(Call.created_at.desc(), Call.id.desc()).all()
     return [to_response(call, db) for call in calls]
 
 

@@ -101,9 +101,16 @@ class TestVehicleAdmin(ApiTestCase):
         self.assertEqual(response.status_code, 404, response.text)
 
     def open_call_id(self):
-        """Идентификатор открытого вызова из тестовых данных."""
+        """
+        Открытый вызов, на который в тестовых данных есть исполнители.
+
+        Вызов выбирается по борту, а не «первый в списке». Второй открытый
+        вызов (A330) — намеренный сценарий «допуска нет ни у кого», и оба
+        создаются в одной транзакции: какой окажется первым, зависело от
+        разрешения системных часов. На Windows тест проходил, на macOS падал.
+        """
         response = self.client.get("/api/calls", headers=auth_header(self.dispatcher))
         for call in response.json():
-            if call["status"] in ("new", "suggested"):
+            if call["status"] in ("new", "suggested") and call["board_number"] == "VP-BZQ":
                 return call["id"]
-        self.fail("в тестовых данных нет открытого вызова")
+        self.fail("в тестовых данных нет открытого вызова на VP-BZQ")
