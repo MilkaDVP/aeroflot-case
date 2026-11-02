@@ -91,15 +91,25 @@ def aircraft_group(aircraft_type):
 
 def required_mark(defect_code, aircraft_type):
     """
-    Какая отметка нужна для устранения дефекта на этом типе ВС.
+    Какая отметка нужна для устранения встроенного дефекта на этом типе ВС.
+
+    Только для встроенных типов из constants.py — ими пользуются тестовые
+    данные и отчёт по сценариям. Типы, заведённые диспетчерами, живут
+    в базе, и для них отметка считается по категории через
+    required_mark_for_category.
+    """
+    if defect_code not in DEFECT_TYPES:
+        raise ValueError(f"код дефекта {defect_code!r} не описан в справочнике")
+    return required_mark_for_category(DEFECT_TYPES[defect_code]["category"], aircraft_type)
+
+
+def required_mark_for_category(family, aircraft_type):
+    """
+    Отметка по семейству и типу ВС.
 
     Складывается из двух измерений: вид работ даёт семейство (A / B1 / B2),
     тип ВС даёт подкатегорию. Для B2 и C подкатегории нет.
     """
-    if defect_code not in DEFECT_TYPES:
-        raise ValueError(f"код дефекта {defect_code!r} не описан в справочнике")
-
-    family = DEFECT_TYPES[defect_code]["category"]
     if family in SPLIT_BY_AIRCRAFT_GROUP:
         return Mark(family, aircraft_group(aircraft_type))
     return Mark(family, None)

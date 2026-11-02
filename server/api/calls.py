@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from algorithm.dispatch import suggest
-from algorithm.qualification import find_qualification, parse_mark, required_mark
+from algorithm.qualification import find_qualification, parse_mark, required_mark_for_category
 from auth.dependencies import (
     Context,
     check_same_airport,
@@ -46,13 +46,17 @@ from services.assignment import (
     plan_route,
     unassign,
 )
+from services.defects import find as find_defect
 
 router = APIRouter(prefix="/api/calls", tags=["Вызовы"])
 
 ERROR_CALL_NOT_FOUND = "Вызов не найден"
 ERROR_AIRCRAFT_NOT_FOUND = "Борт не найден"
 ERROR_EMPLOYEE_NOT_FOUND = "Сотрудник не найден"
-ERROR_UNKNOWN_DEFECT = "Неизвестный код дефекта: {code}"
+ERROR_UNKNOWN_DEFECT = (
+    "Тип неисправности {code} не найден в справочнике. Найдите подходящий "
+    "или заведите новый"
+)
 ERROR_BAD_STATUS = "Недопустимый статус вызова: {status}"
 ERROR_OVERRIDE_NEEDS_REASON = (
     "Назначен не тот сотрудник, которого предложила система. "
@@ -115,7 +119,7 @@ def to_response(call, db=None):
     aircraft = call.aircraft
     assigned = call.assigned_employee
     previous = call.previous_employee
-    defect = DEFECT_TYPES.get(call.defect_code, {})
+    defect = defect_summary(call)
 
     return CallResponse(
         id=call.id,
@@ -126,7 +130,10 @@ def to_response(call, db=None):
         stand_node_id=call.stand_node_id,
         stand_ref=stand_ref_of(call),
         defect_code=call.defect_code,
-        defect_name=defect.get("name", call.defect_code),
+        defect_name=defect["name"],
+        defect_ata=defect["ata"],
+        defect_category=defect["category"],
+        defect_description=call.defect_description,
         required_mark=call.required_mark,
         status=call.status,
         created_at=to_iso_utc(call.created_at),
@@ -145,6 +152,29 @@ def to_response(call, db=None):
         unassign_reason=call.unassign_reason,
         unassigned_at=to_iso_utc(call.unassigned_at),
     )
+
+
+def defect_summary(call):
+    """
+    Название, глава и категория неисправности вызова.
+
+    Тип берётся из справочника в базе. Если записи там нет (вызов старше
+    справочника, база не досоздана), выручает встроенное описание из
+    constants.py, а в крайнем случае — сам код: вызов без названия
+    неисправности лучше, чем ошибка при выводе списка вызовов.
+    """
+    if call.defect_type is not None:
+        return {
+            "name": call.defect_type.name,
+            "ata": call.defect_type.ata,
+            "category": call.defect_type.category,
+        }
+    builtin = DEFECT_TYPES.get(call.defect_code, {})
+    return {
+        "name": builtin.get("name", call.defect_code),
+        "ata": builtin.get("ata"),
+        "category": builtin.get("category"),
+    }
 
 
 def shift_employees(db, context):
@@ -191,6 +221,9 @@ def run_suggestion(db, context, call):
         "aircraft_type": aircraft.aircraft_type,
         "defect_code": call.defect_code,
         "stand_node_id": call.stand_node_id,
+        # Отметка, записанная при регистрации: для типа, заведённого
+        # диспетчером, во встроенном справочнике её не вычислить.
+        "required_mark": call.required_mark,
     }
     vehicles = [vehicle.as_algorithm_dict() for vehicle in free_vehicles(db, call.airport_icao)]
     employees, removed = candidates_for(db, context, call)
@@ -260,14 +293,18 @@ def create_call(
     db: Session = Depends(get_db),
 ):
     """
-    Регистрация вызова: борт и код дефекта.
+    Регистрация вызова: борт, тип неисправности и описание экипажа.
 
     Стоянка и требуемая отметка не передаются клиентом, а выводятся на
-    сервере: стоянка известна из карточки борта, отметка — из справочника
-    дефектов и типа ВС. Клиент не должен иметь возможности задать их сам,
-    иначе появится способ обойти проверку допуска.
+    сервере: стоянка известна из карточки борта, отметка — из категории
+    типа неисправности и типа ВС. Клиент не должен иметь возможности задать
+    их сам, иначе появится способ обойти проверку допуска.
+
+    Тип ищется в открытом справочнике. Если подходящего нет, клиент сначала
+    заводит его (POST /api/defect-types), а затем регистрирует вызов.
     """
-    if payload.defect_code not in DEFECT_TYPES:
+    defect = find_defect(db, payload.defect_code)
+    if defect is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             ERROR_UNKNOWN_DEFECT.format(code=payload.defect_code),
@@ -282,8 +319,9 @@ def create_call(
         airport_icao=aircraft.airport_icao,
         aircraft_id=aircraft.id,
         stand_node_id=aircraft.stand_node_id,
-        defect_code=payload.defect_code,
-        required_mark=str(required_mark(payload.defect_code, aircraft.aircraft_type)),
+        defect_code=defect.code,
+        defect_description=" ".join((payload.description or "").split()) or None,
+        required_mark=str(required_mark_for_category(defect.category, aircraft.aircraft_type)),
         status=CALL_NEW,
     )
     db.add(call)

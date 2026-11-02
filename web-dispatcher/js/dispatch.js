@@ -13,7 +13,6 @@ const state = {
   aircraft: [],
   calls: [],
   vehicles: [],
-  defects: [],
   selectedCall: null,
   suggestion: null,
   // Кандидат, выбранный диспетчером вручную. null — согласие с системой.
@@ -64,8 +63,6 @@ async function start() {
     state.graph = await Api.airportGraph(user.airport_icao);
     airportMap.render(state.graph);
     applyBasemap(savedBasemap());
-
-    state.defects = await Api.defectTypes();
 
     await refresh();
     startClock();
@@ -433,73 +430,23 @@ function openCallFormForStand(node) {
 }
 
 function openCallForm(preselectedAircraftId) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-
-  const options = state.aircraft
-    .map(
-      (item) =>
-        `<option value="${item.id}" ${
-          item.id === preselectedAircraftId ? "selected" : ""
-        }>${item.board_number} · ${item.aircraft_type} · стоянка ${item.stand_ref}</option>`
-    )
-    .join("");
-
-  const defects = state.defects
-    .map(
-      (item) =>
-        `<option value="${item.code}">${item.name} — ATA ${item.ata}, требуется ${item.category}</option>`
-    )
-    .join("");
-
-  backdrop.innerHTML = `
-    <div class="modal">
-      <h2>Регистрация вызова</h2>
-      <div class="modal-field">
-        <label for="form-aircraft">Воздушное судно</label>
-        <select id="form-aircraft">${options}</select>
-      </div>
-      <div class="modal-field">
-        <label for="form-defect">Характер неисправности</label>
-        <select id="form-defect">${defects}</select>
-      </div>
-      <div id="form-error" class="error" hidden></div>
-      <div class="modal-actions">
-        <button id="form-cancel">Отмена</button>
-        <button class="primary" id="form-submit">Зарегистрировать</button>
-      </div>
-    </div>
-  `;
-
-  document.body.append(backdrop);
-
-  backdrop.querySelector("#form-cancel").addEventListener("click", () => backdrop.remove());
-  backdrop.addEventListener("click", (event) => {
-    if (event.target === backdrop) {
-      backdrop.remove();
-    }
+  showCallForm({
+    aircraft: state.aircraft,
+    preselectedAircraftId,
+    onRegistered: openRegisteredCall,
   });
+}
 
-  backdrop.querySelector("#form-submit").addEventListener("click", async () => {
-    const aircraftId = Number(backdrop.querySelector("#form-aircraft").value);
-    const defectCode = backdrop.querySelector("#form-defect").value;
-    const errorBox = backdrop.querySelector("#form-error");
-
-    try {
-      const call = await Api.createCall(aircraftId, defectCode);
-      backdrop.remove();
-      await refresh();
-      // Сразу открываем подбор: диспетчер регистрирует вызов затем,
-      // чтобы немедленно кого-то отправить.
-      const created = state.calls.find((item) => item.id === call.id);
-      if (created) {
-        selectCall(created);
-      }
-    } catch (error) {
-      errorBox.hidden = false;
-      errorBox.textContent = error.detail;
-    }
-  });
+/**
+ * Сразу после регистрации открывается подбор: диспетчер регистрирует
+ * вызов затем, чтобы немедленно кого-то отправить.
+ */
+async function openRegisteredCall(call) {
+  await refresh();
+  const created = state.calls.find((item) => item.id === call.id);
+  if (created) {
+    selectCall(created);
+  }
 }
 
 /* --- Прочее --- */

@@ -24,6 +24,7 @@ from api import (
 )
 from database import SessionLocal, create_all
 from graph_registry import load_from_database, preload_all
+from services.defects import ensure_builtin_defects
 
 # Веб-диспетчер и PWA раздаются отдельными статическими сервисами, поэтому
 # обращения к API идут с другого источника. Для конкурсного стенда список
@@ -33,8 +34,17 @@ CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Подготовка при старте: таблицы, тестовые данные, графы в память."""
+    """Подготовка при старте: таблицы, справочники, тестовые данные, графы в память."""
     create_all()
+
+    # Встроенные типы неисправностей досоздаются при каждом запуске, а не
+    # только при наполнении пустой базы: в базе из Docker-тома, созданной
+    # до появления открытого справочника, его нет вовсе.
+    db = SessionLocal()
+    try:
+        ensure_builtin_defects(db)
+    finally:
+        db.close()
 
     # Наполнение базы при первом запуске. Жюри разворачивает проект одной
     # командой и сразу видит рабочую систему, а не пустые экраны.

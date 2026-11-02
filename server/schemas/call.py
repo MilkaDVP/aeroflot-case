@@ -4,10 +4,13 @@ from pydantic import BaseModel, Field
 
 
 class CallCreateRequest(BaseModel):
-    """Регистрация вызова диспетчером: борт и код дефекта."""
+    """Регистрация вызова диспетчером: борт, тип неисправности и описание."""
 
     aircraft_id: int
     defect_code: str
+    # Сообщение экипажа своими словами. Необязательно: тип неисправности
+    # уже даёт подбору всё нужное, описание — подробности для инженера.
+    description: str | None = Field(default=None, max_length=500)
 
 
 class CallResponse(BaseModel):
@@ -24,6 +27,9 @@ class CallResponse(BaseModel):
     stand_ref: str | None
     defect_code: str
     defect_name: str
+    defect_ata: str | None = None
+    defect_category: str | None = None
+    defect_description: str | None = None
     required_mark: str
     status: str
     created_at: str
@@ -171,4 +177,30 @@ class DefectTypeResponse(BaseModel):
     code: str
     name: str
     ata: str
+    ata_title: str = ""
     category: str
+    keywords: str = ""
+    is_builtin: bool = True
+
+
+class DefectTypeCreateRequest(BaseModel):
+    """
+    Новый тип неисправности, заведённый диспетчером.
+
+    Категория необязательна: по умолчанию берётся та, что обычно требуется
+    по главе ATA. Диспетчер меняет её, когда знает лучше — например, для
+    посадочных фар, которые по главе «Освещение», но работа уровня B1.
+    """
+
+    name: str = Field(min_length=3, max_length=120)
+    ata: str = Field(description="Номер главы ATA, например 29")
+    category: str | None = Field(default=None, description="A, B1 или B2")
+    keywords: str = Field(default="", max_length=200)
+
+
+class AtaChapterResponse(BaseModel):
+    """Глава ATA и категория допуска, которая по ней требуется обычно."""
+
+    ata: str
+    title: str
+    default_category: str

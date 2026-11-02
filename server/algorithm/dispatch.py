@@ -20,7 +20,8 @@
     }
 
 Вызов передаётся словарём:
-    { "aircraft_type", "defect_code", "stand_node_id" }
+    { "aircraft_type", "defect_code", "stand_node_id",
+      "required_mark" (необязательно) — отметка, записанная в вызов }
 
 Свободные машины парка — списком словарей { "id", "call_sign", "lat",
 "lon", "speed_kmh" }: для пешего кандидата система сравнит «пешком»
@@ -36,7 +37,7 @@ from constants import (
     STATUS_FREE,
     STATUSES_BUSY,
 )
-from algorithm.qualification import find_qualification, required_mark
+from algorithm.qualification import find_qualification, parse_mark, required_mark
 from algorithm.transport import best_plan, drive_distances_to, prepare_vehicles
 from clock import utc_today
 
@@ -143,7 +144,7 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
 
     Аргументы:
         graph     — граф аэропорта вызова;
-        call      — вызов (тип ВС, код дефекта, узел стоянки);
+        call      — вызов (тип ВС, код дефекта, узел стоянки, отметка);
         employees — сотрудники этого аэропорта;
         shift     — текущая смена, контекст сессии диспетчера;
         on_date   — дата проверки срока действия отметок;
@@ -153,7 +154,7 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
     on_date = on_date or utc_today()
     stand_id = call["stand_node_id"]
 
-    required = required_mark(call["defect_code"], call["aircraft_type"])
+    required = required_for(call)
 
     # Общие для всех кандидатов расчёты по машинам: посадка машин на граф
     # и один проход Дейкстры на транспорте от стоянки (см. transport.py).
@@ -215,6 +216,20 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
     return Suggestion(
         required, candidates, rejected, busy, elapsed_ms, call["aircraft_type"]
     )
+
+
+def required_for(call):
+    """
+    Требуемая отметка по вызову.
+
+    Если она уже записана в вызов, берётся оттуда: отметка считается один
+    раз при регистрации, и тип неисправности, заведённый диспетчером, во
+    встроенном справочнике не найдётся. Без записи — по встроенному коду,
+    как раньше: так подбор вызывают отчёт по сценариям и юнит-тесты.
+    """
+    if call.get("required_mark"):
+        return parse_mark(call["required_mark"])
+    return required_mark(call["defect_code"], call["aircraft_type"])
 
 
 def rejection(employee, reason):

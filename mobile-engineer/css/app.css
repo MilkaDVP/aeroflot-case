@@ -359,6 +359,15 @@ button:disabled { opacity: 0.5; }
 
 .target-sub { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
 
+.target-note {
+  color: var(--text);
+  font-size: 14px;
+  font-style: italic;
+  margin-top: 6px;
+}
+
+.target-note[hidden] { display: none; }
+
 .target-metrics {
   display: flex;
   gap: 20px;

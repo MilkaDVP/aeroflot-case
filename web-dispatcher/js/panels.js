@@ -73,6 +73,7 @@ function renderCalls(container, calls, selectedId, onSelect) {
         )}</span>
       </div>
       <div class="call-defect">${escapeHtml(call.defect_name)}</div>
+      ${descriptionLine(call)}
       <div class="call-meta">
         <span class="mark">${escapeHtml(call.required_mark)}</span>
         <span class="num">${formatClock(call.created_at)}</span>
@@ -84,6 +85,19 @@ function renderCalls(container, calls, selectedId, onSelect) {
     item.addEventListener("click", () => onSelect(call));
     container.append(item);
   }
+}
+
+/**
+ * Сообщение экипажа своими словами, если диспетчер его записал.
+ *
+ * Тип неисправности нужен системе для подбора, а подробности — людям:
+ * какая стойка, где течь, что на индикации.
+ */
+function descriptionLine(call) {
+  if (!call.defect_description) {
+    return "";
+  }
+  return `<div class="call-description">«${escapeHtml(call.defect_description)}»</div>`;
 }
 
 function statusTitle(status) {
@@ -324,6 +338,10 @@ function renderAssignment(container, call, onUnassign) {
   block.innerHTML = `
     <div>${headline}</div>
     <div class="eta-name">${escapeHtml(call.assigned_employee_name || "—")}</div>
+    <div class="eta-sub">${escapeHtml(call.defect_name)}${
+      call.defect_ata ? ` · ATA ${escapeHtml(call.defect_ata)}` : ""
+    }</div>
+    ${descriptionLine(call)}
     <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${timing}${
       call.vehicle_call_sign
         ? ` · <span class="num">${escapeHtml(call.vehicle_call_sign)}</span>`

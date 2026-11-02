@@ -812,3 +812,152 @@
   justify-content: flex-end;
   margin-top: var(--gap-lg);
 }
+
+/* --- Форма вызова: открытый справочник неисправностей --- */
+
+.modal.call-form {
+  width: 500px;
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.modal textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.modal textarea:focus {
+  outline: none;
+  border-color: var(--route);
+}
+
+.defect-search {
+  position: relative;
+}
+
+/* Подсказки лежат в потоке, а не всплывают поверх: форма короткая,
+   и перекрытые поля описания путали бы больше, чем лишняя высота. */
+.defect-results {
+  margin-top: var(--gap-xs);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.defect-option {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 7px 10px;
+}
+
+.defect-option:last-child {
+  border-bottom: none;
+}
+
+.defect-option:hover,
+.defect-option.active {
+  background: var(--route-soft);
+}
+
+.defect-option-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.defect-option-name {
+  font-size: 12px;
+}
+
+.defect-option-ata {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.defect-option-new {
+  color: var(--route);
+  font-size: 12px;
+}
+
+.defect-empty {
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Выбранный тип — плашка вместо поля: сразу видно, что выбрано
+   и какую категорию допуска это даст. */
+.defect-picked {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 7px 10px;
+  border: 1px solid var(--route);
+  border-radius: var(--radius);
+  background: var(--route-soft);
+}
+
+.defect-picked[hidden] {
+  display: none;
+}
+
+.defect-change {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.defect-new {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--gap-sm) var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.defect-new[hidden] {
+  display: none;
+}
+
+.defect-new-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-bottom: var(--gap-sm);
+}
+
+.defect-new-row {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: var(--gap-sm);
+}
+
+.defect-new-hint {
+  font-size: 11px;
+  color: var(--warn);
+  min-height: 14px;
+}
+
+/* Сообщение экипажа в карточке вызова и в списке. */
+.call-description {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}

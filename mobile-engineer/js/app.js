@@ -242,6 +242,12 @@ function renderWork() {
   el("call-board").textContent = call.board_number;
   el("call-type").textContent = call.aircraft_type;
   el("call-defect").textContent = call.defect_name;
+  // Сообщение экипажа своими словами — то, что инженеру нужно у борта:
+  // какая стойка, где течь, что на индикации.
+  el("call-description").hidden = !call.defect_description;
+  el("call-description").textContent = call.defect_description
+    ? `«${call.defect_description}»`
+    : "";
   el("call-mark").textContent = call.required_mark;
 
   // Инженер должен знать, что после закрытия его не отпустят, а сразу

@@ -130,12 +130,20 @@ const Api = {
     request("PATCH", `/api/employees/${employeeId}`, payload),
 
   aircraft: () => request("GET", "/api/aircraft"),
-  defectTypes: () => request("GET", "/api/defect-types"),
+  // Открытый справочник неисправностей: поиск словами экипажа или номером
+  // главы ATA и пополнение из формы вызова.
+  searchDefects: (query, limit) =>
+    request(
+      "GET",
+      `/api/defect-types?q=${encodeURIComponent(query || "")}&limit=${limit || 20}`
+    ),
+  createDefectType: (payload) => request("POST", "/api/defect-types", payload),
+  ataChapters: () => request("GET", "/api/ata-chapters"),
   vehicles: () => request("GET", "/api/vehicles"),
 
   calls: () => request("GET", "/api/calls"),
-  createCall: (aircraft_id, defect_code) =>
-    request("POST", "/api/calls", { aircraft_id, defect_code }),
+  createCall: (aircraft_id, defect_code, description) =>
+    request("POST", "/api/calls", { aircraft_id, defect_code, description }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   assign: (callId, employee_id, override_reason) =>
     request("POST", `/api/calls/${callId}/assign`, { employee_id, override_reason }),

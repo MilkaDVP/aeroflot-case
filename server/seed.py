@@ -65,6 +65,7 @@ from models.user import (
     User,
 )
 from models.vehicle import Vehicle
+from services.defects import ensure_builtin_defects
 
 # Срок действия отметок: один заведомо действующий, один заведомо истёкший.
 VALID_UNTIL = "2027-12-31"
@@ -407,6 +408,9 @@ def seed_if_empty(verbose=True):
     """
     db = SessionLocal()
     try:
+        # Справочник неисправностей нужен и в уже наполненной базе: вызовы
+        # берут из него названия, а форма вызова ищет по нему.
+        ensure_builtin_defects(db)
         if db.query(User).count() > 0:
             return False
 

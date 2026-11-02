@@ -66,6 +66,10 @@ class Call(Base):
     aircraft_id: Mapped[int] = mapped_column(ForeignKey("aircraft.id"))
     stand_node_id: Mapped[str] = mapped_column(String)
     defect_code: Mapped[str] = mapped_column(String)
+    # Что именно сообщил экипаж — своими словами. Тип неисправности нужен
+    # для подбора, а инженеру у борта важны подробности: какая стойка,
+    # где течь, что показывает индикация.
+    defect_description: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Отметка, требуемая под этот дефект и тип ВС. Считается один раз при
     # создании вызова и сохраняется: справочник может измениться, а причина
@@ -115,6 +119,15 @@ class Call(Base):
 
     aircraft = relationship("Aircraft", lazy="selectin")
     vehicle = relationship("Vehicle", lazy="selectin")
+    # Тип неисправности по коду. Внешнего ключа в схеме нет: таблица вызовов
+    # старше справочника, а в SQLite ключ к существующей таблице без её
+    # пересоздания не добавить. Для чтения названия и главы он не нужен.
+    defect_type = relationship(
+        "DefectType",
+        primaryjoin="foreign(Call.defect_code) == DefectType.code",
+        viewonly=True,
+        lazy="selectin",
+    )
     assigned_employee = relationship(
         "Employee", foreign_keys=[assigned_employee_id], lazy="selectin"
     )
