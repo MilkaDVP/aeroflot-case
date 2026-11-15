@@ -152,6 +152,13 @@ const Api = {
   setCallStatus: (callId, status) =>
     request("PATCH", `/api/calls/${callId}/status`, { status }),
 
+  // Входящие сообщения экипажа и внешних систем: ящик диспетчера.
+  reports: () => request("GET", "/api/reports"),
+  acceptReport: (reportId, defect_code, aircraft_id) =>
+    request("POST", `/api/reports/${reportId}/accept`, { defect_code, aircraft_id }),
+  rejectReport: (reportId, reason) =>
+    request("POST", `/api/reports/${reportId}/reject`, { reason }),
+
   // Режим учений: состояние, переключение (администратор), задержка сотрудника.
   drillState: () => request("GET", "/api/drill"),
   setDrill: (enabled) => request("POST", "/api/drill", { enabled }),

@@ -1317,3 +1317,101 @@
 .hold-button.is-held {
   background: var(--warn-soft);
 }
+
+/* --- Входящие сообщения экипажа --- */
+
+.inbox {
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: var(--gap-sm);
+  border-bottom: 1px solid var(--route);
+  background: var(--route-soft);
+}
+
+.inbox[hidden] {
+  display: none;
+}
+
+.inbox-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--route);
+  margin-bottom: var(--gap-xs);
+}
+
+.inbox-item {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--route);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  margin-bottom: var(--gap-xs);
+}
+
+.inbox-item:last-child {
+  margin-bottom: 0;
+}
+
+.inbox-item-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+.inbox-left {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.inbox-left.is-warn { color: var(--warn); }
+.inbox-left.is-danger { color: var(--danger); font-weight: 600; }
+
+.inbox-text,
+.report-banner-text {
+  margin-top: 3px;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.inbox-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.inbox-actions {
+  display: flex;
+  gap: var(--gap-xs);
+  margin-top: 6px;
+}
+
+.inbox-actions button {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.inbox-process {
+  flex: 1;
+}
+
+/* Слова экипажа в форме разбора. */
+.report-banner {
+  border-left: 3px solid var(--route);
+  background: var(--route-soft);
+  border-radius: var(--radius);
+  padding: var(--gap-sm) var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.report-banner-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-size: 11px;
+}

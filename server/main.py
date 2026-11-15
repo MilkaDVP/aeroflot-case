@@ -23,6 +23,7 @@ from api import (
     employees,
     me,
     reference,
+    reports,
     shift,
     vehicles,
 )
@@ -137,6 +138,7 @@ app.include_router(me.router)
 app.include_router(reference.router)
 app.include_router(shift.router)
 app.include_router(drill.router)
+app.include_router(reports.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
 

@@ -146,6 +146,8 @@ def to_response(call, db=None, now=None):
         status=call.status,
         created_at=to_iso_utc(call.created_at),
         closed_at=to_iso_utc(call.closed_at),
+        reported_at=to_iso_utc(call.reported_at),
+        source=call.source,
         suggested_employee_id=call.suggested_employee_id,
         assigned_employee_id=call.assigned_employee_id,
         assigned_employee_name=assigned.full_name if assigned else None,
@@ -325,18 +327,33 @@ def create_call(
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_AIRCRAFT_NOT_FOUND)
     check_same_airport(context, aircraft.airport_icao)
 
+    call = new_call(db, aircraft, defect, payload.description)
+    db.commit()
+    return to_response(call, db)
+
+
+def new_call(db, aircraft, defect, description, reported_at=None, source=None):
+    """
+    Создаёт вызов — общий путь для диспетчера и для входящего сообщения.
+
+    Стоянка и требуемая отметка выводятся здесь же, из карточки борта
+    и категории неисправности. reported_at передаётся, когда вызов создан
+    из сообщения экипажа: регламент отсчитывается от него.
+    """
     call = Call(
         airport_icao=aircraft.airport_icao,
         aircraft_id=aircraft.id,
         stand_node_id=aircraft.stand_node_id,
         defect_code=defect.code,
-        defect_description=" ".join((payload.description or "").split()) or None,
+        defect_description=" ".join((description or "").split()) or None,
         required_mark=str(required_mark_for_category(defect.category, aircraft.aircraft_type)),
         status=CALL_NEW,
+        reported_at=reported_at,
+        source=source,
     )
     db.add(call)
-    db.commit()
-    return to_response(call, db)
+    db.flush()
+    return call
 
 
 @router.post(

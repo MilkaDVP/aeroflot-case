@@ -345,8 +345,11 @@ function updateCountdown() {
   }
 
   const call = state.call.call;
-  const deadline =
-    new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
+  // Срок берётся у сервера: для вызова из сообщения экипажа он считается
+  // от сообщения, а не от регистрации, и клиент этого сам не знает.
+  const deadline = call.control
+    ? new Date(call.control.deadline_at).getTime()
+    : new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
   const leftMin = (deadline - Date.now()) / 60000;
 
   const block = el("deadline-block");

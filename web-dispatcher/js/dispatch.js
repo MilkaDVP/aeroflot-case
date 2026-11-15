@@ -78,13 +78,14 @@ async function start() {
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
   try {
-    const [employees, aircraft, calls, vehicles, mentorFeed, drill] = await Promise.all([
+    const [employees, aircraft, calls, vehicles, mentorFeed, drill, reports] = await Promise.all([
       Api.employees(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
       Api.shiftFeed(),
       Api.drillState(),
+      Api.reports(),
     ]);
     state.drill = drill.enabled;
 
@@ -105,6 +106,7 @@ async function refresh() {
     renderAll();
     renderMentor(mentorFeed, openCallById);
     renderDrill();
+    renderInbox(reports, processReport, rejectReport);
 
     // Прогноз по назначенному вызову меняется вместе с координатами
     // исполнителя, поэтому его карточка обновляется на каждом опросе.
@@ -498,6 +500,34 @@ async function openRegisteredCall(call) {
 }
 
 /* --- Прочее --- */
+
+/* --- Входящие сообщения --- */
+
+/** Разбор сообщения: та же форма вызова, но с тем, что сообщил экипаж. */
+function processReport(report) {
+  showCallForm({
+    aircraft: state.aircraft,
+    preselectedAircraftId: report.aircraft_id,
+    report,
+    onRegistered: openRegisteredCall,
+  });
+}
+
+async function rejectReport(report) {
+  const reason = window.prompt(
+    `Отклонить сообщение по борту ${report.board_number}?\n` +
+      "Вызов создан не будет. Укажите причину:"
+  );
+  if (!reason) {
+    return;
+  }
+  try {
+    await Api.rejectReport(report.id, reason);
+    await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
 
 /* --- Режим учений --- */
 

@@ -58,6 +58,9 @@ class CallResponse(BaseModel):
     status: str
     created_at: str
     closed_at: str | None
+    # Сообщение экипажа и его источник — если вызов создан из заявки.
+    reported_at: str | None = None
+    source: str | None = None
     suggested_employee_id: int | None
     assigned_employee_id: int | None
     assigned_employee_name: str | None

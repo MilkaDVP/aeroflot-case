@@ -80,7 +80,9 @@ function renderCalls(container, calls, selectedId, onSelect) {
       ${descriptionLine(call)}
       <div class="call-meta">
         <span class="mark">${escapeHtml(call.required_mark)}</span>
-        <span class="num">${formatClock(call.created_at)}</span>
+        <span class="num" title="${call.reported_at ? "сообщение экипажа" : "регистрация"}">${formatClock(
+          call.reported_at || call.created_at
+        )}</span>
         <span>${escapeHtml(statusTitle(call.status))}</span>
         ${controlBadge(call)}
       </div>

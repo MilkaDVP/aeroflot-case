@@ -79,6 +79,13 @@ class Call(Base):
     status: Mapped[str] = mapped_column(String, default=STATUS_NEW)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Когда о неисправности сообщил экипаж, если вызов создан из входящего
+    # сообщения. От этого момента, а не от регистрации диспетчером,
+    # отсчитывается регламент прибытия. Пусто — вызов заведён диспетчером
+    # напрямую, и отсчёт идёт от регистрации.
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Источник сообщения (имя интеграционного ключа) — происхождение вызова.
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Кого предложила система и кого назначил человек.
     suggested_employee_id: Mapped[int | None] = mapped_column(

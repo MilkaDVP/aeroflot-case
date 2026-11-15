@@ -125,11 +125,20 @@ def deadline_of(call):
     """
     Контрольный срок прибытия.
 
-    Отсчёт — от регистрации вызова. Если по договору пятнадцать минут
-    считаются от сообщения экипажа, а не от регистрации диспетчером,
-    точкой отсчёта станет время сообщения — меняется только эта функция.
+    Отсчёт — от сообщения экипажа либо от регистрации (см. started_at).
     """
-    return call.created_at + timedelta(minutes=REGULATION_ARRIVAL_LIMIT_MIN)
+    return started_at(call) + timedelta(minutes=REGULATION_ARRIVAL_LIMIT_MIN)
+
+
+def started_at(call):
+    """
+    Момент, с которого идёт отсчёт по вызову.
+
+    Сообщение экипажа, если вызов создан из входящей заявки: время, пока
+    заявка ждала разбора в диспетчерской, уже потрачено из пятнадцати минут.
+    Для вызова, заведённого диспетчером напрямую, — момент регистрации.
+    """
+    return call.reported_at or call.created_at
 
 
 def assess(call, now=None):
@@ -173,7 +182,7 @@ def assess_unassigned(call, deadline, now):
     у него.
     """
     left = minutes_until(deadline, now)
-    waited = (now - call.created_at).total_seconds() / 60
+    waited = (now - started_at(call)).total_seconds() / 60
 
     if left < 0:
         control = Control(

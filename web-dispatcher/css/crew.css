@@ -1,0 +1,43 @@
+/*
+ * Страница экипажа. Планшет в кабине: крупные поля и одна большая кнопка,
+ * ничего лишнего — у экипажа нет времени разбираться в интерфейсе.
+ */
+
+.crew-box select,
+.crew-box input,
+.crew-box textarea {
+  font-size: 16px;
+  padding: 12px;
+}
+
+.crew-box textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.crew-box textarea:focus {
+  outline: none;
+  border-color: var(--route);
+}
+
+.crew-submit {
+  min-height: 52px;
+  font-size: 16px;
+}
+
+.crew-done {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok);
+  border-radius: var(--radius);
+  padding: var(--gap-sm) var(--gap);
+}
+
+.crew-done[hidden] {
+  display: none;
+}

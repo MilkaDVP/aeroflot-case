@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сообщение о неисправности</title>
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="%230b0f14"/><circle cx="16" cy="16" r="7" fill="%233d8bfd"/></svg>'>
+  <link rel="stylesheet" href="css/theme.css?v=__BUILD__">
+  <link rel="stylesheet" href="css/auth.css?v=__BUILD__">
+  <link rel="stylesheet" href="css/crew.css?v=__BUILD__">
+</head>
+<body>
+  <!--
+    Страница для планшета экипажа. Экипаж только сообщает о неисправности:
+    сообщение уходит в диспетчерскую, и уже там его разбирают и назначают
+    инженера. Напрямую инженеру пилот задачу не ставит.
+  -->
+  <main class="auth-screen">
+    <form class="auth-box wide crew-box" id="crew-form">
+      <h1 class="auth-title">Сообщение о неисправности</h1>
+      <p class="auth-subtitle">
+        Экипаж · аэропорт <b id="crew-airport">—</b>. Сообщение получит диспетчерская ОТО.
+      </p>
+
+      <div class="auth-field">
+        <label for="crew-board">Воздушное судно</label>
+        <select id="crew-board" required></select>
+      </div>
+
+      <div class="auth-field">
+        <label for="crew-description">Что случилось</label>
+        <textarea id="crew-description" rows="4" maxlength="500" required
+                  placeholder="Своими словами: что и где замечено, что на индикации"></textarea>
+      </div>
+
+      <div class="auth-field">
+        <label for="crew-reporter">Кто сообщает <span class="dim">— необязательно</span></label>
+        <input id="crew-reporter" maxlength="80" placeholder="Должность и фамилия">
+      </div>
+
+      <div id="crew-error" class="error" hidden></div>
+      <div id="crew-done" class="crew-done" hidden></div>
+
+      <div class="auth-actions">
+        <button type="submit" class="primary crew-submit" id="crew-submit">Отправить в диспетчерскую</button>
+      </div>
+    </form>
+  </main>
+
+  <script src="js/config.js?v=__BUILD__"></script>
+  <script src="js/crew.js?v=__BUILD__"></script>
+</body>
+</html>

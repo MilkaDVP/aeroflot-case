@@ -44,6 +44,7 @@ from services.deadline import (
     deadline_of,
     minutes_text,
     overrun_text,
+    started_at,
 )
 
 KIND_ASSIGN = "assign"
@@ -136,7 +137,7 @@ def review_assignment(db, call, employee, result, actor, is_override, now=None):
     """
     now = now or utc_now()
     margin = minutes_between(call.eta_at, deadline_of(call))
-    waited = minutes_between(call.created_at, now)
+    waited = minutes_between(started_at(call), now)
     best = result.best
     chosen = candidate_of(result, employee.id)
 
@@ -230,7 +231,7 @@ def review_queue(db, call, employee, result, actor, now=None):
     tail = reason_tail(call.override_reason)
 
     facts = {
-        "minutes_to_assign": minutes_between(call.created_at, now),
+        "minutes_to_assign": minutes_between(started_at(call), now),
         "margin_min": margin,
         "override": True,
         "override_cost_min": 0.0,
@@ -306,7 +307,7 @@ def review_unassign(db, call, employee, control_before, reason, actor, now=None)
     """
     now = now or utc_now()
     board = board_of(call)
-    waited = minutes_between(call.created_at, now)
+    waited = minutes_between(started_at(call), now)
     facts = {"waited_min": waited, "control_level": control_before.level}
 
     if control_before.level in ALERT_LEVELS:
@@ -336,7 +337,7 @@ def review_arrival(db, call, employee, now=None):
     """Исполнитель у борта: в срок или с опозданием — итог по вызову."""
     now = now or utc_now()
     margin = minutes_between(now, deadline_of(call))
-    took = minutes_between(call.created_at, now)
+    took = minutes_between(started_at(call), now)
     facts = {"margin_min": margin, "in_time": margin >= 0, "arrival_min": took}
 
     if margin >= 0:

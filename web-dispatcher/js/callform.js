@@ -41,6 +41,11 @@ function showCallForm(options) {
 
   document.body.append(form.root);
   bindCallForm(form, options);
+  if (options.report) {
+    // Слова экипажа уже записаны в сообщении и показаны в шапке формы —
+    // второе поле описания только путало бы.
+    field(form, "#form-description").closest(".modal-field").hidden = true;
+  }
   field(form, "#form-defect-query").focus();
   return form;
 }
@@ -62,7 +67,8 @@ function buildCallFormMarkup(options) {
 
   backdrop.innerHTML = `
     <div class="modal call-form">
-      <h2>Регистрация вызова</h2>
+      <h2>${options.report ? "Разбор сообщения экипажа" : "Регистрация вызова"}</h2>
+      ${reportBanner(options.report)}
 
       <div class="modal-field">
         <label for="form-aircraft">Воздушное судно</label>
@@ -111,11 +117,36 @@ function buildCallFormMarkup(options) {
       <div id="form-error" class="error" hidden></div>
       <div class="modal-actions">
         <button id="form-cancel">Отмена</button>
-        <button class="primary" id="form-submit" disabled>Зарегистрировать</button>
+        <button class="primary" id="form-submit" disabled>${
+          options.report ? "Создать вызов" : "Зарегистрировать"
+        }</button>
       </div>
     </div>
   `;
   return backdrop;
+}
+
+/**
+ * Шапка формы при разборе сообщения: что сообщил экипаж и сколько осталось.
+ * Диспетчер выбирает тип неисправности, глядя на исходные слова экипажа.
+ */
+function reportBanner(report) {
+  if (!report) {
+    return "";
+  }
+  return `
+    <div class="report-banner">
+      <div class="report-banner-top">
+        <span class="call-board">${escapeHtml(report.board_number)}</span>
+        <span class="dim">${escapeHtml(
+          report.reporter || SOURCE_TITLES[report.source] || report.source
+        )} ·
+          сообщено в ${formatClock(report.reported_at)} ·
+          срок ${formatClock(report.deadline_at)}</span>
+      </div>
+      <div class="report-banner-text">«${escapeHtml(report.description)}»</div>
+    </div>
+  `;
 }
 
 function bindCallForm(form, options) {
@@ -392,11 +423,16 @@ async function submitCallForm(form, options) {
       code = created.code;
     }
 
-    const call = await Api.createCall(
-      Number(field(form, "#form-aircraft").value),
-      code,
-      field(form, "#form-description").value.trim() || null
-    );
+    // Разбор входящего сообщения: вызов создаётся из него и наследует
+    // время сообщения экипажа — от него идёт отсчёт регламента.
+    const aircraftId = Number(field(form, "#form-aircraft").value);
+    const call = options.report
+      ? await Api.acceptReport(options.report.id, code, aircraftId)
+      : await Api.createCall(
+          aircraftId,
+          code,
+          field(form, "#form-description").value.trim() || null
+        );
     closeCallForm(form);
     options.onRegistered(call);
   } catch (error) {
