@@ -20,6 +20,7 @@ from api import (
     employees,
     me,
     reference,
+    shift,
     vehicles,
 )
 from database import SessionLocal, create_all
@@ -94,6 +95,7 @@ app.include_router(employees.router)
 app.include_router(calls.router)
 app.include_router(me.router)
 app.include_router(reference.router)
+app.include_router(shift.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
 

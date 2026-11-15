@@ -76,11 +76,12 @@ async function start() {
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
   try {
-    const [employees, aircraft, calls, vehicles] = await Promise.all([
+    const [employees, aircraft, calls, vehicles, mentorFeed] = await Promise.all([
       Api.employees(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
+      Api.shiftFeed(),
     ]);
 
     state.employees = employees;
@@ -98,6 +99,7 @@ async function refresh() {
     }
 
     renderAll();
+    renderMentor(mentorFeed, openCallById);
 
     // Прогноз по назначенному вызову меняется вместе с координатами
     // исполнителя, поэтому его карточка обновляется на каждом опросе.
@@ -165,6 +167,17 @@ function employeeStatusClass(employee) {
     (candidate) => candidate.employee_id === employee.id
   );
   return isCandidate ? "is-ok" : "is-no-permit";
+}
+
+/**
+ * Открывает вызов по идентификатору — щелчок по замечанию Наставника.
+ * Закрытого вызова в списке уже нет: тогда замечание остаётся просто текстом.
+ */
+function openCallById(callId) {
+  const call = state.calls.find((item) => item.id === callId);
+  if (call) {
+    selectCall(call);
+  }
 }
 
 /* --- Работа с вызовом --- */
@@ -526,6 +539,10 @@ function showMapNotice(message) {
 for (const button of document.querySelectorAll("#basemap-switch button")) {
   button.addEventListener("click", () => applyBasemap(button.dataset.basemap));
 }
+
+document.getElementById("mentor-summary").addEventListener("click", () => {
+  openShiftSummary(openCallById);
+});
 
 document.getElementById("zoom-in").addEventListener("click", () => {
   airportMap.zoomFromCentre(1.4);

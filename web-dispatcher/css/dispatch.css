@@ -1132,3 +1132,157 @@
   stroke: var(--danger);
   stroke-dasharray: 2 2;
 }
+
+/* --- Наставник: лента оценок и итог смены --- */
+
+/* Блок занимает нижнюю треть правой панели: оценка должна быть видна
+   рядом с решением, но не вытеснять кандидатов, по которым оно принимается. */
+.mentor {
+  flex: 0 0 36%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-strong);
+}
+
+.mentor .panel-head {
+  gap: var(--gap-sm);
+}
+
+.mentor-score {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.verdict-count {
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 3px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.verdict-count.is-good { color: var(--ok); background: var(--ok-soft); }
+.verdict-count.is-fair { color: var(--warn); background: var(--warn-soft); }
+.verdict-count.is-bad { color: var(--danger); background: var(--danger-soft); }
+
+.mentor-summary-button {
+  padding: 2px 8px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.mentor-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--gap-sm);
+}
+
+.mentor-item {
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-raised);
+  border-radius: var(--radius);
+  padding: 6px 9px;
+  margin-bottom: var(--gap-xs);
+}
+
+.mentor-item.is-good { border-left-color: var(--ok); }
+.mentor-item.is-fair { border-left-color: var(--warn); }
+.mentor-item.is-bad { border-left-color: var(--danger); }
+
+.mentor-item.is-clickable { cursor: pointer; }
+.mentor-item.is-clickable:hover { background: var(--bg-hover); }
+
+.mentor-item-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-size: 11px;
+}
+
+.verdict-badge {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+
+.verdict-badge.is-good { color: var(--ok); }
+.verdict-badge.is-fair { color: var(--warn); }
+.verdict-badge.is-bad { color: var(--danger); }
+
+.mentor-time {
+  margin-left: auto;
+  color: var(--text-dim);
+}
+
+.mentor-text {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Окно итога смены. */
+.modal.shift-summary {
+  width: 640px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-grade {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: var(--gap);
+}
+
+.summary-grade.is-good { color: var(--ok); }
+.summary-grade.is-fair { color: var(--warn); }
+.summary-grade.is-bad { color: var(--danger); }
+
+.summary-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gap-sm);
+}
+
+.summary-tile {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap-sm) var(--gap);
+}
+
+.summary-tile-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.summary-tile-value {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 2px 0;
+  white-space: nowrap;
+}
+
+.summary-tile-value .verdict-badge {
+  font-size: inherit;
+  letter-spacing: 0;
+}
+
+.summary-tile-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.summary-feed {
+  flex: 1;
+  min-height: 80px;
+  overflow-y: auto;
+}

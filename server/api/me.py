@@ -22,6 +22,7 @@ from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.employee import Employee
 from schemas.auth import MessageResponse
 from schemas.call import CallResponse
+from services import mentor
 from services.assignment import (
     advance_after_close,
     mark_arrived,
@@ -174,6 +175,7 @@ def update_status(
         employee.status = employee_status
         if payload.action == ACTION_ARRIVED:
             mark_arrived(db, employee, call)
+            mentor.review_arrival(db, call, employee)
 
     db.commit()
     return call_to_response(call)

@@ -8,13 +8,21 @@
  */
 
 const API_PORT = "8000";
+const API_STORAGE = "aeroflot.api";
 
 function detectApiBase() {
   // Явное переопределение через ?api=... — нужно, когда сервер поднят
   // на другой машине (например, телефон смотрит на ноутбук).
+  // Адрес запоминается: переходы между экранами (вход → смена → рабочий
+  // экран) параметр из адресной строки теряют, и без этого он действовал
+  // бы только на первой странице.
   const override = new URLSearchParams(window.location.search).get("api");
   if (override) {
-    return override.replace(/\/$/, "");
+    localStorage.setItem(API_STORAGE, override.replace(/\/$/, ""));
+  }
+  const saved = localStorage.getItem(API_STORAGE);
+  if (saved) {
+    return saved;
   }
   return `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
 }

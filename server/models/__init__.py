@@ -10,6 +10,7 @@ from models.airport import Airport
 from models.call import Call
 from models.defect_type import DefectType
 from models.employee import Employee
+from models.shift_event import ShiftEvent
 from models.user import AuthSession, User
 from models.vehicle import Vehicle
 
@@ -20,6 +21,7 @@ __all__ = [
     "Call",
     "DefectType",
     "Employee",
+    "ShiftEvent",
     "User",
     "Vehicle",
 ]

@@ -109,6 +109,20 @@
           Назначить
         </button>
       </div>
+
+      <!-- Наставник: оценка каждого решения с причиной в цифрах -->
+      <div class="mentor">
+        <div class="panel-head">
+          <span>Наставник</span>
+          <span class="mentor-score" id="mentor-score"></span>
+          <button type="button" class="mentor-summary-button" id="mentor-summary">
+            Итог смены
+          </button>
+        </div>
+        <div class="mentor-feed" id="mentor-feed">
+          <div class="empty">Загрузка…</div>
+        </div>
+      </div>
     </section>
 
     <!-- Состояние смены -->
@@ -134,6 +148,7 @@
   <script src="js/map.js?v=__BUILD__"></script>
   <script src="js/panels.js?v=__BUILD__"></script>
   <script src="js/alerts.js?v=__BUILD__"></script>
+  <script src="js/mentor.js?v=__BUILD__"></script>
   <script src="js/callform.js?v=__BUILD__"></script>
   <script src="js/dispatch.js?v=__BUILD__"></script>
 </body>

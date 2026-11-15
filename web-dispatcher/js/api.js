@@ -152,6 +152,9 @@ const Api = {
   setCallStatus: (callId, status) =>
     request("PATCH", `/api/calls/${callId}/status`, { status }),
 
+  // Лента Наставника и итог смены одним ответом.
+  shiftFeed: (limit) => request("GET", `/api/shift/feed?limit=${limit || 30}`),
+
   /* --- Администрирование --- */
 
   adminAirports: () => request("GET", "/api/admin/airports"),

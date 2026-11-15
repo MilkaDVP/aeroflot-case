@@ -23,6 +23,7 @@ from database import get_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.call import ACTIVE_CALL_STATUSES, CALL_STATUSES, WORKING_CALL_STATUSES, Call
+from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
@@ -37,6 +38,7 @@ from schemas.call import (
     SuggestResponse,
     UnassignRequest,
 )
+from services import mentor
 from services.assignment import (
     advance_after_close,
     assign_now,
@@ -396,10 +398,12 @@ def assign_employee(
     check_same_airport(context, employee.airport_icao)
     check_permit(call, employee)
 
-    # Предложение системы должно существовать до назначения: иначе
-    # переопределение невозможно отличить от обычного назначения.
+    # Подбор выполняется перед каждым назначением. Предложение системы
+    # должно существовать — иначе переопределение не отличить от обычного
+    # назначения, — а свежий результат нужен Наставнику: по нему видно,
+    # кого система предлагала в эту минуту и сколько стоит отступление.
+    result = run_suggestion(db, context, call)
     if call.suggested_employee_id is None:
-        result = run_suggestion(db, context, call)
         call.suggested_employee_id = result.best.employee["id"] if result.best else None
 
     # Занятость проверяется по фактическому состоянию, а не по предложению:
@@ -415,6 +419,7 @@ def assign_employee(
             )
         call.override_reason = payload.override_reason
         enqueue(db, call, employee)
+        mentor.review_queue(db, call, employee, result, context.user)
         db.commit()
         return to_response(call, db)
 
@@ -435,6 +440,7 @@ def assign_employee(
 
     call.override_reason = payload.override_reason if is_override else None
     assign_now(db, call, employee, plan, pickup_vehicle)
+    mentor.review_assignment(db, call, employee, result, context.user, is_override)
     db.commit()
     return to_response(call, db)
 
@@ -472,7 +478,12 @@ def unassign_employee(
             status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_UNASSIGN_NEEDS_REASON
         )
 
+    # Оценка снятия опирается на обстановку до него: после снятия вызов
+    # уже «без исполнителя», и понять, успевал ли снятый, будет нельзя.
+    removed = call.assigned_employee
+    control_before = assess(call)
     unassign(db, call, reason)
+    mentor.review_unassign(db, call, removed, control_before, reason, context.user)
     db.commit()
     return to_response(call, db)
 
@@ -508,7 +519,10 @@ def update_call_status(
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_QUEUE_PROMOTES_ITSELF)
 
     was_working = call.status in WORKING_CALL_STATUSES
+    arrived_now = payload.status == CALL_ARRIVED and call.status != CALL_ARRIVED
     call.status = payload.status
+    if arrived_now and call.assigned_employee is not None:
+        mentor.review_arrival(db, call, call.assigned_employee)
 
     if payload.status == CALL_CLOSED:
         call.closed_at = utc_now()
