@@ -18,6 +18,8 @@ const state = {
   // Кандидат, выбранный диспетчером вручную. null — согласие с системой.
   pickedEmployeeId: null,
   // Режим имитации координат: включён ли и кого переставляем.
+  // Идут ли учения: сервер сам двигает сотрудников без телефона.
+  drill: false,
   moveMode: false,
   movingEmployeeId: null,
 };
@@ -76,13 +78,15 @@ async function start() {
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
   try {
-    const [employees, aircraft, calls, vehicles, mentorFeed] = await Promise.all([
+    const [employees, aircraft, calls, vehicles, mentorFeed, drill] = await Promise.all([
       Api.employees(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
       Api.shiftFeed(),
+      Api.drillState(),
     ]);
+    state.drill = drill.enabled;
 
     state.employees = employees;
     state.aircraft = aircraft;
@@ -100,13 +104,14 @@ async function refresh() {
 
     renderAll();
     renderMentor(mentorFeed, openCallById);
+    renderDrill();
 
     // Прогноз по назначенному вызову меняется вместе с координатами
     // исполнителя, поэтому его карточка обновляется на каждом опросе.
     // Панель подбора для неназначенного вызова не трогаем: в ней диспетчер
     // мог выбрать другого кандидата, и опрос не должен сбрасывать его выбор.
     if (state.selectedCall && !isAssignable(state.selectedCall)) {
-      renderAssignment(elements.suggestBody, state.selectedCall, unassignSelected);
+      renderAssignedCard(state.selectedCall);
     }
     elements.connStatus.textContent = `обновлено ${new Date().toLocaleTimeString("ru-RU")}`;
   } catch (error) {
@@ -195,7 +200,7 @@ function showAssignment(call) {
   elements.calcTime.textContent = "";
   elements.assignButton.disabled = true;
 
-  renderAssignment(elements.suggestBody, call, unassignSelected);
+  renderAssignedCard(call);
   if (call.route_node_ids && call.route_node_ids.length > 1) {
     airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
   } else {
@@ -493,6 +498,70 @@ async function openRegisteredCall(call) {
 }
 
 /* --- Прочее --- */
+
+/* --- Режим учений --- */
+
+/**
+ * Значок учений в шапке и переключатель.
+ *
+ * Значок виден всем: диспетчер должен понимать, что сотрудники на карте
+ * движутся по учебному сценарию и прибытие подтверждается само.
+ * Включает и выключает учения только администратор.
+ */
+function renderDrill() {
+  const badge = document.getElementById("drill-badge");
+  const toggle = document.getElementById("drill-toggle");
+  badge.hidden = !state.drill;
+  toggle.hidden = Session.user.role !== "admin";
+  toggle.textContent = state.drill ? "Завершить учения" : "Начать учения";
+}
+
+async function toggleDrill() {
+  try {
+    await Api.setDrill(!state.drill);
+    await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+/**
+ * Карточка назначенного вызова; в учениях — с кнопкой задержки.
+ *
+ * «Задержать» останавливает исполнителя на маршруте: так на тренировке
+ * разыгрывается вводная «исполнитель встал», и видно, как меняется прогноз.
+ */
+function renderAssignedCard(call) {
+  renderAssignment(elements.suggestBody, call, unassignSelected);
+  if (!state.drill || !call.assigned_employee_id || call.status === "arrived") {
+    return;
+  }
+  const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
+  if (!employee) {
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = "hold-button";
+  button.className = employee.held ? "hold-button is-held" : "hold-button";
+  button.textContent = employee.held
+    ? "Учения: отпустить исполнителя"
+    : "Учения: задержать исполнителя";
+  button.addEventListener("click", () => toggleHold(employee));
+  elements.suggestBody.append(button);
+}
+
+async function toggleHold(employee) {
+  try {
+    await Api.holdEmployee(employee.id, !employee.held);
+    await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+document.getElementById("drill-toggle").addEventListener("click", toggleDrill);
 
 /* --- Подложка карты --- */
 

@@ -18,7 +18,7 @@
 не нужны.
 """
 
-from sqlalchemy import JSON, String, text
+from sqlalchemy import JSON, Boolean, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -48,3 +48,10 @@ class Airport(Base):
     # Граф целиком для аэропортов, созданных во время работы. У встроенных
     # пусто: их граф читается из файла.
     graph: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Режим учений: сотрудники без телефона сами движутся по назначенному
+    # маршруту. Нужен для демонстрации и тренировки диспетчеров; включает
+    # его только администратор, по умолчанию выключен.
+    drill_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0")
+    )

@@ -116,6 +116,9 @@ class Call(Base):
     # или он идёт пешком: тогда маршрут из одного участка.
     vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), nullable=True)
     pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Сколько метров маршрута пройдено в режиме учений. Пусто, пока
+    # исполнитель не начал движение или идёт не по учебному сценарию.
+    sim_progress_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     aircraft = relationship("Aircraft", lazy="selectin")
     vehicle = relationship("Vehicle", lazy="selectin")

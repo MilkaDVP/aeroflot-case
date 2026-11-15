@@ -6,7 +6,9 @@
 Автодокументация API: http://localhost:8000/docs
 """
 
+import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,6 +19,7 @@ from api import (
     airports,
     auth,
     calls,
+    drill,
     employees,
     me,
     reference,
@@ -25,12 +28,41 @@ from api import (
 )
 from database import SessionLocal, create_all
 from graph_registry import load_from_database, preload_all
+from constants import DRILL_MAX_STEP_S, DRILL_TICK_S
+from services import drill as drill_service
 from services.defects import ensure_builtin_defects
 
 # Веб-диспетчер и PWA раздаются отдельными статическими сервисами, поэтому
 # обращения к API идут с другого источника. Для конкурсного стенда список
 # источников открыт; в эксплуатации сюда прописывается конкретный домен.
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+
+
+async def drill_loop():
+    """Раз в несколько секунд продвигает сотрудников в аэропортах с учениями."""
+    last = time.monotonic()
+    while True:
+        await asyncio.sleep(DRILL_TICK_S)
+        now = time.monotonic()
+        dt_s = min(now - last, DRILL_MAX_STEP_S)
+        last = now
+        # Работа с базой синхронная — в отдельном потоке, чтобы такт
+        # не задерживал обработку запросов.
+        await asyncio.to_thread(drill_tick, dt_s)
+
+
+def drill_tick(dt_s):
+    """Один такт учений по всем аэропортам, где они включены."""
+    db = SessionLocal()
+    try:
+        for icao in drill_service.enabled_airports(db):
+            drill_service.step(db, icao, dt_s)
+        db.commit()
+    except Exception as error:  # такт не должен ронять сервер
+        db.rollback()
+        print(f"Учения: такт пропущен — {error}")
+    finally:
+        db.close()
 
 
 @asynccontextmanager
@@ -68,7 +100,15 @@ async def lifespan(app: FastAPI):
     print(f"Загружены графы аэропортов: {', '.join(loaded) or 'нет'}")
     if custom:
         print(f"Аэропорты из базы: {', '.join(custom)}")
+
+    # Такты режима учений. Задача живёт всё время работы сервера, но
+    # что-то делает только там, где администратор учения включил.
+    ticker = None
+    if os.environ.get("DRILL_LOOP", "1") == "1":
+        ticker = asyncio.create_task(drill_loop())
     yield
+    if ticker is not None:
+        ticker.cancel()
 
 
 app = FastAPI(
@@ -96,6 +136,7 @@ app.include_router(calls.router)
 app.include_router(me.router)
 app.include_router(reference.router)
 app.include_router(shift.router)
+app.include_router(drill.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
 

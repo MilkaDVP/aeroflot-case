@@ -72,6 +72,7 @@ def to_response(employee):
         location_at=to_iso_utc(employee.location_at),
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
+        held=bool(employee.held),
     )
 
 

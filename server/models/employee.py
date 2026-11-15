@@ -15,7 +15,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from clock import to_iso_utc, utc_now
@@ -49,6 +49,10 @@ class Employee(Base):
     location_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     location_source: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Задержан в режиме учений: стоит на месте, хотя назначен на вызов.
+    # Так на тренировке разыгрывается «исполнитель не успевает».
+    held: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     # Индивидуальная скорость ходьбы. None — нормативная скорость пешехода
     # из constants.py. Скорость машины — свойство машины, а не человека.

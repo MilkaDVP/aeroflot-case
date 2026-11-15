@@ -18,6 +18,9 @@ from pathlib import Path
 _TEMP_DIR = tempfile.mkdtemp(prefix="aeroflot-test-")
 _DB_PATH = Path(_TEMP_DIR) / "test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
+# Фоновые такты учений в тестах выключены: движение проверяется прямым
+# вызовом шага с заданным временем, иначе результат зависел бы от часов.
+os.environ["DRILL_LOOP"] = "0"
 
 from fastapi.testclient import TestClient  # noqa: E402
 

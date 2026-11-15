@@ -321,6 +321,7 @@ def unassign(db, call, reason):
     call.vehicle = None
     call.pickup_node_id = None
     call.route_node_ids = None
+    call.sim_progress_m = None
     call.eta_minutes = None
     call.eta_at = None
     call.queued_at = None

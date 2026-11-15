@@ -1286,3 +1286,34 @@
   min-height: 80px;
   overflow-y: auto;
 }
+
+/* --- Режим учений --- */
+
+/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
+   видеть, что картина на карте учебная. */
+.drill-badge {
+  padding: 3px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  background: var(--warn-soft);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.drill-badge[hidden] {
+  display: none;
+}
+
+.hold-button {
+  width: 100%;
+  margin-top: var(--gap-sm);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.hold-button.is-held {
+  background: var(--warn-soft);
+}

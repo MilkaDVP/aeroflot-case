@@ -152,6 +152,12 @@ const Api = {
   setCallStatus: (callId, status) =>
     request("PATCH", `/api/calls/${callId}/status`, { status }),
 
+  // Режим учений: состояние, переключение (администратор), задержка сотрудника.
+  drillState: () => request("GET", "/api/drill"),
+  setDrill: (enabled) => request("POST", "/api/drill", { enabled }),
+  holdEmployee: (employeeId, held) =>
+    request("POST", `/api/drill/hold/${employeeId}`, { held }),
+
   // Лента Наставника и итог смены одним ответом.
   shiftFeed: (limit) => request("GET", `/api/shift/feed?limit=${limit || 30}`),
 

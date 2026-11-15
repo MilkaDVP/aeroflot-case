@@ -32,6 +32,8 @@ class EmployeeResponse(BaseModel):
     location_at: str | None = None
     location_source: str | None = None
     seen_at: str | None = None
+    # Задержан на месте в режиме учений.
+    held: bool = False
 
 
 class EmployeeCreateRequest(BaseModel):
