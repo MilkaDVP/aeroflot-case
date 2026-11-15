@@ -60,6 +60,7 @@ LEVEL_UNASSIGNED = "unassigned"  # время идёт, а исполнител�
 LEVEL_NO_SIGNAL = "no_signal"    # координаты устарели — прогнозу верить нельзя
 LEVEL_PENDING = "pending"        # только поступил, назначение ещё в норме
 LEVEL_ARRIVED = "arrived"        # исполнитель у борта
+LEVEL_PAUSED = "paused"          # был у борта, работы приостановлены
 LEVEL_CLOSED = "closed"          # работа завершена
 
 # По этим уровням диспетчер и начальник смены получают красное уведомление.
@@ -150,6 +151,8 @@ def assess(call, now=None):
         return Control(LEVEL_CLOSED, "Вызов закрыт", deadline, now)
     if call.status == STATUS_ARRIVED:
         return assess_arrived(call, deadline, now)
+    if call.first_arrived_at is not None:
+        return assess_paused(call, deadline, now)
     if call.assigned_employee is None:
         return assess_unassigned(call, deadline, now)
     if call.status == STATUS_QUEUED:
@@ -162,14 +165,32 @@ def assess(call, now=None):
 def assess_arrived(call, deadline, now):
     """Исполнитель у борта: для разбора смены — успел или нет."""
     control = Control(LEVEL_ARRIVED, "Исполнитель у борта", deadline, now)
-    if call.eta_at is not None:
-        margin = (deadline - call.eta_at).total_seconds() / 60
+    arrived_at = call.first_arrived_at or call.eta_at
+    if arrived_at is not None:
+        margin = (deadline - arrived_at).total_seconds() / 60
         control.margin_min = round(margin, 1)
         control.reason = (
             f"Прибыл в срок, запас {minutes_text(margin)}"
             if margin >= 0
             else f"Прибыл с опозданием на {overrun_text(-margin)}"
         )
+    return control
+
+
+def assess_paused(call, deadline, now):
+    """
+    Исполнитель уже был у борта и переключён на другой вызов.
+
+    Регламент прибытия по этому вызову исполнен в момент первого прибытия,
+    поэтому тревоги здесь нет, как бы давно ни истёк срок: работы ждут
+    запчастей, а инженер вернётся, когда закроет срочный борт.
+    """
+    control = Control(LEVEL_PAUSED, "Работы приостановлены", deadline, now)
+    if call.assigned_employee is None:
+        control.reason = "Работы приостановлены: исполнитель снят, назначьте другого"
+    elif call.eta_at is not None and call.status == STATUS_QUEUED:
+        control.reason = "Работы приостановлены: исполнитель переключён на другой борт и вернётся"
+    control.forecast_at = None
     return control
 
 

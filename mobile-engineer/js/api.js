@@ -126,6 +126,9 @@ const Api = {
 
   currentCall: () => request("GET", "/api/me/current-call"),
   setStatus: (action) => request("POST", "/api/me/status", { action }),
+  // У борта: этап работ и статус AOG (ставит только инженер).
+  setStage: (stage) => request("POST", "/api/me/stage", { stage }),
+  setAog: (aog) => request("POST", "/api/me/aog", { aog }),
 
   setShift: (employeeId, onShift) =>
     request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift }),

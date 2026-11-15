@@ -123,8 +123,8 @@ def advance(db, call, dt_s, now):
     if progress >= total:
         call.status = STATUS_ARRIVED
         employee.status = STATUS_BUSY
-        mark_arrived(db, employee, call)
-        mentor.review_arrival(db, call, employee, now)
+        if mark_arrived(db, employee, call):
+            mentor.review_arrival(db, call, employee, now)
     return True
 
 

@@ -44,6 +44,7 @@ from constants import (
     LOCATION_MANUAL,
     SHIFT_DAY,
     SHIFT_NIGHT,
+    STAGE_WAITING_PARTS,
     STATUS_BUSY,
     STATUS_FREE,
     STATUS_OFFLINE,
@@ -385,6 +386,10 @@ def seed_working_call(db, icao, aircraft, employees, working_call):
             assigned_employee_id=employee.id,
             eta_minutes=0.0,
             eta_at=arrived_at,
+            first_arrived_at=arrived_at,
+            # Занятый инженер ждёт запчасти: на нём показывается, что такого
+            # исполнителя можно переключить на срочный борт без вреда.
+            work_stage=STAGE_WAITING_PARTS,
             route_node_ids=[board.stand_node_id],
         )
     )

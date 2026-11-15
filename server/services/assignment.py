@@ -33,6 +33,9 @@ from constants import (
     MODE_VEHICLE,
     MODE_WALK,
     PICKUP_RADIUS_M,
+    STAGE_INSPECTION,
+    STAGE_REPAIR,
+    STAGE_WAITING_PARTS,
     STATUS_ASSIGNED,
     STATUS_FREE,
     STATUSES_BUSY,
@@ -344,13 +347,52 @@ def mark_arrived(db, employee, call):
 
     Если инженер ехал на зарезервированной машине, с этого момента она
     при нём: доехал до борта — значит, забрал. По фактическому времени
-    пересчитывается очередь.
+    пересчитывается очередь. Возвращает True, если это первое прибытие.
     """
-    call.eta_at = utc_now()
+    first = call.first_arrived_at is None
+    if first:
+        # Только первое прибытие — «прибытие по регламенту». Возвращение
+        # к борту после переключения на другой вызов срок не переписывает.
+        call.eta_at = utc_now()
+        call.first_arrived_at = call.eta_at
+    if call.work_stage is None:
+        call.work_stage = STAGE_INSPECTION
     vehicle = employee.vehicle
     if vehicle is not None and vehicle.status == VEHICLE_RESERVED:
         vehicle.status = VEHICLE_IN_USE
     replan_queue(db, employee)
+    return first
+
+
+def can_switch_from(call):
+    """
+    Можно ли переключить исполнителя с этого вызова на другой — и почему.
+
+    Возвращает пару (можно, объяснение). Правило экспертов: начатый ремонт
+    не прерывают — вскрытый агрегат нельзя бросить, — а пока инженер ждёт
+    запчасти, он простаивает, и его время можно отдать срочному борту.
+    """
+    if call.status != CALL_ARRIVED:
+        return False, "в пути к борту"
+    if call.work_stage == STAGE_WAITING_PARTS:
+        return True, "ждёт запчасти — можно переключить"
+    if call.work_stage == STAGE_REPAIR:
+        return False, "ремонт начат — прерывать нельзя"
+    return False, "ведёт осмотр — диагноз ещё не поставлен"
+
+
+def switch_to(db, working, call, employee, plan):
+    """
+    Переключает исполнителя с ожидания запчастей на другой вызов.
+
+    Прежний вызов не закрывается и не теряет исполнителя: он встаёт
+    в его же очередь и снова станет текущим, когда новый будет закрыт.
+    Этап работ и первое прибытие по нему сохраняются.
+    """
+    working.status = CALL_QUEUED
+    working.queued_at = utc_now()
+    db.flush()
+    assign_now(db, call, employee, plan, None)
 
 
 def release_vehicle(employee, graph=None, stand_node_id=None):

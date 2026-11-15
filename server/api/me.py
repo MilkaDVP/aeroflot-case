@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from api.calls import to_response as call_to_response
 from auth.dependencies import Context, get_context
 from clock import utc_now
-from constants import STATUS_BUSY, STATUS_EN_ROUTE, VEHICLE_RESERVED
+from constants import STATUS_BUSY, STATUS_EN_ROUTE, VEHICLE_RESERVED, WORK_STAGES
 from database import get_db
 from graph_registry import get_graph
 from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
@@ -33,6 +33,7 @@ from services.assignment import (
 router = APIRouter(prefix="/api/me", tags=["PWA инженера"])
 
 ERROR_NOT_ENGINEER = "Учётная запись не связана с карточкой сотрудника"
+ERROR_NOT_AT_AIRCRAFT = "Этап работ и AOG выставляются у борта: сначала подтвердите прибытие"
 ERROR_NO_ACTIVE_CALL = "Активного вызова нет"
 
 ACTION_ACCEPTED = "accepted"
@@ -174,8 +175,73 @@ def update_status(
     else:
         employee.status = employee_status
         if payload.action == ACTION_ARRIVED:
-            mark_arrived(db, employee, call)
-            mentor.review_arrival(db, call, employee)
+            if mark_arrived(db, employee, call):
+                mentor.review_arrival(db, call, employee)
 
+    db.commit()
+    return call_to_response(call)
+
+
+class StageRequest(BaseModel):
+    """Этап работ у борта."""
+
+    stage: str = Field(description="inspection, waiting_parts или repair")
+
+
+class AogRequest(BaseModel):
+    """Статус AOG по итогам осмотра."""
+
+    aog: bool
+
+
+def arrived_call(context, db):
+    """Вызов, у борта которого инженер сейчас находится."""
+    employee = load_own_employee(context, db)
+    call = working_call_of(db, employee)
+    if call is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    if call.status != CALL_ARRIVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NOT_AT_AIRCRAFT)
+    return employee, call
+
+
+@router.post("/stage", response_model=CallResponse, summary="Этап работ")
+def set_stage(
+    payload: StageRequest,
+    context: Context = Depends(get_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Инженер сообщает, на каком этапе работы: осмотр, ждёт запчасти, ремонт.
+
+    По этапу диспетчер решает, можно ли переключить инженера на другой
+    борт: ожидание запчастей — простой, начатый ремонт прерывать нельзя.
+    Пересчитывается и время освобождения по его очереди.
+    """
+    if payload.stage not in WORK_STAGES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Этап должен быть одним из: {', '.join(WORK_STAGES)}",
+        )
+    employee, call = arrived_call(context, db)
+    call.work_stage = payload.stage
+    db.commit()
+    return call_to_response(call)
+
+
+@router.post("/aog", response_model=CallResponse, summary="Статус AOG")
+def set_aog(
+    payload: AogRequest,
+    context: Context = Depends(get_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Инженер ставит или снимает AOG — борт не может выполнять полёт.
+
+    Только инженер и только у борта: статус определяется после осмотра
+    и диагностики, а не со слов экипажа и не решением диспетчера.
+    """
+    employee, call = arrived_call(context, db)
+    call.aog = payload.aog
     db.commit()
     return call_to_response(call)

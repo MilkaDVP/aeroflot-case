@@ -72,6 +72,7 @@ function renderCalls(container, calls, selectedId, onSelect) {
     item.innerHTML = `
       <div class="call-top">
         <span class="call-board">${escapeHtml(call.board_number)}</span>
+        ${callFlags(call)}
         <span class="call-stand">${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(
           call.stand_ref || "—"
         )}</span>
@@ -83,7 +84,7 @@ function renderCalls(container, calls, selectedId, onSelect) {
         <span class="num" title="${call.reported_at ? "сообщение экипажа" : "регистрация"}">${formatClock(
           call.reported_at || call.created_at
         )}</span>
-        <span>${escapeHtml(statusTitle(call.status))}</span>
+        <span>${escapeHtml(statusWithStage(call))}</span>
         ${controlBadge(call)}
       </div>
       ${assignee}
@@ -253,7 +254,22 @@ function buildBusyRow(busy, queueOptions) {
   row.innerHTML = `
     <b>${escapeHtml(busy.full_name)} <span class="mark">${escapeHtml(busy.mark)}</span></b>
     <span class="busy-until">до ${formatClock(busy.busy_until)}</span>
+    ${busyStageLine(busy)}
   `;
+
+  // Того, кто ждёт запчасти, можно переключить на этот вызов сразу:
+  // это быстрее очереди и не вредит прежнему борту.
+  if (queueOptions && busy.switchable) {
+    const button = document.createElement("button");
+    button.className = "queue-button switch-button";
+    button.textContent = "Переключить";
+    button.disabled = !queueOptions.allowed;
+    button.title = queueOptions.allowed
+      ? "Сотрудник ждёт запчасти: переключить его на этот вызов, к прежнему борту он вернётся"
+      : queueOptions.denyReason;
+    button.addEventListener("click", () => queueOptions.onSwitch(busy));
+    row.append(button);
+  }
 
   if (queueOptions) {
     const button = document.createElement("button");
@@ -269,6 +285,40 @@ function buildBusyRow(busy, queueOptions) {
   return row;
 }
 
+/**
+ * Чем занят сотрудник: борт, этап работ и можно ли его переключить.
+ * Начатый ремонт не прерывают — это видно до того, как диспетчер решит.
+ */
+function busyStageLine(busy) {
+  if (!busy.current_board) {
+    return "";
+  }
+  const cls = busy.switchable ? "is-ok" : "";
+  return (
+    `<span class="busy-stage ${cls}">${escapeHtml(busy.current_board)} · ` +
+    `${escapeHtml(busy.switch_note || "")}</span>`
+  );
+}
+
+/**
+ * Отметки вызова: AOG и срочность.
+ * AOG ставит только инженер после осмотра; срочность — диспетчер.
+ */
+function callFlags(call) {
+  return (
+    (call.aog ? '<span class="flag flag-aog" title="Борт не может лететь. Статус поставил инженер">AOG</span>' : "") +
+    (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "")
+  );
+}
+
+/** Статус вызова вместе с этапом работ: «прибыл · ждёт запчасти». */
+function statusWithStage(call) {
+  const title = statusTitle(call.status);
+  return call.work_stage_title && call.status === "arrived"
+    ? `${title} · ${call.work_stage_title}`
+    : title;
+}
+
 /** Класс карточки вызова: новый, в очереди или назначенный. */
 /* --- Контроль регламента --- */
 
@@ -281,6 +331,7 @@ const CONTROL_LABELS = {
   unassigned: "без исполнителя",
   no_signal: "нет сигнала",
   pending: "",
+  paused: "приостановлен",
   arrived: "",
   closed: "",
 };
@@ -306,6 +357,11 @@ function controlBadge(call) {
   const control = call.control;
   if (!control || control.level === "arrived" || control.level === "closed") {
     return "";
+  }
+  if (control.level === "paused") {
+    // Срок прибытия по приостановленному вызову уже исполнен —
+    // минуты до него показывать незачем.
+    return `<span class="control-badge">приостановлен</span>`;
   }
   const label = CONTROL_LABELS[control.level];
   return (

@@ -11,6 +11,8 @@ class CallCreateRequest(BaseModel):
     # Сообщение экипажа своими словами. Необязательно: тип неисправности
     # уже даёт подбору всё нужное, описание — подробности для инженера.
     description: str | None = Field(default=None, max_length=500)
+    # Срочный вызов стоит первым в списке диспетчера.
+    urgent: bool = False
 
 
 class CallControl(BaseModel):
@@ -61,6 +63,11 @@ class CallResponse(BaseModel):
     # Сообщение экипажа и его источник — если вызов создан из заявки.
     reported_at: str | None = None
     source: str | None = None
+    urgent: bool = False
+    # AOG ставит только инженер после осмотра.
+    aog: bool = False
+    work_stage: str | None = None
+    work_stage_title: str | None = None
     suggested_employee_id: int | None
     assigned_employee_id: int | None
     assigned_employee_name: str | None
@@ -149,6 +156,12 @@ class BusySchema(BaseModel):
     mark: str
     status: str
     busy_until: str | None
+    # Чем занят и можно ли переключить его на этот вызов: начатый ремонт
+    # не прерывают, ожидание запчастей — можно.
+    current_board: str | None = None
+    work_stage_title: str | None = None
+    switchable: bool = False
+    switch_note: str | None = None
 
 
 class SuggestResponse(BaseModel):
@@ -180,6 +193,15 @@ class AssignRequest(BaseModel):
 
     employee_id: int
     override_reason: str | None = None
+    # Переключить занятого исполнителя, ждущего запчасти: его текущий вызов
+    # уходит в его же очередь, а этот становится текущим.
+    switch: bool = False
+
+
+class UrgencyRequest(BaseModel):
+    """Срочность вызова выставляет диспетчер."""
+
+    urgent: bool
 
 
 class UnassignRequest(BaseModel):

@@ -107,6 +107,20 @@
       </div>
       <div class="queue-note" id="call-queue" hidden></div>
       <div class="vehicle-note" id="call-vehicle" hidden></div>
+
+      <!--
+        У борта: этап работ и статус AOG. Этап видит диспетчер — по нему
+        он решает, можно ли переключить инженера на другой борт.
+        AOG ставит только инженер, после осмотра.
+      -->
+      <div class="at-aircraft" id="at-aircraft" hidden>
+        <div class="segmented stages" id="stage-switch">
+          <button data-stage="inspection">Осмотр</button>
+          <button data-stage="waiting_parts">Жду запчасти</button>
+          <button data-stage="repair">Ремонт</button>
+        </div>
+        <button class="aog-toggle" id="aog-toggle">AOG: борт не может лететь</button>
+      </div>
     </div>
   </div>
 

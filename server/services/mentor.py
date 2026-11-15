@@ -49,6 +49,7 @@ from services.deadline import (
 
 KIND_ASSIGN = "assign"
 KIND_QUEUE = "queue"
+KIND_SWITCH = "switch"
 KIND_UNASSIGN = "unassign"
 KIND_ARRIVAL = "arrival"
 KIND_WATCH_UNASSIGNED = "watch_unassigned"
@@ -294,6 +295,51 @@ def earlier_busy_note(result, employee):
     return ""
 
 
+# --- Переключение с ожидания запчастей --------------------------------------
+
+
+def review_switch(db, call, paused, employee, result, actor, now=None):
+    """
+    Оценка переключения исполнителя, ждавшего запчасти, на другой вызов.
+
+    Это грамотный ход: инженер простаивал, а борт получил исполнителя.
+    Вопрос только один — не было ли свободного, который приехал бы раньше.
+    """
+    now = now or utc_now()
+    margin = minutes_between(call.eta_at, deadline_of(call))
+    best = result.best
+    facts = {
+        "minutes_to_assign": minutes_between(started_at(call), now),
+        "margin_min": margin,
+        "override": False,
+        "override_cost_min": 0.0,
+    }
+    tail = reason_tail(call.override_reason)
+    paused_board = board_of(paused)
+
+    if best is not None and best.minutes + OVERRIDE_TOLERANCE_MIN <= call.eta_minutes:
+        verdict = VERDICT_FAIR
+        text = (
+            f"{employee.full_name} переключён с борта {paused_board}, где ждал запчасти, "
+            f"но свободный {best.employee['full_name']} ({transport_text(best)}) приехал бы "
+            f"раньше — за {minutes_text(best.minutes)}.{tail}"
+        )
+    elif margin >= 0:
+        verdict = VERDICT_GOOD
+        text = (
+            f"{employee.full_name} ждал запчасти на борте {paused_board} и переключён "
+            f"на этот вызов: простой использован, запас до срока {minutes_text(margin)}. "
+            f"К {paused_board} он вернётся после.{tail}"
+        )
+    else:
+        verdict = VERDICT_FAIR
+        text = (
+            f"{employee.full_name} переключён с ожидания запчастей на борте {paused_board}, "
+            f"но опоздает на {overrun_text(-margin)}.{tail}"
+        )
+    return record(db, call, KIND_SWITCH, verdict, text, facts, employee, actor, now)
+
+
 # --- Снятие исполнителя -----------------------------------------------------
 
 
@@ -461,7 +507,7 @@ def summary(db, airport_icao, now=None):
         if event.kind == KIND_ARRIVAL:
             arrivals += 1
             in_time += 1 if facts.get("in_time") else 0
-        if event.kind in (KIND_ASSIGN, KIND_QUEUE):
+        if event.kind in (KIND_ASSIGN, KIND_QUEUE, KIND_SWITCH):
             assign_waits.append(facts.get("minutes_to_assign") or 0.0)
             if facts.get("override"):
                 overrides += 1

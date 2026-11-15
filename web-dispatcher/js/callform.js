@@ -114,6 +114,11 @@ function buildCallFormMarkup(options) {
                   placeholder="Подробности для инженера: какая стойка, где течь, что на индикации"></textarea>
       </div>
 
+      <label class="form-check">
+        <input type="checkbox" id="form-urgent">
+        <span>Срочный вызов <span class="dim">— встанет первым в списке</span></span>
+      </label>
+
       <div id="form-error" class="error" hidden></div>
       <div class="modal-actions">
         <button id="form-cancel">Отмена</button>
@@ -426,12 +431,14 @@ async function submitCallForm(form, options) {
     // Разбор входящего сообщения: вызов создаётся из него и наследует
     // время сообщения экипажа — от него идёт отсчёт регламента.
     const aircraftId = Number(field(form, "#form-aircraft").value);
+    const urgent = field(form, "#form-urgent").checked;
     const call = options.report
-      ? await Api.acceptReport(options.report.id, code, aircraftId)
+      ? await Api.acceptReport(options.report.id, code, aircraftId, urgent)
       : await Api.createCall(
           aircraftId,
           code,
-          field(form, "#form-description").value.trim() || null
+          field(form, "#form-description").value.trim() || null,
+          urgent
         );
     closeCallForm(form);
     options.onRegistered(call);

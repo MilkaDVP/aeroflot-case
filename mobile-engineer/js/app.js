@@ -299,6 +299,56 @@ function renderWork() {
   updateDistance();
   updateCountdown();
   renderForecast(call.control);
+  renderAtAircraft(call);
+}
+
+/**
+ * Блок «у борта»: этап работ и AOG. Виден только после прибытия —
+ * до осмотра ни этапа, ни диагноза ещё нет.
+ */
+function renderAtAircraft(call) {
+  const arrived = call.status === "arrived";
+  el("at-aircraft").hidden = !arrived;
+  if (!arrived) {
+    return;
+  }
+  for (const button of document.querySelectorAll("#stage-switch button")) {
+    button.classList.toggle("active", button.dataset.stage === call.work_stage);
+  }
+  el("aog-toggle").classList.toggle("active", call.aog);
+  el("aog-toggle").textContent = call.aog
+    ? "AOG поставлен — снять"
+    : "AOG: борт не может лететь";
+}
+
+async function changeStage(stage) {
+  try {
+    await Api.setStage(stage);
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+}
+
+/**
+ * AOG — серьёзный статус: борт снимается с рейса. Поэтому постановка
+ * подтверждается, а снятие — нет: ошибочно поставленный статус нужно
+ * уметь убрать быстро.
+ */
+async function toggleAog() {
+  const call = state.call && state.call.call;
+  if (!call) {
+    return;
+  }
+  if (!call.aog && !window.confirm("Поставить AOG? Борт не сможет выполнять полёт.")) {
+    return;
+  }
+  try {
+    await Api.setAog(!call.aog);
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
 }
 
 /** Строка про машину: забрать по пути или уже едем на ней. */
@@ -585,6 +635,11 @@ function applySimulated(lat, lon) {
 }
 
 function bindEvents() {
+  for (const button of document.querySelectorAll("#stage-switch button")) {
+    button.addEventListener("click", () => changeStage(button.dataset.stage));
+  }
+  el("aog-toggle").addEventListener("click", toggleAog);
+
   // Переключатель подложки: снимок требует сети, схема работает всегда.
   el("map-toggle").addEventListener("click", () => {
     const toImagery = el("map-toggle").textContent === "Спутник";

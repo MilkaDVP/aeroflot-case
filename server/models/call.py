@@ -9,7 +9,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from clock import utc_now
@@ -86,6 +86,19 @@ class Call(Base):
     reported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Источник сообщения (имя интеграционного ключа) — происхождение вызова.
     source: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Срочность выставляет диспетчер: срочные вызовы стоят первыми в списке.
+    urgent: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # AOG (Aircraft on Ground) — борт не может лететь. Статус ставит только
+    # инженер после осмотра и диагностики: ни экипаж, ни диспетчер этого
+    # определить не вправе.
+    aog: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Этап работ у борта (constants.WORK_STAGES); пусто до прибытия.
+    work_stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Первое прибытие исполнителя. Отделено от eta_at: инженера, ждущего
+    # запчасти, могут переключить на другой борт, и его возвращение —
+    # не новое «прибытие по регламенту».
+    first_arrived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Кого предложила система и кого назначил человек.
     suggested_employee_id: Mapped[int | None] = mapped_column(

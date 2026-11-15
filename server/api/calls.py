@@ -18,7 +18,7 @@ from auth.dependencies import (
     require_roles,
 )
 from clock import to_iso_utc, utc_now, utc_today
-from constants import DEFECT_TYPES
+from constants import DEFECT_TYPES, WORK_STAGES
 from database import get_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
@@ -37,6 +37,7 @@ from schemas.call import (
     CallStatusRequest,
     SuggestResponse,
     UnassignRequest,
+    UrgencyRequest,
 )
 from services import mentor
 from services.assignment import (
@@ -44,8 +45,12 @@ from services.assignment import (
     assign_now,
     enqueue,
     free_vehicles,
+    can_switch_from,
     is_busy,
+    mark_arrived,
     plan_route,
+    switch_to,
+    working_call_of,
     unassign,
 )
 from services.deadline import assess
@@ -86,6 +91,7 @@ ERROR_QUEUE_PROMOTES_ITSELF = (
     "Вызов в очереди становится текущим сам, когда исполнитель закроет "
     "предыдущий вызов"
 )
+ERROR_NOT_SWITCHABLE = "Переключить нельзя: {name} — {note}"
 ERROR_NOT_ASSIGNED = "У вызова нет исполнителя: снимать нечего"
 ERROR_CLOSED_CALL = "Вызов закрыт. Снять исполнителя с закрытого вызова нельзя"
 ERROR_UNASSIGN_NEEDS_REASON = (
@@ -148,6 +154,10 @@ def to_response(call, db=None, now=None):
         closed_at=to_iso_utc(call.closed_at),
         reported_at=to_iso_utc(call.reported_at),
         source=call.source,
+        urgent=bool(call.urgent),
+        aog=bool(call.aog),
+        work_stage=call.work_stage,
+        work_stage_title=WORK_STAGES.get(call.work_stage),
         suggested_employee_id=call.suggested_employee_id,
         assigned_employee_id=call.assigned_employee_id,
         assigned_employee_name=assigned.full_name if assigned else None,
@@ -250,7 +260,28 @@ def run_suggestion(db, context, call):
                 ),
             }
         )
+    for entry in result.busy:
+        describe_busy(db, entry)
     return result
+
+
+def describe_busy(db, entry):
+    """
+    Дополняет запись о занятом: на каком он борте и можно ли его переключить.
+
+    Диспетчер, выбирая из занятых, должен видеть не только «освободится
+    в 14:40», но и чем человек занят: того, кто ждёт запчасти, можно
+    переключить без вреда, а того, кто вскрыл агрегат, — нельзя.
+    """
+    employee = db.get(Employee, entry["employee_id"])
+    working = working_call_of(db, employee) if employee is not None else None
+    if working is None:
+        return
+    switchable, note = can_switch_from(working)
+    entry["current_board"] = mentor.board_of(working)
+    entry["work_stage_title"] = WORK_STAGES.get(working.work_stage)
+    entry["switchable"] = switchable
+    entry["switch_note"] = note
 
 
 def check_permit(call, employee):
@@ -288,7 +319,11 @@ def list_calls(
 
     # Второй ключ — идентификатор: вызовы, созданные в одну миллисекунду,
     # иначе шли бы в порядке, зависящем от разрешения системных часов.
-    calls = query.order_by(Call.created_at.desc(), Call.id.desc()).all()
+    # Сначала AOG и срочные: при нескольких вызовах сразу диспетчер должен
+    # видеть главное наверху, а не искать его в списке по времени.
+    calls = query.order_by(
+        Call.aog.desc(), Call.urgent.desc(), Call.created_at.desc(), Call.id.desc()
+    ).all()
     now = utc_now()
     return [to_response(call, db, now) for call in calls]
 
@@ -328,6 +363,7 @@ def create_call(
     check_same_airport(context, aircraft.airport_icao)
 
     call = new_call(db, aircraft, defect, payload.description)
+    call.urgent = payload.urgent
     db.commit()
     return to_response(call, db)
 
@@ -435,8 +471,11 @@ def assign_employee(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_QUEUE_NEEDS_REASON
             )
         call.override_reason = payload.override_reason
-        enqueue(db, call, employee)
-        mentor.review_queue(db, call, employee, result, context.user)
+        if payload.switch:
+            switch_employee(db, call, employee, result, context.user)
+        else:
+            enqueue(db, call, employee)
+            mentor.review_queue(db, call, employee, result, context.user)
         db.commit()
         return to_response(call, db)
 
@@ -458,6 +497,41 @@ def assign_employee(
     call.override_reason = payload.override_reason if is_override else None
     assign_now(db, call, employee, plan, pickup_vehicle)
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
+    db.commit()
+    return to_response(call, db)
+
+
+def switch_employee(db, call, employee, result, actor):
+    """
+    Переключение занятого исполнителя на этот вызов.
+
+    Разрешено только с ожидания запчастей; правило проверяет сервер,
+    чтобы запрос в обход интерфейса не мог прервать начатый ремонт.
+    """
+    working = working_call_of(db, employee)
+    switchable, note = can_switch_from(working) if working is not None else (False, "занят")
+    if not switchable:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, ERROR_NOT_SWITCHABLE.format(name=employee.full_name, note=note)
+        )
+    plan, _vehicle = plan_route(db, employee, call.stand_node_id, get_graph(call.airport_icao))
+    if plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)
+
+    switch_to(db, working, call, employee, plan)
+    mentor.review_switch(db, call, working, employee, result, actor)
+
+
+@router.post("/{call_id}/urgency", response_model=CallResponse, summary="Срочность вызова")
+def set_urgency(
+    call_id: int,
+    payload: UrgencyRequest,
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+    db: Session = Depends(get_db),
+):
+    """Диспетчер отмечает вызов срочным или снимает отметку."""
+    call = load_call(db, context, call_id)
+    call.urgent = payload.urgent
     db.commit()
     return to_response(call, db)
 
@@ -539,7 +613,8 @@ def update_call_status(
     arrived_now = payload.status == CALL_ARRIVED and call.status != CALL_ARRIVED
     call.status = payload.status
     if arrived_now and call.assigned_employee is not None:
-        mentor.review_arrival(db, call, call.assigned_employee)
+        if mark_arrived(db, call.assigned_employee, call):
+            mentor.review_arrival(db, call, call.assigned_employee)
 
     if payload.status == CALL_CLOSED:
         call.closed_at = utc_now()

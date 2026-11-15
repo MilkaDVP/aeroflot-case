@@ -284,6 +284,7 @@ function queueOptions() {
     allowed: canOverride && assignable,
     denyReason,
     onQueue: queueOnto,
+    onSwitch: switchOnto,
   };
 }
 
@@ -320,6 +321,34 @@ async function queueOnto(busy) {
 
   try {
     await Api.assign(state.selectedCall.id, busy.employee_id, reason);
+    clearSuggestion();
+    state.selectedCall = null;
+    await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+/**
+ * Переключение на выбранный вызов сотрудника, который ждёт запчасти.
+ *
+ * Его текущий борт не теряет исполнителя: вызов встаёт в его же очередь,
+ * и он вернётся туда после этого. Причина остаётся в записи.
+ */
+async function switchOnto(busy) {
+  if (!state.selectedCall) {
+    return;
+  }
+  const reason = window.prompt(
+    `Переключить сотрудника ${busy.full_name} на этот вызов?\n` +
+      `Сейчас он на борте ${busy.current_board}: ${busy.switch_note}. ` +
+      "К этому борту он вернётся после.\n\nУкажите причину:"
+  );
+  if (!reason) {
+    return;
+  }
+  try {
+    await Api.assign(state.selectedCall.id, busy.employee_id, reason, true);
     clearSuggestion();
     state.selectedCall = null;
     await refresh();

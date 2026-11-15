@@ -577,3 +577,37 @@ button:disabled { opacity: 0.5; }
 }
 
 .deadline-forecast[hidden] { display: none; }
+
+/* --- У борта: этап работ и AOG --- */
+
+.at-aircraft {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.at-aircraft[hidden] { display: none; }
+
+.segmented.stages { grid-template-columns: 1fr 1fr 1fr; }
+.segmented.stages button { font-size: 13px; padding: 8px 4px; }
+
+/* AOG — красный и отдельной кнопкой: это решение с последствиями,
+   его нельзя нажать случайно вместе с этапом. */
+.aog-toggle {
+  min-height: 48px;
+  border-color: var(--danger);
+  color: var(--danger);
+  background: transparent;
+  font-weight: 600;
+}
+
+.aog-toggle.active {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* У галочки «прибытие подтверждено» единицы измерения нет. */
+.deadline.is-done .deadline-value small { display: none; }

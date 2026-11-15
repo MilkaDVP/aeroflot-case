@@ -82,6 +82,7 @@ class ReportAcceptRequest(BaseModel):
 
     defect_code: str
     aircraft_id: int | None = None
+    urgent: bool = False
 
 
 class ReportRejectRequest(BaseModel):
@@ -299,6 +300,7 @@ def accept_report(
         )
 
     call = new_call(db, aircraft, defect, report.description, report.reported_at, report.source)
+    call.urgent = payload.urgent
     report.status = REPORT_ACCEPTED
     report.call_id = call.id
     report.aircraft = aircraft

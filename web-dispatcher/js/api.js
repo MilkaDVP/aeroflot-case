@@ -142,11 +142,18 @@ const Api = {
   vehicles: () => request("GET", "/api/vehicles"),
 
   calls: () => request("GET", "/api/calls"),
-  createCall: (aircraft_id, defect_code, description) =>
-    request("POST", "/api/calls", { aircraft_id, defect_code, description }),
+  createCall: (aircraft_id, defect_code, description, urgent) =>
+    request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
-  assign: (callId, employee_id, override_reason) =>
-    request("POST", `/api/calls/${callId}/assign`, { employee_id, override_reason }),
+  // switchOver — переключить занятого, ждущего запчасти, на этот вызов.
+  assign: (callId, employee_id, override_reason, switchOver) =>
+    request("POST", `/api/calls/${callId}/assign`, {
+      employee_id,
+      override_reason,
+      switch: Boolean(switchOver),
+    }),
+  setUrgency: (callId, urgent) =>
+    request("POST", `/api/calls/${callId}/urgency`, { urgent }),
   unassign: (callId, reason) =>
     request("POST", `/api/calls/${callId}/unassign`, { reason }),
   setCallStatus: (callId, status) =>
@@ -154,8 +161,8 @@ const Api = {
 
   // Входящие сообщения экипажа и внешних систем: ящик диспетчера.
   reports: () => request("GET", "/api/reports"),
-  acceptReport: (reportId, defect_code, aircraft_id) =>
-    request("POST", `/api/reports/${reportId}/accept`, { defect_code, aircraft_id }),
+  acceptReport: (reportId, defect_code, aircraft_id, urgent) =>
+    request("POST", `/api/reports/${reportId}/accept`, { defect_code, aircraft_id, urgent }),
   rejectReport: (reportId, reason) =>
     request("POST", `/api/reports/${reportId}/reject`, { reason }),
 
