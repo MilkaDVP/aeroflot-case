@@ -35,6 +35,19 @@ const EMPTY_VIEW_HALF_M = 1500;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 30;
 
+// След хранит точки за это время и не короче этого шага между точками.
+const TRAIL_WINDOW_MS = 3 * 60 * 1000;
+const TRAIL_MIN_STEP_M = 3;
+
+/** Точка следа ещё свежая; момент «сейчас» приходит через this. */
+function isRecentTrailPoint(point) {
+  return this - point.at <= TRAIL_WINDOW_MS;
+}
+
+function trailPoint(point) {
+  return `${point.x},${point.y}`;
+}
+
 class AirportMap {
   constructor(svgElement) {
     this.svg = svgElement;
@@ -49,6 +62,7 @@ class AirportMap {
       taxiways: createGroup("layer-taxiways"),
       stands: createGroup("layer-stands"),
       route: createGroup("layer-route"),
+      trails: createGroup("layer-trails"),
       aircraft: createGroup("layer-aircraft"),
       vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
@@ -77,6 +91,8 @@ class AirportMap {
     this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
 
     this.tiles = null;
+    // Следы перемещения: идентификатор сотрудника -> последние точки.
+    this.trails = new Map();
     // Догрузка тайлов откладывается до конца жеста: во время
     // перетаскивания пересчитывать их на каждое движение мыши незачем.
     this.tileRefreshTimer = null;
@@ -408,6 +424,7 @@ class AirportMap {
     const placed = employees.filter(
       (employee) => employee.lat !== null && employee.lon !== null
     );
+    this.drawTrails(placed);
     const offsets = spreadOverlapping(placed);
 
     for (const employee of placed) {
@@ -470,6 +487,51 @@ class AirportMap {
 
     const point = this.toGraphCoords(event.clientX, event.clientY);
     this.onGroundClick(this.unprojectXY(point.x, point.y));
+  }
+
+  /**
+   * Короткий след перемещения сотрудников за последние минуты.
+   *
+   * Точка на карте отвечает на вопрос «где он», а след — «куда и как
+   * быстро он движется»: по нему видно, что инженер едет к борту,
+   * стоит или свернул не туда, ещё до того, как изменится прогноз.
+   * След собирается из опросов в памяти рабочего места; машина, на
+   * которой едет инженер, движется вместе с ним, и отдельный след
+   * ей не нужен.
+   */
+  drawTrails(employees) {
+    const now = Date.now();
+    const seen = new Set();
+
+    for (const employee of employees) {
+      seen.add(employee.id);
+      const position = this.projectLatLon(employee.lat, employee.lon);
+      const trail = this.trails.get(employee.id) || [];
+      const last = trail[trail.length - 1];
+      // Новая точка добавляется, только если сотрудник сдвинулся
+      // заметнее погрешности: дрожание GPS следом не считается.
+      if (!last || Math.hypot(last.x - position.x, last.y - position.y) > TRAIL_MIN_STEP_M) {
+        trail.push({ x: position.x, y: position.y, at: now });
+      }
+      this.trails.set(employee.id, trail.filter(isRecentTrailPoint, now));
+    }
+    for (const id of [...this.trails.keys()]) {
+      if (!seen.has(id)) {
+        this.trails.delete(id);
+      }
+    }
+
+    const layer = this.layers.trails;
+    layer.replaceChildren();
+    for (const trail of this.trails.values()) {
+      if (trail.length < 2) {
+        continue;
+      }
+      const line = document.createElementNS(SVG_NS, "polyline");
+      line.setAttribute("points", trail.map(trailPoint).join(" "));
+      line.setAttribute("class", "trail");
+      layer.append(line);
+    }
   }
 
   /**

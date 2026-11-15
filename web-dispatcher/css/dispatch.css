@@ -1472,3 +1472,16 @@
 .form-check input {
   width: auto;
 }
+
+/* След перемещения сотрудника за последние минуты: тонкий и неяркий,
+   чтобы не спорить с маршрутом. */
+.trail {
+  fill: none;
+  stroke: var(--text);
+  stroke-opacity: 0.45;
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 5;
+  vector-effect: non-scaling-stroke;
+}
