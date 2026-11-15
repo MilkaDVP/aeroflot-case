@@ -6,6 +6,8 @@
 Телефон в руках человека на перроне должен делать минимум обращений.
 """
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,13 +15,21 @@ from sqlalchemy.orm import Session
 from api.calls import to_response as call_to_response
 from auth.dependencies import Context, get_context
 from clock import utc_now
-from constants import STATUS_BUSY, STATUS_EN_ROUTE, VEHICLE_RESERVED, WORK_STAGES
+from constants import (
+    OFFLINE_ACTION_MAX_AGE_S,
+    STATUS_BUSY,
+    STATUS_EN_ROUTE,
+    VEHICLE_RESERVED,
+    WORK_STAGES,
+)
 from database import get_db
 from graph_registry import get_graph
 from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import STATUS_CLOSED as CALL_CLOSED
+from models.call import Call
 from models.employee import Employee
+from models.engineer_action import EngineerAction
 from schemas.auth import MessageResponse
 from schemas.call import CallResponse
 from services import mentor
@@ -34,11 +44,22 @@ router = APIRouter(prefix="/api/me", tags=["PWA инженера"])
 
 ERROR_NOT_ENGINEER = "Учётная запись не связана с карточкой сотрудника"
 ERROR_NOT_AT_AIRCRAFT = "Этап работ и AOG выставляются у борта: сначала подтвердите прибытие"
+ERROR_OTHER_CALL = "Действие относится к другому вызову: этот вызов с вас снят или уже закрыт"
+ERROR_WRONG_ORDER = "Действие не подходит к состоянию вызова ({status})"
 ERROR_NO_ACTIVE_CALL = "Активного вызова нет"
 
 ACTION_ACCEPTED = "accepted"
 ACTION_ARRIVED = "arrived"
 ACTION_CLOSED = "closed"
+
+# Из каких статусов вызова действие допустимо. Раньше порядок не
+# проверялся; с отложенной отправкой это стало важно: действия, накопленные
+# без связи, приходят пачкой, и каждое обязано лечь на своё место.
+ACTION_ALLOWED_FROM = {
+    ACTION_ACCEPTED: ("assigned",),
+    ACTION_ARRIVED: ("assigned", "accepted"),
+    ACTION_CLOSED: ("arrived",),
+}
 
 # Действие инженера -> статус вызова и статус самого сотрудника.
 # Таблица вместо ветвлений: список действий короткий и фиксированный,
@@ -55,6 +76,15 @@ class EngineerStatusRequest(BaseModel):
     """Смена статуса инженером с телефона."""
 
     action: str = Field(description="accepted, arrived или closed")
+    # Идентификатор действия, выданный телефоном: повторная отправка того
+    # же действия (ответ потерялся, связь мигнула) не применится дважды.
+    action_id: str | None = Field(default=None, min_length=8, max_length=64)
+    # К какому вызову относится действие. Пока телефон был без связи,
+    # диспетчер мог снять вызов: чужой вызов действие не тронет.
+    call_id: int | None = None
+    # Сколько секунд назад действие совершено. Возраст, а не время:
+    # часы телефона могут расходиться с сервером.
+    age_s: float | None = Field(default=None, ge=0, le=OFFLINE_ACTION_MAX_AGE_S)
 
 
 class CurrentCallResponse(BaseModel):
@@ -162,22 +192,52 @@ def update_status(
         )
 
     employee = load_own_employee(context, db)
+
+    # Повтор уже применённого действия: отвечаем состоянием вызова,
+    # ничего не меняя. Телефон получает тот же ответ, что и в первый раз.
+    if payload.action_id:
+        done = db.get(EngineerAction, payload.action_id)
+        if done is not None and done.employee_id == employee.id:
+            return call_to_response(db.get(Call, done.call_id))
+
     call = working_call_of(db, employee)
     if call is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    if payload.call_id is not None and payload.call_id != call.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_OTHER_CALL)
+    if call.status not in ACTION_ALLOWED_FROM[payload.action]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            ERROR_WRONG_ORDER.format(status=call.status),
+        )
 
+    now = utc_now()
+    performed = now - timedelta(seconds=payload.age_s or 0)
     call_status, employee_status = ENGINEER_ACTIONS[payload.action]
     call.status = call_status
 
     if payload.action == ACTION_CLOSED:
-        call.closed_at = utc_now()
+        call.closed_at = performed
         advance_after_close(db, employee, call, was_working=True)
     else:
         employee.status = employee_status
         if payload.action == ACTION_ARRIVED:
-            if mark_arrived(db, employee, call):
-                mentor.review_arrival(db, call, employee)
+            # Прибытие засчитывается по моменту нажатия, а не доставки:
+            # инженер, прибывший вовремя без связи, регламент не нарушил.
+            if mark_arrived(db, employee, call, performed):
+                mentor.review_arrival(db, call, employee, performed)
 
+    if payload.action_id:
+        db.add(
+            EngineerAction(
+                action_id=payload.action_id,
+                employee_id=employee.id,
+                call_id=call.id,
+                action=payload.action,
+                performed_at=performed,
+                received_at=now,
+            )
+        )
     db.commit()
     return call_to_response(call)
 

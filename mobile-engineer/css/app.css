@@ -611,3 +611,18 @@ button:disabled { opacity: 0.5; }
 
 /* У галочки «прибытие подтверждено» единицы измерения нет. */
 .deadline.is-done .deadline-value small { display: none; }
+
+/* --- Нет связи --- */
+
+/* Жёлтая полоса, а не красная: отсутствие связи на перроне — обычное
+   дело, а не авария; важно лишь, чтобы возраст данных был на виду. */
+.link-banner {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn);
+}
+
+.link-banner[hidden] { display: none; }

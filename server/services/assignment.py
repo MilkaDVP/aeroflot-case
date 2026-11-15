@@ -341,7 +341,7 @@ def unassign(db, call, reason):
         advance_after_close(db, employee, call, was_working, park_at_stand)
 
 
-def mark_arrived(db, employee, call):
+def mark_arrived(db, employee, call, at=None):
     """
     Прибытие подтверждено: фактическое время вместо расчётного.
 
@@ -353,7 +353,9 @@ def mark_arrived(db, employee, call):
     if first:
         # Только первое прибытие — «прибытие по регламенту». Возвращение
         # к борту после переключения на другой вызов срок не переписывает.
-        call.eta_at = utc_now()
+        # at — когда инженер нажал «прибыл», если нажатие дошло позже:
+        # телефон был без связи, а срок исполнен в момент нажатия.
+        call.eta_at = at or utc_now()
         call.first_arrived_at = call.eta_at
     if call.work_stage is None:
         call.work_stage = STAGE_INSPECTION

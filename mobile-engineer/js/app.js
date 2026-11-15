@@ -14,6 +14,10 @@ const state = {
   // Последние отправленные координаты: чтобы не слать одно и то же.
   sentAt: 0,
   onShift: false,
+  // Нет связи с сервером: экран живёт на сохранённом вызове.
+  offline: false,
+  // Когда получены данные, которые сейчас на экране.
+  snapshotAt: null,
   // Удалось ли включить офлайн-оболочку.
   offlineReady: false,
   // Опорная точка аэропорта: на неё центрируется карта, пока нет
@@ -54,11 +58,20 @@ async function start() {
   }
 
   try {
+    await Outbox.load();
     const user = await Api.me();
     Session.user = user;
     state.user = user;
     afterLogin(user);
   } catch (error) {
+    // Нет связи при запуске — не повод выбрасывать из учётной записи:
+    // с сохранёнными данными инженер продолжает работу.
+    if (error.status === 0 && Session.user) {
+      state.user = Session.user;
+      state.onShift = true;
+      enterWork();
+      return;
+    }
     Session.clear();
     showScreen("login");
   }
@@ -205,6 +218,8 @@ el("shift-logout").addEventListener("click", logout);
  */
 function enterWork() {
   showScreen("work");
+  // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
+  window.addEventListener("online", refresh);
   locator.startGps();
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
@@ -216,10 +231,19 @@ function enterWork() {
 
 async function refresh() {
   try {
+    // Сначала досылаем накопленное: иначе ответ сервера не учёл бы
+    // действия, нажатые без связи, и «откатил» бы экран назад.
+    await flushOutbox();
+    if (Outbox.items.length) {
+      throw new ApiError(0, "Нет связи с сервером");
+    }
     const payload = await Api.currentCall();
     // Сервер отдаёт либо вызов с маршрутом, либо сообщение «вызовов нет».
     const previous = state.call ? state.call.call : null;
     state.call = payload && payload.call ? payload : null;
+    state.offline = false;
+    state.snapshotAt = Date.now();
+    saveSnapshot();
     noticeIfTaken(previous);
     renderWork();
   } catch (error) {
@@ -227,7 +251,97 @@ async function refresh() {
       logout();
       return;
     }
+    if (error.status === 0) {
+      await goOffline();
+      return;
+    }
     showToast(error.detail, true);
+  }
+}
+
+/* --- Работа без связи --- */
+
+function saveSnapshot() {
+  OfflineStore.set(KEY_SNAPSHOT, {
+    payload: state.call,
+    at: state.snapshotAt,
+    employeeId: state.user.employee_id,
+  });
+}
+
+/**
+ * Связи нет: показываем последний известный вызов с пометкой о возрасте.
+ *
+ * Снимок читается с диска один раз за период без связи — дальше экран
+ * живёт на состоянии в памяти, к которому уже применены нажатые действия.
+ */
+async function goOffline() {
+  if (!state.offline) {
+    const snapshot = await OfflineStore.get(KEY_SNAPSHOT);
+    if (snapshot && snapshot.employeeId === state.user.employee_id && state.call === null) {
+      state.call = snapshot.payload;
+      state.snapshotAt = snapshot.at;
+    }
+    state.offline = true;
+  }
+  renderWork();
+}
+
+/** Полоса состояния связи: возраст данных и неотправленные действия. */
+function renderLink() {
+  const banner = el("link-banner");
+  const pending = Outbox.items.length;
+  banner.hidden = !state.offline && pending === 0;
+  if (banner.hidden) {
+    return;
+  }
+  const parts = [];
+  if (state.offline) {
+    parts.push("Нет связи");
+    if (state.snapshotAt) {
+      parts.push(`данные на ${clockText(state.snapshotAt)}`);
+    }
+  }
+  if (pending) {
+    parts.push(`не отправлено действий: ${pending}`);
+  }
+  banner.textContent = parts.join(" · ");
+}
+
+function clockText(timestamp) {
+  return new Date(timestamp).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Досылает накопленные действия; об отказах сервера сообщает инженеру. */
+async function flushOutbox() {
+  if (!Outbox.items.length) {
+    return;
+  }
+  const rejected = await Outbox.flush();
+  if (rejected.length) {
+    showToast(`Действие не принято: ${rejected[0].detail}`, true);
+  }
+}
+
+/**
+ * Применяет действие к вызову на экране, не дожидаясь сервера.
+ *
+ * Инженер без связи должен видеть результат нажатия сразу: кнопка
+ * переходит к следующему шагу, а действие ждёт отправки в очереди.
+ */
+function applyLocally(action) {
+  const call = state.call.call;
+  if (action === "closed") {
+    state.call = null;
+    return;
+  }
+  call.status = action;
+  if (action === "arrived") {
+    call.work_stage = call.work_stage || "inspection";
+    if (call.control) {
+      call.control.level = "arrived";
+      call.control.alert = false;
+    }
   }
 }
 
@@ -248,6 +362,7 @@ function noticeIfTaken(previous) {
 }
 
 function renderWork() {
+  renderLink();
   const hasCall = Boolean(state.call);
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
@@ -530,16 +645,21 @@ el("call-action").addEventListener("click", async () => {
   el("call-error").hidden = true;
 
   try {
-    await Api.setStatus(step.action);
+    // Действие сначала записывается на телефон и применяется к экрану,
+    // и только потом отправляется: без связи оно не теряется и не
+    // блокирует работу, а уйдёт на сервер с исходным временем нажатия.
     const hadQueue = step.action === "closed" && (state.call.queued_count || 0) > 0;
-    if (step.action === "closed") {
-      state.call = null;
-    }
+    await Outbox.add(step.action, call.id);
+    applyLocally(step.action);
+    saveSnapshot();
+    renderWork();
     await refresh();
-    if (step.action === "closed") {
+    if (step.action === "closed" && !state.offline) {
       // Сообщение по факту ответа сервера, а не по предположению: при
       // очереди следующий вызов уже пришёл, и «вы свободны» было бы ложью.
       showToast(hadQueue && state.call ? "Вызов закрыт. Следующий вызов из очереди" : "Вызов закрыт. Вы снова свободны");
+    } else if (step.action === "closed" && hadQueue) {
+      showToast("Вызов закрыт. Следующий вызов придёт, когда появится связь");
     }
   } catch (error) {
     el("call-error").hidden = false;

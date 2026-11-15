@@ -125,7 +125,9 @@ const Api = {
   me: () => request("GET", "/api/auth/me"),
 
   currentCall: () => request("GET", "/api/me/current-call"),
-  setStatus: (action) => request("POST", "/api/me/status", { action }),
+  // extra — идентификатор действия, вызов и возраст: для отложенной отправки.
+  setStatus: (action, extra) =>
+    request("POST", "/api/me/status", { action, ...(extra || {}) }),
   // У борта: этап работ и статус AOG (ставит только инженер).
   setStage: (stage) => request("POST", "/api/me/stage", { stage }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
