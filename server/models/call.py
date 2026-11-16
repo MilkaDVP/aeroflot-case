@@ -140,6 +140,12 @@ class Call(Base):
     # исполнитель не начал движение или идёт не по учебному сценарию.
     sim_progress_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Вызов поддержки: ещё один инженер на тот же борт по тому же вызову.
+    # Здесь — основной вызов. Отдельная запись, а не список исполнителей
+    # в одной: у каждого инженера свой маршрут, своя машина, свой статус
+    # и своя очередь, и вся эта логика уже работает для вызова целиком.
+    parent_call_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"), nullable=True)
+
     aircraft = relationship("Aircraft", lazy="selectin")
     vehicle = relationship("Vehicle", lazy="selectin")
     # Тип неисправности по коду. Внешнего ключа в схеме нет: таблица вызовов

@@ -28,11 +28,12 @@ from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.call import Call
+from models.call_message import AUTHOR_ENGINEER
 from models.employee import Employee
 from models.engineer_action import EngineerAction
 from schemas.auth import MessageResponse
-from schemas.call import CallResponse
-from services import mentor
+from schemas.call import CallResponse, MessageRequest
+from services import mentor, support
 from services.assignment import (
     advance_after_close,
     mark_arrived,
@@ -219,6 +220,9 @@ def update_status(
     if payload.action == ACTION_CLOSED:
         call.closed_at = performed
         advance_after_close(db, employee, call, was_working=True)
+        if call.parent_call_id is None:
+            # Основной инженер закрыл вызов — работы окончены для всех.
+            support.close_support(db, call, performed)
     else:
         employee.status = employee_status
         if payload.action == ACTION_ARRIVED:
@@ -302,6 +306,31 @@ def set_aog(
     и диагностики, а не со слов экипажа и не решением диспетчера.
     """
     employee, call = arrived_call(context, db)
+    # AOG — свойство борта, а не инженера: кто бы из группы его ни
+    # поставил, отметка ложится на основной вызов, который видит диспетчер.
+    support.root_of(call).aog = payload.aog
     call.aog = payload.aog
+    db.commit()
+    return call_to_response(call)
+
+
+@router.post("/message", response_model=CallResponse, summary="Написать диспетчеру")
+def send_message(
+    payload: MessageRequest,
+    context: Context = Depends(get_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Сообщение инженера диспетчеру по текущему вызову.
+
+    Свободный текст вместо набора готовых статусов: «нужен подъёмник»,
+    «запчасть привезут к 15:00», «прошу второго инженера». Диспетчер
+    видит его на карточке вызова.
+    """
+    employee = load_own_employee(context, db)
+    call = working_call_of(db, employee)
+    if call is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    support.add_message(db, call, AUTHOR_ENGINEER, employee.full_name, payload.text)
     db.commit()
     return call_to_response(call)

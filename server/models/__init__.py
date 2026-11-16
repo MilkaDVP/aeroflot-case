@@ -8,6 +8,7 @@
 from models.aircraft import Aircraft
 from models.airport import Airport
 from models.call import Call
+from models.call_message import CallMessage
 from models.defect_type import DefectType
 from models.employee import Employee
 from models.engineer_action import EngineerAction
@@ -21,6 +22,7 @@ __all__ = [
     "Airport",
     "AuthSession",
     "Call",
+    "CallMessage",
     "DefectType",
     "Employee",
     "EngineerAction",

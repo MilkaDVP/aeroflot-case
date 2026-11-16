@@ -152,6 +152,11 @@ const Api = {
       override_reason,
       switch: Boolean(switchOver),
     }),
+  // Ещё один инженер на тот же вызов: свободный выезжает сразу,
+  // занятый встаёт в очередь (нужна причина).
+  support: (callId, employee_id, override_reason) =>
+    request("POST", `/api/calls/${callId}/support`, { employee_id, override_reason }),
+  sendMessage: (callId, text) => request("POST", `/api/calls/${callId}/message`, { text }),
   setUrgency: (callId, urgent) =>
     request("POST", `/api/calls/${callId}/urgency`, { urgent }),
   unassign: (callId, reason) =>

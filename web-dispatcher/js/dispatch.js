@@ -17,8 +17,13 @@ const state = {
   reports: [],
   selectedCall: null,
   suggestion: null,
-  // Кандидат, выбранный диспетчером вручную. null — согласие с системой.
-  pickedEmployeeId: null,
+  // Кого диспетчер отправляет на вызов, в порядке выбора. Первый —
+  // ответственный исполнитель, остальные едут ему в помощь. Сразу после
+  // подбора здесь один человек — тот, кого предложила система.
+  picked: [],
+  // Все вызовы с сервера, включая вызовы поддержки (второй инженер).
+  // В списке слева — только основные: state.calls.
+  allCalls: [],
   // Режим имитации координат: включён ли и кого переставляем.
   // Идут ли учения: сервер сам двигает сотрудников без телефона.
   drill: false,
@@ -97,7 +102,10 @@ async function refresh() {
 
     state.employees = employees;
     state.aircraft = aircraft;
-    state.calls = calls;
+    state.allCalls = calls;
+    // Вызов поддержки — не отдельный борт, а второй инженер основного
+    // вызова: он показан строкой на его карточке, а не карточкой в списке.
+    state.calls = calls.filter((call) => !call.parent_call_id);
     state.vehicles = vehicles;
 
     // Выбранный вызов мог быть закрыт другим диспетчером.
@@ -111,7 +119,6 @@ async function refresh() {
 
     renderAll();
     renderDrill();
-    updateGuide();
     renderInbox(reports, processReport, rejectReport);
 
     // Прогноз по назначенному вызову меняется вместе с координатами
@@ -120,6 +127,7 @@ async function refresh() {
     // мог выбрать другого кандидата, и опрос не должен сбрасывать его выбор.
     if (state.selectedCall && !isAssignable(state.selectedCall)) {
       renderAssignedCard(state.selectedCall);
+      updateAssignButton();
     }
     elements.connStatus.textContent = `обновлено ${new Date().toLocaleTimeString("ru-RU")}`;
   } catch (error) {
@@ -129,7 +137,7 @@ async function refresh() {
 
 function renderAll() {
   elements.callsCount.textContent = state.calls.length;
-  renderAlerts(state.calls, selectCall);
+  renderAlerts(state.calls);
   renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
   renderShiftStats(state.employees, state.vehicles);
 
@@ -204,23 +212,47 @@ function openCallById(callId) {
  */
 function showAssignment(call) {
   state.suggestion = null;
-  state.pickedEmployeeId = null;
+  state.picked = [];
   elements.calcTime.textContent = "";
   elements.assignButton.disabled = true;
 
   renderAssignedCard(call);
-  updateGuide();
   if (call.route_node_ids && call.route_node_ids.length > 1) {
     airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
   } else {
     airportMap.clearRoute();
   }
   airportMap.drawEmployees(state.employees, employeeClass);
+  loadExtraCandidates(call);
+}
+
+/**
+ * Кого ещё можно отправить на уже назначенный вызов.
+ *
+ * Тот же подбор, что и для нового вызова: свободные с допуском и занятые,
+ * к которым можно встать в очередь. Назначенные на этот вызов в нём уже
+ * не значатся — они заняты.
+ */
+async function loadExtraCandidates(call) {
+  if (call.status === "closed") {
+    return;
+  }
+  try {
+    const suggestion = await Api.suggest(call.id);
+    // Пока ждали ответ, диспетчер мог открыть другой вызов.
+    if (!state.selectedCall || state.selectedCall.id !== call.id) {
+      return;
+    }
+    state.suggestion = suggestion;
+    renderAssignedCard(state.selectedCall);
+  } catch (error) {
+    // Без списка «кого добавить» карточка назначенного вызова всё равно полезна.
+  }
 }
 
 async function selectCall(call) {
   state.selectedCall = call;
-  state.pickedEmployeeId = null;
+  state.picked = [];
   renderCalls(elements.callsList, state.calls, call.id, selectCall);
 
   airportMap.focusOn(call.stand_node_id, 4);
@@ -235,10 +267,11 @@ async function selectCall(call) {
   try {
     const suggestion = await Api.suggest(call.id);
     state.suggestion = suggestion;
-    updateGuide();
+    state.picked = suggestion.best ? [suggestion.best.employee_id] : [];
     elements.calcTime.textContent = `${suggestion.elapsed_ms} мс`;
 
-    renderSuggestion(elements.suggestBody, suggestion, null, pickCandidate, queueOptions());
+    renderSuggestion(elements.suggestBody, suggestion, state.picked, pickCandidate, queueOptions());
+    updateAssignButton();
     airportMap.drawEmployees(state.employees, employeeClass);
 
     if (suggestion.best) {
@@ -256,18 +289,47 @@ async function selectCall(call) {
   }
 }
 
-/** Диспетчер выбрал другого кандидата — показываем его маршрут. */
+/**
+ * Щелчок по кандидату добавляет его к выбранным или убирает.
+ *
+ * Так на один вызов отправляют двоих: щёлкнуть по обоим и нажать
+ * «Назначить». Первый выбранный — ответственный, остальные едут
+ * в помощь, каждый своим способом. Отдельной кнопки «добавить второго»
+ * нет: выбор одного и выбор нескольких — одно и то же действие.
+ */
 function pickCandidate(candidate) {
-  state.pickedEmployeeId = candidate.employee_id;
-  renderSuggestion(
-    elements.suggestBody,
-    state.suggestion,
-    candidate.employee_id,
-    pickCandidate,
-    queueOptions()
-  );
+  const index = state.picked.indexOf(candidate.employee_id);
+  if (index === -1) {
+    state.picked.push(candidate.employee_id);
+  } else {
+    state.picked.splice(index, 1);
+  }
+
+  if (isAssignable(state.selectedCall)) {
+    renderSuggestion(
+      elements.suggestBody,
+      state.suggestion,
+      state.picked,
+      pickCandidate,
+      queueOptions()
+    );
+  } else {
+    renderAssignedCard(state.selectedCall);
+  }
   airportMap.drawRoute(candidate.route.node_ids, candidate.route.pickup_node_id);
-  elements.assignButton.disabled = !isAssignable(state.selectedCall);
+  updateAssignButton();
+}
+
+/** Кнопка внизу говорит, сколько человек она отправит. */
+function updateAssignButton() {
+  const count = state.picked.length;
+  const adding = !isAssignable(state.selectedCall);
+  elements.assignButton.disabled = count === 0 || !state.selectedCall;
+  if (adding) {
+    elements.assignButton.textContent = count > 1 ? `Отправить ещё ${count}` : "Отправить ещё одного";
+  } else {
+    elements.assignButton.textContent = count > 1 ? `Назначить ${count} инженеров` : "Назначить";
+  }
 }
 
 /**
@@ -279,17 +341,14 @@ function pickCandidate(candidate) {
 function queueOptions() {
   const role = Session.user ? Session.user.role : null;
   const canOverride = role === "shift_supervisor" || role === "admin";
-  const assignable = isAssignable(state.selectedCall);
 
   let denyReason = "";
-  if (!assignable) {
-    denyReason = "Вызов уже назначен";
-  } else if (!canOverride) {
+  if (!canOverride) {
     denyReason = "Ставить вызов в очередь к занятому вправе только начальник смены";
   }
 
   return {
-    allowed: canOverride && assignable,
+    allowed: canOverride,
     denyReason,
     onQueue: queueOnto,
     onSwitch: switchOnto,
@@ -328,7 +387,12 @@ async function queueOnto(busy) {
   }
 
   try {
-    await Api.assign(state.selectedCall.id, busy.employee_id, reason);
+    // У назначенного вызова занятый встаёт в очередь вторым инженером.
+    if (isAssignable(state.selectedCall)) {
+      await Api.assign(state.selectedCall.id, busy.employee_id, reason);
+    } else {
+      await Api.support(state.selectedCall.id, busy.employee_id, reason);
+    }
     clearSuggestion();
     state.selectedCall = null;
     await refresh();
@@ -402,29 +466,38 @@ async function unassignSelected() {
 
 function clearSuggestion() {
   state.suggestion = null;
-  state.pickedEmployeeId = null;
+  state.picked = [];
   elements.calcTime.textContent = "";
   elements.assignButton.disabled = true;
+  elements.assignButton.textContent = "Назначить";
   airportMap.clearRoute();
-  renderSuggestion(elements.suggestBody, null, null, pickCandidate);
+  renderSuggestion(elements.suggestBody, null, [], pickCandidate);
 }
 
-elements.assignButton.addEventListener("click", async () => {
-  if (!state.selectedCall || !state.suggestion) {
-    return;
-  }
+elements.assignButton.addEventListener("click", assignPicked);
 
-  const best = state.suggestion.best;
-  const employeeId = state.pickedEmployeeId || best?.employee_id;
-  if (!employeeId) {
+/**
+ * Отправляет выбранных на вызов.
+ *
+ * Новый вызов: первый выбранный становится исполнителем, остальные —
+ * вторыми инженерами. Уже назначенный вызов: все выбранные добавляются
+ * вторыми. Каждый назначается отдельным запросом: если второго назначить
+ * не удалось, первый всё равно едет, а диспетчер видит причину.
+ */
+async function assignPicked() {
+  const call = state.selectedCall;
+  if (!call || !state.suggestion || !state.picked.length) {
     return;
   }
+  const picked = state.picked.slice();
+  const fresh = isAssignable(call);
+  const best = state.suggestion.best;
 
   // Назначение не того, кого предложила система, требует причины —
   // это правило сервера, но спросить её должен клиент, иначе диспетчер
   // получит непонятную ошибку 422.
   let reason = null;
-  if (best && employeeId !== best.employee_id) {
+  if (fresh && best && picked[0] !== best.employee_id) {
     reason = window.prompt(
       "Назначается не тот сотрудник, которого предложила система.\n" +
         "Укажите причину переопределения:"
@@ -436,16 +509,49 @@ elements.assignButton.addEventListener("click", async () => {
 
   elements.assignButton.disabled = true;
   try {
-    await Api.assign(state.selectedCall.id, employeeId, reason);
-    clearSuggestion();
-    state.selectedCall = null;
+    if (fresh) {
+      await Api.assign(call.id, picked.shift(), reason);
+    }
+    for (const employeeId of picked) {
+      await Api.support(call.id, employeeId, null);
+    }
+  } catch (error) {
+    window.alert(error.detail);
+  }
+  clearSuggestion();
+  state.selectedCall = null;
+  await refresh();
+}
+
+/** Снятие второго инженера: основной исполнитель остаётся на вызове. */
+async function removeSupport(member) {
+  const reason = window.prompt(`Снять ${member.employee_name} с этого вызова?\n\nУкажите причину:`);
+  if (!reason) {
+    return;
+  }
+  try {
+    await Api.unassign(member.call_id, reason);
     await refresh();
   } catch (error) {
     window.alert(error.detail);
-  } finally {
-    elements.assignButton.disabled = false;
   }
-});
+}
+
+/** Ответ диспетчера инженерам вызова. */
+async function sendCallMessage(call, text) {
+  try {
+    await Api.sendMessage(call.id, text);
+    // Поле очищается сразу: перерисовка карточки берёт черновик из него.
+    state.messageDraft = "";
+    const input = document.getElementById("message-input");
+    if (input) {
+      input.value = "";
+    }
+    await refresh();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
 
 /* --- Регистрация вызова --- */
 
@@ -571,33 +677,15 @@ async function rejectReport(report) {
 /**
  * Значок учений в шапке и переключатель.
  *
- * Значок «идут учения» виден всем и стоит в строке под шапкой вместе с
- * объяснением: диспетчер должен понимать, что сотрудники на карте движутся
- * по учебному сценарию и прибытие подтверждается само.
+ * Значок виден всем: диспетчер должен понимать, что сотрудники на карте
+ * движутся по учебному сценарию и прибытие подтверждается само.
  * Включает и выключает учения только администратор.
  */
 function renderDrill() {
+  document.getElementById("drill-badge").hidden = !state.drill;
   const toggle = document.getElementById("drill-toggle");
   toggle.hidden = Session.user.role !== "admin";
   toggle.textContent = state.drill ? "Завершить учения" : "Начать учения";
-  toggle.title = `${DRILL_EXPLAIN} ${DRILL_WHO}`;
-}
-
-/**
- * Строка «что сейчас» под шапкой и значок учений в ней.
- * Обновляется на каждом опросе и при каждом действии диспетчера.
- */
-function updateGuide() {
-  renderGuide(
-    {
-      reports: state.reports,
-      calls: state.calls,
-      selectedCall: state.selectedCall,
-      suggestion: state.suggestion,
-      drill: state.drill,
-    },
-    openCallById
-  );
 }
 
 async function toggleDrill() {
@@ -616,7 +704,31 @@ async function toggleDrill() {
  * разыгрывается вводная «исполнитель встал», и видно, как меняется прогноз.
  */
 function renderAssignedCard(call) {
-  renderAssignment(elements.suggestBody, call, unassignSelected);
+  const body = elements.suggestBody;
+  // Карточка перерисовывается на каждом опросе: недописанный ответ
+  // инженеру и курсор в поле должны это пережить.
+  const input = body.querySelector("#message-input");
+  if (input) {
+    state.messageDraft = input.value;
+    state.messageFocused = document.activeElement === input;
+  }
+
+  renderAssignment(body, call, unassignSelected);
+  appendHoldButton(body, call);
+  renderTeam(body, call, removeSupport);
+  renderMessages(body, call, state.messageDraft || "", sendCallMessage);
+  if (state.suggestion && call.status !== "closed") {
+    renderExtraCandidates(body, call, state.suggestion, state.picked, pickCandidate, queueOptions());
+  }
+
+  const restored = body.querySelector("#message-input");
+  if (restored && state.messageFocused) {
+    restored.focus();
+    restored.setSelectionRange(restored.value.length, restored.value.length);
+  }
+}
+
+function appendHoldButton(body, call) {
   if (!state.drill || !call.assigned_employee_id || call.status === "arrived") {
     return;
   }
@@ -633,13 +745,7 @@ function renderAssignedCard(call) {
     ? "Учения: отпустить исполнителя"
     : "Учения: задержать исполнителя";
   button.addEventListener("click", () => toggleHold(employee));
-
-  // Что имитирует кнопка — рядом с ней: без пояснения «задержать»
-  // выглядит как настоящее действие над настоящим человеком.
-  const note = document.createElement("div");
-  note.className = "hold-note";
-  note.textContent = employee.held ? HELD_EXPLAIN : HOLD_EXPLAIN;
-  elements.suggestBody.append(button, note);
+  body.append(button);
 }
 
 async function toggleHold(employee) {
@@ -698,8 +804,6 @@ function showMapNotice(message) {
 for (const button of document.querySelectorAll("#basemap-switch button")) {
   button.addEventListener("click", () => applyBasemap(button.dataset.basemap));
 }
-
-document.getElementById("help-open").addEventListener("click", openHelp);
 
 document.getElementById("shift-summary").addEventListener("click", () => {
   openShiftSummary(openCallById);

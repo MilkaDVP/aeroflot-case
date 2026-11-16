@@ -9,6 +9,9 @@
  */
 
 :root {
+  /* Палитра та же, что у диспетчера (web-dispatcher/css/theme.css),
+     значение в значение: один цвет — один смысл на обоих экранах.
+     Меняя тон здесь, меняйте его и там. */
   --bg-deep: #0b0f14;
   --bg-panel: #121820;
   --bg-raised: #1a222c;
@@ -17,19 +20,22 @@
 
   --text: #e4ecf4;
   --text-muted: #8b9bad;
-  /* Третий уровень текста: контраст не ниже 4,5:1 — экран читают на солнце. */
   --text-dim: #7b8a9a;
 
   --ok: #35c46a;
   --warn: #e3a72c;
   --danger: #f2564d;
-  /* Красный для текста: на тёмной и красной подложке контраст выше 4,5:1. */
-  --danger-text: #ff766d;
   --route: #3d8bfd;
+
+  /* Тона для текста и для заливок под белым текстом: контраст от 4,5:1. */
+  --danger-text: #ff766d;
+  --danger-strong: #d03c33;
+  --route-strong: #2a6bd4;
 
   --ok-soft: rgba(53, 196, 106, 0.14);
   --warn-soft: rgba(227, 167, 44, 0.14);
-  --danger-soft: rgba(242, 86, 77, 0.16);
+  --danger-soft: rgba(242, 86, 77, 0.14);
+  --route-soft: rgba(61, 139, 253, 0.16);
 
   --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
@@ -164,7 +170,7 @@ button {
   width: 100%;
 }
 
-.primary { background: var(--route); border-color: var(--route); color: #fff; }
+.primary { background: var(--route-strong); border-color: var(--route-strong); color: #fff; }
 .ghost { background: transparent; }
 button:disabled { opacity: 0.5; }
 
@@ -534,7 +540,7 @@ button:disabled { opacity: 0.5; }
 .segmented button { min-height: 48px; font-size: 14px; }
 
 .segmented button.active {
-  background: var(--route);
+  background: var(--route-strong);
   border-color: var(--route);
   color: #fff;
   font-weight: 600;
@@ -573,7 +579,7 @@ button:disabled { opacity: 0.5; }
 
 .deadline-forecast.is-alert {
   color: #fff;
-  background: var(--danger);
+  background: var(--danger-strong);
   border-radius: 8px;
   padding: 6px 10px;
   font-weight: 600;
@@ -581,35 +587,88 @@ button:disabled { opacity: 0.5; }
 
 .deadline-forecast[hidden] { display: none; }
 
-/* --- У борта: этап работ и AOG --- */
+/* --- У борта: две отметки и связь с диспетчером --- */
 
 .at-aircraft {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .at-aircraft[hidden] { display: none; }
 
-.segmented.stages { grid-template-columns: 1fr 1fr 1fr; }
-.segmented.stages button { font-size: 13px; padding: 8px 4px; }
-
-/* AOG — красный и отдельной кнопкой: это решение с последствиями,
-   его нельзя нажать случайно вместе с этапом. */
-.aog-toggle {
+/* Отметка-переключатель: включена — залита. */
+.mark-toggle {
   min-height: 48px;
+  font-weight: 600;
+  background: transparent;
+}
+
+.mark-toggle.active {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* AOG — красный: это решение с последствиями для рейса. */
+.aog-toggle {
   border-color: var(--danger);
   color: var(--danger-text);
-  background: transparent;
-  font-weight: 600;
 }
 
 .aog-toggle.active {
-  background: var(--danger);
+  background: var(--danger-strong);
+  border-color: var(--danger-strong);
   color: #fff;
+}
+
+.chat {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.chat-list:empty { display: none; }
+
+.chat-item {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: var(--bg-raised);
+}
+
+/* Свои сообщения — справа и синим, как у диспетчера на его экране. */
+.chat-item.is-engineer {
+  align-self: flex-end;
+  background: var(--route-soft);
+}
+
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-form input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+}
+
+.chat-form button {
+  min-height: 48px;
+  padding: 0 16px;
+  font-weight: 600;
 }
 
 /* У галочки «прибытие подтверждено» единицы измерения нет. */
@@ -630,7 +689,7 @@ button:disabled { opacity: 0.5; }
 
 .link-banner[hidden] { display: none; }
 
-/* --- Подсказки: что делать и что даст нажатие --- */
+/* --- Место инженера --- */
 
 /* GPS не дал координат. Жёлтая строка с действием: это не авария,
    и закрывать ею маршрут на карте нельзя. */
@@ -653,43 +712,4 @@ button:disabled { opacity: 0.5; }
 .chip.is-warn {
   border-color: var(--warn);
   color: var(--warn);
-}
-
-/* Строка над главной кнопкой. */
-.action-hint {
-  margin: 0 14px 8px;
-  font-size: 13px;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.action-hint[hidden] { display: none; }
-
-.at-aircraft-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.at-aircraft-title .muted {
-  font-weight: 400;
-}
-
-.at-aircraft-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* Справка в меню. */
-.help-steps {
-  margin: 12px 0;
-  padding-left: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-.help-steps b {
-  color: var(--text);
 }

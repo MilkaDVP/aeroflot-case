@@ -34,6 +34,7 @@ from constants import (
 )
 from models.call import ACTIVE_CALL_STATUSES, STATUS_QUEUED, Call
 from models.shift_event import VERDICT_BAD, VERDICT_FAIR, VERDICT_GOOD, ShiftEvent
+from services.support import first_arrival
 from services.deadline import (
     ALERT_LEVELS,
     LEVEL_LATE,
@@ -382,6 +383,11 @@ def lower_first(text):
 def review_arrival(db, call, employee, now=None):
     """Исполнитель у борта: в срок или с опозданием — итог по вызову."""
     now = now or utc_now()
+    # Срок исполняет первый прибывший из группы. Второй инженер, который
+    # приехал позже, регламент уже не нарушает и отдельной оценки не получает.
+    first = first_arrival(call)
+    if first is not None and call.first_arrived_at is not None and first < call.first_arrived_at:
+        return None
     margin = minutes_between(now, deadline_of(call))
     took = minutes_between(started_at(call), now)
     facts = {"margin_min": margin, "in_time": margin >= 0, "arrival_min": took}

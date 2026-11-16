@@ -33,24 +33,17 @@ let heartbeatTimer = null;
 
 // Действие инженера: что показывает кнопка и что уходит на сервер.
 // Порядок в жизненном цикле вызова: назначен -> принял -> прибыл -> завершил.
-// hint — что даст нажатие: строка над кнопкой, чтобы не гадать.
 const ACTIONS = {
-  assigned: {
-    label: "Принять вызов",
-    action: "accepted",
-    hint: "Диспетчер назначил вас. Примите вызов — он увидит, что вы выехали",
-  },
-  accepted: {
-    label: "Я у борта",
-    action: "arrived",
-    hint: "Нажмите, когда подойдёте к самолёту: по этой отметке считается срок",
-  },
-  arrived: {
-    label: "Закрыть вызов — работы завершены",
-    action: "closed",
-    hint: "Закрывайте, когда всё сделано. Отменить закрытие нельзя",
-  },
+  assigned: { label: "Принять вызов", action: "accepted" },
+  accepted: { label: "Я у борта", action: "arrived" },
+  arrived: { label: "Закрыть вызов", action: "closed" },
 };
+
+// Этапы работ, которые отмечает инженер. Остальное он пишет словами.
+const STAGE_WAITING_PARTS = "waiting_parts";
+const STAGE_WORKING = "repair";
+// Сколько последних сообщений переписки видно на экране вызова.
+const CHAT_SHOWN = 3;
 
 const CLOSE_CONFIRM = "Работы завершены? Закрытый вызов вернуть нельзя.";
 
@@ -383,7 +376,6 @@ function renderWork() {
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
   el("call-action").hidden = !hasCall;
-  el("action-hint").hidden = !hasCall;
 
   // Карта рисуется в любом случае: без вызова она показывает, где стоит
   // сам инженер, и позволяет поставить точку в режиме имитации.
@@ -424,7 +416,6 @@ function renderWork() {
   const step = ACTIONS[call.status];
   el("call-action").textContent = step ? step.label : "Ожидание";
   el("call-action").disabled = !step;
-  el("action-hint").textContent = step ? step.hint : "";
 
   el("work-status").textContent = statusTitle(call.status);
   el("work-status-dot").className = "status-dot busy";
@@ -433,6 +424,7 @@ function renderWork() {
   updateCountdown();
   renderForecast(call.control);
   renderAtAircraft(call);
+  renderChat(call);
 }
 
 /**
@@ -445,16 +437,65 @@ function renderAtAircraft(call) {
   if (!arrived) {
     return;
   }
-  for (const button of document.querySelectorAll("#stage-switch button")) {
-    button.classList.toggle("active", button.dataset.stage === call.work_stage);
-  }
+  el("parts-toggle").classList.toggle("active", call.work_stage === STAGE_WAITING_PARTS);
   el("aog-toggle").classList.toggle("active", call.aog);
-  el("aog-toggle").textContent = call.aog
-    ? "AOG поставлен — снять"
-    : "AOG: борт не может лететь";
-  el("aog-hint").textContent = call.aog
-    ? "Диспетчер видит AOG: вызов стоит первым в его списке."
-    : "AOG ставьте после осмотра, если борт нельзя выпускать в рейс.";
+}
+
+/**
+ * «Жду запчасти» — переключатель: пока он включён, диспетчер может
+ * отправить инженера на срочный борт, и к этому он потом вернётся.
+ */
+function toggleWaitingParts() {
+  const call = state.call && state.call.call;
+  if (!call) {
+    return;
+  }
+  changeStage(call.work_stage === STAGE_WAITING_PARTS ? STAGE_WORKING : STAGE_WAITING_PARTS);
+}
+
+/* --- Связь с диспетчером --- */
+
+/** Последние сообщения переписки по вызову: свои справа, диспетчера слева. */
+function renderChat(call) {
+  const list = el("chat-list");
+  const messages = (call.messages || []).slice(-CHAT_SHOWN);
+  // Перерисовка только при изменении: список обновляется на каждом опросе,
+  // и лишняя перерисовка сбрасывала бы прокрутку.
+  const key = messages.map((item) => item.id).join(",");
+  if (list.dataset.key === key) {
+    return;
+  }
+  list.dataset.key = key;
+  list.replaceChildren();
+  for (const message of messages) {
+    const item = document.createElement("div");
+    item.className = `chat-item is-${message.author_role}`;
+    item.textContent =
+      message.author_role === "dispatcher" ? `Диспетчер: ${message.text}` : message.text;
+    list.append(item);
+  }
+}
+
+async function sendChatMessage(event) {
+  event.preventDefault();
+  const input = el("chat-input");
+  const text = input.value.trim();
+  if (!text) {
+    return;
+  }
+  el("chat-send").disabled = true;
+  try {
+    const call = await Api.sendMessage(text);
+    input.value = "";
+    state.call.call = call;
+    renderChat(call);
+  } catch (error) {
+    // Текст остаётся в поле: без связи сообщение не теряется, его можно
+    // отправить ещё раз, когда сеть вернётся.
+    showToast(state.offline ? "Нет связи — сообщение не отправлено" : error.detail, true);
+  } finally {
+    el("chat-send").disabled = false;
+  }
 }
 
 async function changeStage(stage) {
@@ -802,13 +843,10 @@ function applySimulated(lat, lon) {
 }
 
 function bindEvents() {
-  for (const button of document.querySelectorAll("#stage-switch button")) {
-    button.addEventListener("click", () => changeStage(button.dataset.stage));
-  }
+  el("parts-toggle").addEventListener("click", toggleWaitingParts);
   el("aog-toggle").addEventListener("click", toggleAog);
+  el("chat-form").addEventListener("submit", sendChatMessage);
   el("geo-notice").addEventListener("click", switchToManualPlace);
-  el("menu-help").addEventListener("click", openHelpSheet);
-  el("help-close").addEventListener("click", () => closeSheet("help-sheet"));
 
   // Переключатель подложки: снимок требует сети, схема работает всегда.
   el("map-toggle").addEventListener("click", () => {
@@ -883,12 +921,6 @@ function setGeoMode(mode) {
   if (state.call) {
     drawRoute();
   }
-}
-
-/** Справка открывается из меню: меню закрывается, чтобы листы не наслаивались. */
-function openHelpSheet() {
-  closeSheet("menu-sheet");
-  openSheet("help-sheet");
 }
 
 function openSheet(id) {

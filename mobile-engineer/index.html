@@ -118,21 +118,23 @@
       <div class="vehicle-note" id="call-vehicle" hidden></div>
 
       <!--
-        У борта: этап работ и статус AOG. Этап видит диспетчер — по нему
-        он решает, можно ли переключить инженера на другой борт.
-        AOG ставит только инженер, после осмотра.
+        У борта — две отметки, которые нужны системе: «жду запчасти»
+        (инженера можно переключить на срочный борт) и AOG (ставит только
+        инженер, после осмотра). Всё остальное инженер пишет словами.
       -->
       <div class="at-aircraft" id="at-aircraft" hidden>
-        <div class="at-aircraft-title">
-          Что сейчас с бортом <span class="muted">— диспетчер видит это сразу</span>
-        </div>
-        <div class="segmented stages" id="stage-switch">
-          <button data-stage="inspection">Осмотр</button>
-          <button data-stage="waiting_parts">Жду запчасти</button>
-          <button data-stage="repair">Ремонт</button>
-        </div>
-        <button class="aog-toggle" id="aog-toggle">AOG: борт не может лететь</button>
-        <div class="at-aircraft-hint" id="aog-hint"></div>
+        <button class="mark-toggle" id="parts-toggle">Жду запчасти</button>
+        <button class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
+      </div>
+
+      <!-- Связь с диспетчером: свободный текст вместо набора статусов -->
+      <div class="chat">
+        <div class="chat-list" id="chat-list"></div>
+        <form class="chat-form" id="chat-form">
+          <input id="chat-input" maxlength="500" autocomplete="off"
+                 placeholder="Написать диспетчеру">
+          <button type="submit" class="primary" id="chat-send">Отправить</button>
+        </form>
       </div>
     </div>
   </div>
@@ -149,8 +151,6 @@
   </div>
 
   <div class="error work-error" id="call-error" hidden></div>
-  <!-- Что даст нажатие главной кнопки — одной строкой над ней -->
-  <div class="action-hint" id="action-hint" hidden></div>
   <button class="big primary action" id="call-action" hidden>—</button>
 </section>
 
@@ -189,30 +189,9 @@
   <div class="sheet">
     <h3 id="menu-name">—</h3>
     <p class="muted small" id="menu-marks">—</p>
-    <button class="big ghost" id="menu-help">Как это работает</button>
     <button class="big ghost" id="menu-leave">Уйти со смены</button>
     <button class="big ghost" id="menu-logout">Выйти из учётной записи</button>
     <button class="big ghost" id="menu-close">Закрыть</button>
-  </div>
-</div>
-
-<!-- Справка: путь вызова глазами инженера -->
-<div class="sheet-backdrop" id="help-sheet" hidden>
-  <div class="sheet">
-    <h3>Как это работает</h3>
-    <ol class="help-steps">
-      <li><b>Вызов приходит сам.</b> Диспетчер назначил вас — на экране борт, стоянка и сколько минут осталось.</li>
-      <li><b>«Принять вызов».</b> Диспетчер видит, что вы выехали. Маршрут — на карте; если нужна машина, она отмечена.</li>
-      <li><b>«Я у борта».</b> Нажмите, когда подойдёте к самолёту. По этой отметке считается срок 15 минут.</li>
-      <li><b>У борта</b> отмечайте, что происходит: осмотр, ждёте запчасти или идёт ремонт. Если борт не может лететь — поставьте AOG.</li>
-      <li><b>«Закрыть вызов»,</b> когда работы закончены. Следующий вызов придёт сам.</li>
-    </ol>
-    <p class="muted small">
-      Нет связи — работайте как обычно: вызов остаётся на экране, отметки
-      сохраняются в телефоне и уйдут, когда появится сеть. Время прибытия
-      засчитается по моменту нажатия.
-    </p>
-    <button class="big ghost" id="help-close">Понятно</button>
   </div>
 </div>
 

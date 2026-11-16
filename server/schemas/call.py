@@ -90,6 +90,12 @@ class CallResponse(BaseModel):
     unassign_reason: str | None = None
     unassigned_at: str | None = None
     control: CallControl | None = None
+    # Основной вызов, если это вызов поддержки (второй инженер на борт).
+    parent_call_id: int | None = None
+    # Инженеры поддержки основного вызова: кто, в каком статусе, когда будет.
+    support: list[dict] = []
+    # Переписка инженеров с диспетчером по вызову, старые первыми.
+    messages: list[dict] = []
 
 
 class LegSchema(BaseModel):
@@ -196,6 +202,12 @@ class AssignRequest(BaseModel):
     # Переключить занятого исполнителя, ждущего запчасти: его текущий вызов
     # уходит в его же очередь, а этот становится текущим.
     switch: bool = False
+
+
+class MessageRequest(BaseModel):
+    """Сообщение по вызову — от инженера диспетчеру или обратно."""
+
+    text: str = Field(min_length=1, max_length=500)
 
 
 class UrgencyRequest(BaseModel):

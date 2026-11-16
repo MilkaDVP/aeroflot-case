@@ -37,6 +37,7 @@ from schemas.call import (
     CallStatusRequest,
     SuggestResponse,
     UnassignRequest,
+    MessageRequest,
     UrgencyRequest,
 )
 from services import mentor
@@ -53,6 +54,8 @@ from services.assignment import (
     working_call_of,
     unassign,
 )
+from models.call_message import AUTHOR_DISPATCHER
+from services import support
 from services.deadline import assess
 from services.defects import find as find_defect
 
@@ -92,6 +95,10 @@ ERROR_QUEUE_PROMOTES_ITSELF = (
     "предыдущий вызов"
 )
 ERROR_NOT_SWITCHABLE = "Переключить нельзя: {name} — {note}"
+ERROR_SUPPORT_NEEDS_MAIN = (
+    "Второго инженера добавляют к вызову, у которого уже есть исполнитель"
+)
+ERROR_ALREADY_ON_CALL = "{name} уже назначен на этот вызов"
 ERROR_NOT_ASSIGNED = "У вызова нет исполнителя: снимать нечего"
 ERROR_CLOSED_CALL = "Вызов закрыт. Снять исполнителя с закрытого вызова нельзя"
 ERROR_UNASSIGN_NEEDS_REASON = (
@@ -172,6 +179,9 @@ def to_response(call, db=None, now=None):
         unassign_reason=call.unassign_reason,
         unassigned_at=to_iso_utc(call.unassigned_at),
         control=assess(call, now).as_dict(),
+        parent_call_id=call.parent_call_id,
+        support=support.support_summary(call) if call.parent_call_id is None else [],
+        messages=support.messages_of(call),
     )
 
 
@@ -444,7 +454,19 @@ def assign_employee(
     call = load_call(db, context, call_id)
     if call.status not in ASSIGNABLE_STATUSES:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_ALREADY_ASSIGNED)
+    perform_assign(db, context, call, payload)
+    db.commit()
+    return to_response(call, db)
 
+
+def perform_assign(db, context, call, payload, free_choice=False):
+    """
+    Назначает исполнителя на вызов; коммит остаётся за вызывающим.
+
+    free_choice — для второго инженера: предложение системы на него не
+    распространяется, поэтому выбор диспетчера не считается
+    переопределением и причины не требует.
+    """
     employee = db.get(Employee, payload.employee_id)
     if employee is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
@@ -456,7 +478,9 @@ def assign_employee(
     # назначения, — а свежий результат нужен Наставнику: по нему видно,
     # кого система предлагала в эту минуту и сколько стоит отступление.
     result = run_suggestion(db, context, call)
-    if call.suggested_employee_id is None:
+    if free_choice:
+        call.suggested_employee_id = employee.id
+    elif call.suggested_employee_id is None:
         call.suggested_employee_id = result.best.employee["id"] if result.best else None
 
     # Занятость проверяется по фактическому состоянию, а не по предложению:
@@ -476,8 +500,7 @@ def assign_employee(
         else:
             enqueue(db, call, employee)
             mentor.review_queue(db, call, employee, result, context.user)
-        db.commit()
-        return to_response(call, db)
+        return
 
     is_override = call.suggested_employee_id != employee.id
     if is_override:
@@ -497,8 +520,77 @@ def assign_employee(
     call.override_reason = payload.override_reason if is_override else None
     assign_now(db, call, employee, plan, pickup_vehicle)
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
+
+
+@router.post(
+    "/{call_id}/support", response_model=CallResponse, summary="Добавить второго инженера"
+)
+def add_support(
+    call_id: int,
+    payload: AssignRequest,
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+    db: Session = Depends(get_db),
+):
+    """
+    Ещё один инженер на тот же вызов.
+
+    Создаётся вызов поддержки — копия основного по борту, неисправности
+    и времени отсчёта — и назначается обычным путём: свободный выезжает
+    сразу своим способом (пешком или через машину парка), занятый встаёт
+    в очередь по решению начальника смены. Если назначить не удалось,
+    вызов поддержки не создаётся. Отвечает основным вызовом.
+    """
+    call = load_call(db, context, call_id)
+    root = support.root_of(call)
+    if root.status == CALL_CLOSED or root.assigned_employee_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_SUPPORT_NEEDS_MAIN)
+
+    team = [root.assigned_employee_id] + [
+        item.assigned_employee_id for item in support.support_calls(root)
+    ]
+    if payload.employee_id in team:
+        employee = db.get(Employee, payload.employee_id)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, ERROR_ALREADY_ON_CALL.format(name=employee.full_name)
+        )
+
+    extra = Call(
+        airport_icao=root.airport_icao,
+        aircraft_id=root.aircraft_id,
+        stand_node_id=root.stand_node_id,
+        defect_code=root.defect_code,
+        defect_description=root.defect_description,
+        required_mark=root.required_mark,
+        status=CALL_NEW,
+        created_at=root.created_at,
+        reported_at=root.reported_at,
+        source=root.source,
+        urgent=root.urgent,
+        parent_call_id=root.id,
+    )
+    db.add(extra)
+    db.flush()
+    try:
+        perform_assign(db, context, extra, payload, free_choice=True)
+    except HTTPException:
+        db.rollback()
+        raise
     db.commit()
-    return to_response(call, db)
+    return to_response(root, db)
+
+
+@router.post("/{call_id}/message", response_model=CallResponse, summary="Ответить инженеру")
+def send_message(
+    call_id: int,
+    payload: MessageRequest,
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+    db: Session = Depends(get_db),
+):
+    """Сообщение диспетчера инженерам вызова: его увидят в телефоне."""
+    call = load_call(db, context, call_id)
+    support.add_message(db, call, AUTHOR_DISPATCHER, context.user.full_name, payload.text)
+    db.commit()
+    return to_response(support.root_of(call), db)
 
 
 def switch_employee(db, call, employee, result, actor):
@@ -575,8 +667,17 @@ def unassign_employee(
     control_before = assess(call)
     unassign(db, call, reason)
     mentor.review_unassign(db, call, removed, control_before, reason, context.user)
+    if call.parent_call_id is not None:
+        # Вызов поддержки без исполнителя не нужен: это не борт, который
+        # ждёт инженера, а запись о том, что второго сняли.
+        call.status = CALL_CLOSED
+        call.closed_at = utc_now()
+    else:
+        # Основного сняли — помощники без ответственного не остаются:
+        # вызов целиком возвращается к подбору.
+        support.close_support(db, call)
     db.commit()
-    return to_response(call, db)
+    return to_response(support.root_of(call), db)
 
 
 @router.patch("/{call_id}/status", response_model=CallResponse, summary="Статус вызова")
@@ -620,6 +721,8 @@ def update_call_status(
         call.closed_at = utc_now()
         if call.assigned_employee is not None:
             advance_after_close(db, call.assigned_employee, call, was_working)
+        if call.parent_call_id is None:
+            support.close_support(db, call, call.closed_at)
 
     db.commit()
     return to_response(call, db)

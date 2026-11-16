@@ -52,6 +52,7 @@ from models.call import (
     STATUS_QUEUED,
     STATUS_SUGGESTED,
 )
+from services.support import first_arrival
 
 # Уровни контроля. Цвет в интерфейсе следует уровню, а не наоборот.
 LEVEL_OK = "ok"                  # успевает с запасом
@@ -166,6 +167,9 @@ def assess(call, now=None):
         return assess_arrived(call, deadline, now)
     if call.first_arrived_at is not None:
         return assess_paused(call, deadline, now)
+    group_arrival = first_arrival(call)
+    if group_arrival is not None:
+        return assess_covered(group_arrival, deadline, now)
     if call.assigned_employee is None:
         return assess_unassigned(call, deadline, now)
     if call.status == STATUS_QUEUED:
@@ -187,6 +191,18 @@ def assess_arrived(call, deadline, now):
             if margin >= 0
             else f"Прибыл с опозданием на {overrun_text(-margin)}"
         )
+    return control
+
+
+def assess_covered(arrived_at, deadline, now):
+    """
+    У борта уже есть другой инженер этого вызова.
+
+    Срок прибытия исполнен первым прибывшим, поэтому второй, который ещё
+    в пути, тревоги не вызывает, как бы поздно он ни приехал.
+    """
+    control = Control(LEVEL_ARRIVED, "У борта уже работает инженер этого вызова", deadline, now)
+    control.margin_min = round((deadline - arrived_at).total_seconds() / 60, 1)
     return control
 
 

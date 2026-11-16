@@ -9,11 +9,10 @@
 .workspace {
   height: 100vh;
   display: grid;
-  grid-template-rows: 44px 32px 1fr 30px;
+  grid-template-rows: 44px 1fr 30px;
   grid-template-columns: 300px 1fr 330px;
   grid-template-areas:
     "header header header"
-    "guide  guide  guide"
     "calls  map    suggest"
     "status status status";
 }
@@ -64,169 +63,27 @@
   white-space: nowrap;
 }
 
-/* --- Строка «что сейчас» --- */
-
-/* Под шапкой во всю ширину: следующее действие должно быть там, куда
-   человек смотрит первым, и не должно отнимать место у карты. */
-.guide {
-  grid-area: guide;
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  padding: 0 var(--gap);
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs);
-  min-width: 0;
+/* Термин с пояснением при наведении. */
+[data-term] {
+  cursor: help;
 }
 
-.guide-label {
-  flex-shrink: 0;
-  color: var(--route);
+/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
+   видеть, что картина на карте учебная. */
+.drill-badge {
+  padding: 3px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  background: var(--warn-soft);
   font-size: var(--fs-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
 
-.guide-text {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.guide-text.is-link {
-  cursor: pointer;
-  text-decoration: underline dotted var(--text-dim);
-  text-underline-offset: 3px;
-}
-
-.guide-text.is-link:hover {
-  color: var(--route);
-}
-
-/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
-   видеть, что картина на карте учебная. */
-.guide-drill {
-  flex-shrink: 0;
-  padding: 2px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
-  background: var(--warn-soft);
-  font-size: var(--fs-sm);
-}
-
-.guide-drill[hidden] {
+.drill-badge[hidden] {
   display: none;
-}
-
-/* Термин с пояснением при наведении. */
-[data-term] {
-  cursor: help;
-}
-
-/* --- Звук тревоги: состояние и проверка --- */
-
-.sound-control {
-  position: relative;
-}
-
-.sound-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 30;
-  width: 340px;
-  padding: var(--gap);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  font-size: var(--fs-sm);
-}
-
-.sound-panel[hidden] {
-  display: none;
-}
-
-.sound-panel p {
-  margin: var(--gap-sm) 0 var(--gap);
-  color: var(--text-muted);
-}
-
-.sound-state {
-  font-weight: 600;
-}
-
-.sound-state.is-waiting {
-  color: var(--warn);
-}
-
-.sound-actions {
-  display: flex;
-  gap: var(--gap-sm);
-}
-
-/* --- Окно справки --- */
-
-.modal.help {
-  width: 680px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.modal.help .section-title {
-  margin-top: var(--gap-lg);
-}
-
-.help-steps {
-  margin: var(--gap-sm) 0;
-  padding-left: 20px;
-}
-
-.help-steps li {
-  margin-bottom: var(--gap-xs);
-  color: var(--text-muted);
-}
-
-.help-steps b,
-.help-list dt {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.help-note {
-  margin: var(--gap-sm) 0 0;
-  color: var(--text-muted);
-}
-
-.help-list {
-  display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: var(--gap-xs) var(--gap);
-  margin: var(--gap-sm) 0 0;
-}
-
-.help-list dd {
-  margin: 0;
-  color: var(--text-muted);
-}
-
-.help-colors {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--gap-xs) var(--gap);
-  margin-top: var(--gap-sm);
-  color: var(--text-muted);
-}
-
-.help-color {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
 }
 
 /* --- Панели --- */
@@ -810,18 +667,6 @@
   margin-bottom: var(--gap-sm);
 }
 
-.eta-next {
-  margin-top: var(--gap-sm);
-  font-size: var(--fs-sm);
-  color: var(--text);
-}
-
-/* Почему предложен именно этот кандидат. */
-.eta-why {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
 .eta-unit {
   font-size: 18px;
   color: var(--text-muted);
@@ -915,8 +760,113 @@
   background: var(--bg-hover);
 }
 
-.candidate.is-best {
+/* Выбранный кандидат: его отправит кнопка «Назначить». */
+.candidate.is-picked {
   border-color: var(--route);
+  background: var(--route-soft);
+}
+
+/* Порядок выбора, когда выбрано несколько: первый — ответственный. */
+.candidate-order {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 50%;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: #fff;
+  background: var(--route-strong);
+}
+
+/* --- Команда вызова и переписка --- */
+
+.team-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-sm);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.team-name {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.team-status {
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.team-remove {
+  padding: 0 var(--gap-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.team-remove:hover:not(:disabled) {
+  background: transparent;
+  color: var(--danger-text);
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-size: var(--fs-sm);
+}
+
+/* Свои ответы — справа и синим, как в любой переписке. */
+.message.is-dispatcher {
+  align-self: flex-end;
+  background: var(--route-soft);
+}
+
+.message-meta {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.message-form {
+  display: flex;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-sm);
+}
+
+.message-form input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 var(--gap-sm);
+}
+
+.message-form button {
+  height: var(--control-h);
+  padding: 0 var(--gap);
+  font-size: var(--fs-sm);
+}
+
+/* Последнее сообщение инженера на карточке вызова. */
+.call-message {
+  margin-top: var(--gap-xs);
+  padding-left: var(--gap-sm);
+  border-left: 2px solid var(--route);
+  font-size: var(--fs-sm);
+  color: var(--text);
 }
 
 .candidate-time {
@@ -1228,48 +1178,6 @@
   color: var(--warn);
 }
 
-/* Счётчик тревог в шапке: виден, даже когда открыт другой вызов. */
-.alert-pill {
-  background: var(--danger-strong);
-  border-color: var(--danger-strong);
-  color: #fff;
-  font-weight: 600;
-  padding: 4px 12px;
-  animation: alert-pulse 1.4s ease-in-out infinite;
-}
-
-.alert-pill[hidden] {
-  display: none;
-}
-
-.sound-toggle {
-  font-size: var(--fs-xs);
-  padding: 4px 10px;
-  color: var(--text-muted);
-}
-
-.sound-toggle.is-off {
-  color: var(--text-dim);
-  border-style: dashed;
-}
-
-/* Звук включён, но браузер его ещё не разрешил — это нужно заметить. */
-.sound-toggle.is-waiting {
-  color: var(--warn);
-  border-color: var(--warn);
-}
-
-/* Пульсирует рамка, а не фон: тревога должна бросаться в глаза,
-   но текст причины должен оставаться читаемым. */
-@keyframes alert-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(242, 86, 77, 0.55);
-  }
-  50% {
-    box-shadow: 0 0 0 5px rgba(242, 86, 77, 0);
-  }
-}
-
 .assignment-advice {
   margin-top: 3px;
   font-size: var(--fs-xs);
@@ -1428,12 +1336,6 @@
 
 .hold-button.is-held {
   background: var(--warn-soft);
-}
-
-.hold-note {
-  margin-top: var(--gap-xs);
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
 }
 
 /* --- Входящие сообщения экипажа --- */

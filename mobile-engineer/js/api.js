@@ -130,6 +130,7 @@ const Api = {
     request("POST", "/api/me/status", { action, ...(extra || {}) }),
   // У борта: этап работ и статус AOG (ставит только инженер).
   setStage: (stage) => request("POST", "/api/me/stage", { stage }),
+  sendMessage: (text) => request("POST", "/api/me/message", { text }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
 
   setShift: (employeeId, onShift) =>

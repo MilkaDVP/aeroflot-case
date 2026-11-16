@@ -168,6 +168,8 @@ function buildCallCard(call, selectedId, onSelect) {
     <div class="call-defect">${escapeHtml(call.defect_name)}</div>
     ${descriptionLine(call)}
     ${whoLine(call)}
+    ${supportLines(call)}
+    ${lastEngineerMessage(call)}
     ${controlNote(call)}
   `;
 
@@ -216,7 +218,7 @@ function statusTitle(status) {
  * за назначение лично и должен видеть, кого система от него скрыла
  * и на каком основании.
  */
-function renderSuggestion(container, result, selectedEmployeeId, onPick, queueOptions) {
+function renderSuggestion(container, result, pickedIds, onPick, queueOptions) {
   container.replaceChildren();
 
   if (!result) {
@@ -235,9 +237,7 @@ function renderSuggestion(container, result, selectedEmployeeId, onPick, queueOp
       )
     );
     for (const candidate of result.candidates) {
-      container.append(
-        buildCandidateRow(candidate, result.best, selectedEmployeeId, onPick)
-      );
+      container.append(buildCandidateRow(candidate, pickedIds, onPick));
     }
   }
 
@@ -274,11 +274,6 @@ function buildEtaBlock(result) {
       <div class="eta-sub">Нужна отметка <span class="mark"${term("mark")}>${escapeHtml(
         result.required_mark
       )}</span> и <span${term("rating")}>допуск на тип</span></div>
-      <div class="eta-next">${
-        result.busy.length
-          ? "Что можно сделать: поставить вызов в очередь к занятому — список ниже."
-          : "Что можно сделать: сообщить начальнику смены — нужен сотрудник с допуском."
-      }</div>
     `;
     return block;
   }
@@ -292,7 +287,6 @@ function buildEtaBlock(result) {
       ><span class="eta-unit">мин в пути</span>
     </div>
     <div class="eta-name">${escapeHtml(best.full_name)}</div>
-    <div class="eta-why">будет у борта быстрее всех свободных с допуском</div>
     <div class="eta-sub">
       <span class="mark"${term("mark")}>${escapeHtml(best.mark)}</span>
       <span${best.vehicle_call_sign ? term("vehicle") : ""}>${transportLabel(best)}</span> ·
@@ -305,14 +299,17 @@ function buildEtaBlock(result) {
   return block;
 }
 
-function buildCandidateRow(candidate, best, selectedEmployeeId, onPick) {
+/**
+ * Строка кандидата. Щелчок выбирает или снимает выбор; выбрать можно
+ * нескольких — тогда на вызов поедут все выбранные. Номер показывает
+ * порядок: первый — ответственный исполнитель.
+ */
+function buildCandidateRow(candidate, pickedIds, onPick) {
   const row = document.createElement("div");
   row.className = "candidate";
-  if (best && candidate.employee_id === best.employee_id) {
-    row.classList.add("is-best");
-  }
-  if (candidate.employee_id === selectedEmployeeId) {
-    row.classList.add("is-best");
+  const order = pickedIds.indexOf(candidate.employee_id);
+  if (order !== -1) {
+    row.classList.add("is-picked");
   }
 
   row.innerHTML = `
@@ -327,6 +324,13 @@ function buildCandidateRow(candidate, best, selectedEmployeeId, onPick) {
         · <span class="num">${Math.round(candidate.route.distance_m)}</span> м
       </span>
     </span>
+    ${
+      order !== -1 && pickedIds.length > 1
+        ? `<span class="candidate-order num" title="${
+            order === 0 ? "Ответственный исполнитель" : "Едет в помощь"
+          }">${order + 1}</span>`
+        : ""
+    }
   `;
 
   row.addEventListener("click", () => onPick(candidate));
@@ -555,6 +559,140 @@ function sectionTitle(text, hint) {
     element.dataset.term = "section";
   }
   return element;
+}
+
+/* --- Команда вызова и переписка --- */
+
+/**
+ * Кого ещё отправить на уже назначенный вызов.
+ *
+ * Те же строки, что в подборе, без крупной цифры и без списка отсеянных:
+ * исполнитель уже есть, здесь только выбор подмоги.
+ */
+function renderExtraCandidates(container, call, result, pickedIds, onPick, queueOptions) {
+  // Те, кто уже едет на этот вызов, в подборе значатся занятыми —
+  // предлагать поставить их в очередь к самим себе незачем.
+  const team = [call.assigned_employee_id].concat(
+    (call.support || []).map((member) => member.employee_id)
+  );
+  const busyOthers = result.busy.filter((busy) => !team.includes(busy.employee_id));
+  if (result.candidates.length) {
+    container.append(sectionTitle(`Отправить ещё инженера (${result.candidates.length})`));
+    for (const candidate of result.candidates) {
+      container.append(buildCandidateRow(candidate, pickedIds, onPick));
+    }
+  }
+  if (busyOthers.length) {
+    container.append(sectionTitle("Заняты, допуск есть", TERMS.queue.text));
+    for (const busy of busyOthers) {
+      // Переключение — только для нового вызова; второго ставят в очередь.
+      container.append(buildBusyRow({ ...busy, switchable: false }, queueOptions));
+    }
+  }
+}
+
+/** Вторые инженеры вызова: кто, на каком шаге, когда будет. */
+function renderTeam(container, call, onRemove) {
+  if (!call.support || !call.support.length) {
+    return;
+  }
+  container.append(sectionTitle("Ещё на вызове"));
+  for (const member of call.support) {
+    const row = document.createElement("div");
+    row.className = "team-row";
+    row.innerHTML = `
+      <span class="team-name">${escapeHtml(member.employee_name || "—")}</span>
+      <span class="team-status">${escapeHtml(supportStatus(member))}</span>
+    `;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "team-remove";
+    remove.textContent = "снять";
+    remove.addEventListener("click", () => onRemove(member));
+    row.append(remove);
+    container.append(row);
+  }
+}
+
+/** «принял, едет · будет ~17:44 · ТМ-04» — второй инженер одной строкой. */
+function supportStatus(member) {
+  const parts = [member.status === "arrived" ? "у борта" : statusTitle(member.status)];
+  if (member.status !== "arrived" && member.eta_at) {
+    parts.push(`будет ~${formatClock(member.eta_at)}`);
+  }
+  if (member.vehicle_call_sign) {
+    parts.push(member.vehicle_call_sign);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Переписка с инженерами вызова и поле ответа.
+ *
+ * Инженер пишет свободным текстом — «нужен подъёмник», «запчасть будет
+ * к 15:00», — потому что реальных ситуаций больше, чем готовых статусов.
+ */
+function renderMessages(container, call, draft, onSend) {
+  if (call.status === "closed") {
+    return;
+  }
+  container.append(sectionTitle("Связь с инженером"));
+  const list = document.createElement("div");
+  list.className = "messages";
+  for (const message of call.messages || []) {
+    list.append(buildMessage(message));
+  }
+  container.append(list);
+
+  const form = document.createElement("form");
+  form.className = "message-form";
+  form.innerHTML = `
+    <input id="message-input" maxlength="500" autocomplete="off" placeholder="Написать инженеру">
+    <button type="submit">Отправить</button>
+  `;
+  const input = form.querySelector("input");
+  input.value = draft;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (text) {
+      onSend(call, text);
+    }
+  });
+  container.append(form);
+}
+
+function buildMessage(message) {
+  const item = document.createElement("div");
+  item.className = `message is-${message.author_role}`;
+  item.innerHTML = `
+    <span class="message-meta">${escapeHtml(message.author_name)} ·
+      <span class="num">${formatClock(message.created_at)}</span></span>
+    <span class="message-text">${escapeHtml(message.text)}</span>
+  `;
+  return item;
+}
+
+/** Вторые инженеры на карточке вызова в списке — по строке на каждого. */
+function supportLines(call) {
+  return (call.support || [])
+    .map(
+      (member) =>
+        `<div class="call-who">+ <b>${escapeHtml(member.employee_name || "—")}</b> · ${escapeHtml(
+          supportStatus(member)
+        )}</div>`
+    )
+    .join("");
+}
+
+/** Последнее сообщение инженера — на карточке: диспетчер видит его, не открывая вызов. */
+function lastEngineerMessage(call) {
+  const fromEngineers = (call.messages || []).filter((item) => item.author_role === "engineer");
+  const last = fromEngineers[fromEngineers.length - 1];
+  if (!last) {
+    return "";
+  }
+  return `<div class="call-message">${escapeHtml(last.author_name)}: ${escapeHtml(last.text)}</div>`;
 }
 
 /* --- Назначенный вызов --- */
