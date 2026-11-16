@@ -202,7 +202,7 @@
 
 .item-actions button.danger:hover:not(:disabled) {
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .item-actions button:disabled {
@@ -214,7 +214,7 @@
   display: inline-block;
   padding: 2px 8px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -249,7 +249,7 @@
 }
 
 .admin-form label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-dim);
@@ -337,7 +337,7 @@
 
 .admin-note.is-error {
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
 }
 

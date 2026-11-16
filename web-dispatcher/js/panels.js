@@ -357,7 +357,7 @@ function buildBusyRow(busy, queueOptions) {
   row.className = "busy-row";
   row.innerHTML = `
     <b>${escapeHtml(busy.full_name)} <span class="mark">${escapeHtml(busy.mark)}</span></b>
-    <span class="busy-until">до ${formatClock(busy.busy_until)}</span>
+    <span class="busy-until" title="Когда по расчёту закончит текущую работу">освободится ~${formatClock(busy.busy_until)}</span>
     ${busyStageLine(busy)}
   `;
 

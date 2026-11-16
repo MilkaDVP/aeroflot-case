@@ -34,7 +34,7 @@
 
 .auth-subtitle {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-top: var(--gap-xs);
   margin-bottom: var(--gap-lg);
 }
@@ -56,7 +56,7 @@
   padding-top: var(--gap);
   border-top: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .auth-hint code {
@@ -106,7 +106,7 @@
 
 .choice-city {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .shift-row {
