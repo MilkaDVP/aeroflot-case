@@ -34,6 +34,7 @@ from constants import (
     DEADLINE_MARGIN_MIN,
     DEVICE_SILENT_S,
     LOCATION_GPS,
+    MINUTES_IN_HOUR,
     MODE_VEHICLE,
     MODE_WALK,
     POSITION_STALE_S,
@@ -49,6 +50,7 @@ from models.call import (
     STATUS_ASSIGNED,
     STATUS_CLOSED,
     STATUS_QUEUED,
+    STATUS_SUGGESTED,
 )
 
 # Уровни контроля. Цвет в интерфейсе следует уровню, а не наоборот.
@@ -69,11 +71,22 @@ ALERT_LEVELS = (LEVEL_LATE, LEVEL_OVERDUE, LEVEL_UNASSIGNED, LEVEL_NO_SIGNAL)
 EN_ROUTE_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
 # Что делать — подсказка к тревоге. Решение остаётся за человеком.
+# У каждого положения дел своя подсказка: совет «время под угрозой» при
+# сроке, истёкшем три часа назад, читался как ошибка системы.
 ADVICE_REASSIGN = (
-    "Свяжитесь с исполнителем; если он не успевает — снимите его "
-    "и назначьте ближайшего свободного"
+    "Свяжитесь с исполнителем. Если не успевает — снимите его "
+    "и назначьте того, кто ближе"
 )
-ADVICE_ASSIGN = "Назначьте исполнителя: время прибытия уже под угрозой"
+ADVICE_ASSIGN = "Откройте вызов и назначьте исполнителя"
+ADVICE_ASSIGN_OVERDUE = "Срок сорван. Назначьте исполнителя, чтобы сократить опоздание"
+ADVICE_NOBODY = (
+    "Свободных с допуском нет. Поставьте вызов в очередь к занятому "
+    "или сообщите начальнику смены"
+)
+ADVICE_OVERDUE_EN_ROUTE = "Срок сорван. Уточните у исполнителя, когда он будет у борта"
+ADVICE_OVERDUE_QUEUED = (
+    "Срок сорван, а вызов ещё в очереди. Переназначьте его на свободного, если такой есть"
+)
 ADVICE_SIGNAL = "Свяжитесь с исполнителем по рации и уточните, где он"
 
 
@@ -212,6 +225,7 @@ def assess_unassigned(call, deadline, now):
             deadline,
             now,
         )
+        control.advice = ADVICE_ASSIGN_OVERDUE
     elif waited >= UNASSIGNED_ALERT_AFTER_MIN:
         control = Control(
             LEVEL_UNASSIGNED,
@@ -219,13 +233,25 @@ def assess_unassigned(call, deadline, now):
             deadline,
             now,
         )
+        control.advice = ADVICE_ASSIGN
     else:
         return Control(
             LEVEL_PENDING, f"Ожидает назначения, до срока {minutes_text(left)}", deadline, now
         )
 
-    control.advice = ADVICE_ASSIGN
+    if nobody_to_assign(call):
+        control.advice = ADVICE_NOBODY
     return control
+
+
+def nobody_to_assign(call):
+    """
+    Подбор уже выполнялся и никого не нашёл.
+
+    Совет «назначьте исполнителя» здесь был бы издёвкой: назначать некого.
+    Диспетчеру нужен другой ход — очередь к занятому или начальник смены.
+    """
+    return call.status == STATUS_SUGGESTED and call.suggested_employee_id is None
 
 
 def assess_queued(call, deadline, now):
@@ -244,7 +270,7 @@ def assess_queued(call, deadline, now):
             deadline,
             now,
         )
-        control.advice = ADVICE_REASSIGN
+        control.advice = ADVICE_OVERDUE_QUEUED
         return control
 
     if call.eta_at is None:
@@ -288,7 +314,7 @@ def assess_en_route(call, deadline, now):
             deadline,
             now,
         )
-        control.advice = ADVICE_REASSIGN
+        control.advice = ADVICE_OVERDUE_EN_ROUTE
     elif minutes is None:
         control = Control(
             LEVEL_NO_SIGNAL,
@@ -428,9 +454,14 @@ def overrun_text(minutes):
     Опоздание или просрочка: всегда целые минуты, округление вверх.
 
     Опоздание на 12 секунд — это «на 1 мин», а не «на 0 мин»: преуменьшать
-    нарушение договорного срока нельзя.
+    нарушение договорного срока нельзя. От часа и больше — часами:
+    «204 мин» приходится пересчитывать в уме, «3 ч 24 мин» читается сразу.
     """
-    return f"{max(1, math.ceil(minutes))} мин"
+    whole = max(1, math.ceil(minutes))
+    if whole < MINUTES_IN_HOUR:
+        return f"{whole} мин"
+    hours, rest = divmod(whole, MINUTES_IN_HOUR)
+    return f"{hours} ч {rest} мин" if rest else f"{hours} ч"
 
 
 def seconds_text(seconds):

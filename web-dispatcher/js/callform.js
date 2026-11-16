@@ -8,12 +8,23 @@
  * название, глава ATA и категория допуска. По категории сервер посчитает
  * требуемую отметку, и новый тип сразу участвует в подборе.
  *
+ * Слова экипажа вводятся один раз. Раньше их просили дважды: в поле поиска
+ * типа и ниже, в поле «Сообщение экипажа». Теперь поле одно: по нему
+ * подбирается тип, и этот же текст уходит инженеру как описание. При
+ * разборе сообщения с планшета слова экипажа уже есть — тип предлагается
+ * по ним сразу, перепечатывать ничего не нужно.
+ *
  * Поиск выполняет сервер: правила ранжирования должны быть в одном месте,
  * а не повторяться в каждом клиенте.
  */
 
 const CALL_FORM_SEARCH_DELAY_MS = 200;
 const CALL_FORM_RESULTS = 7;
+// Фраза экипажа разбирается по словам; короче трёх букв — предлоги и союзы.
+const CALL_FORM_WORD_MIN = 3;
+const CALL_FORM_WORDS_MAX = 8;
+// Длинную фразу экипажа нельзя подставлять как название нового типа.
+const CALL_FORM_NAME_FROM_TEXT_MAX = 40;
 
 // Главы ATA грузятся один раз за сеанс: справочник глав неизменен.
 let ataChaptersCache = null;
@@ -37,14 +48,15 @@ function showCallForm(options) {
     active: -1,
     timer: null,
     busy: false,
+    // Сообщение экипажа при разборе входящего; иначе null.
+    report: options.report || null,
   };
 
   document.body.append(form.root);
   bindCallForm(form, options);
-  if (options.report) {
-    // Слова экипажа уже записаны в сообщении и показаны в шапке формы —
-    // второе поле описания только путало бы.
-    field(form, "#form-description").closest(".modal-field").hidden = true;
+  if (form.report) {
+    // Слова экипажа уже есть — типы предлагаются по ним сразу.
+    runDefectSearch(form);
   }
   field(form, "#form-defect-query").focus();
   return form;
@@ -75,15 +87,7 @@ function buildCallFormMarkup(options) {
         <select id="form-aircraft">${aircraftOptions}</select>
       </div>
 
-      <div class="modal-field">
-        <label for="form-defect-query">Неисправность</label>
-        <div class="defect-picked" id="form-defect-picked" hidden></div>
-        <div class="defect-search" id="form-defect-search">
-          <input id="form-defect-query" autocomplete="off"
-                 placeholder="Слова экипажа или глава: «течь», «шасси», «ATA 32»">
-          <div class="defect-results" id="form-defect-results" hidden></div>
-        </div>
-      </div>
+      ${options.report ? defectTypeField(options) + wordsField(options) : wordsField(options) + defectTypeField(options)}
 
       <div class="defect-new" id="form-defect-new" hidden>
         <div class="defect-new-title">Новый тип неисправности</div>
@@ -108,12 +112,6 @@ function buildCallFormMarkup(options) {
         <div class="defect-new-hint" id="form-new-hint"></div>
       </div>
 
-      <div class="modal-field">
-        <label for="form-description">Сообщение экипажа <span class="dim">— необязательно</span></label>
-        <textarea id="form-description" rows="2" maxlength="500"
-                  placeholder="Подробности для инженера: какая стойка, где течь, что на индикации"></textarea>
-      </div>
-
       <label class="form-check">
         <input type="checkbox" id="form-urgent">
         <span>Срочный вызов <span class="dim">— встанет первым в списке</span></span>
@@ -129,6 +127,41 @@ function buildCallFormMarkup(options) {
     </div>
   `;
   return backdrop;
+}
+
+/**
+ * Поле слов экипажа. При разборе сообщения слова уже есть, и поле
+ * становится уточняющим поиском — поэтому стоит ниже предложенных типов.
+ */
+function wordsField(options) {
+  return `
+      <div class="modal-field">
+        <label for="form-defect-query">${
+          options.report
+            ? "Тип не подошёл? Найдите по слову или главе ATA"
+            : "Что сообщил экипаж"
+        }</label>
+        <textarea id="form-defect-query" rows="${options.report ? 1 : 2}" maxlength="500"
+                  autocomplete="off" placeholder="${
+                    options.report
+                      ? "«шасси», «ATA 32»"
+                      : "Например: «течь у левой стойки шасси». Инженер прочтёт это в вызове"
+                  }"></textarea>
+      </div>`;
+}
+
+function defectTypeField(options) {
+  return `
+      <div class="modal-field">
+        <label>Тип неисправности</label>
+        <div class="defect-picked" id="form-defect-picked" hidden></div>
+        <div class="defect-results" id="form-defect-results" hidden></div>
+        <div class="defect-hint" id="form-defect-hint">${
+          options.report
+            ? "Подбираем по словам экипажа…"
+            : "Появится здесь по словам экипажа — останется выбрать"
+        }</div>
+      </div>`;
 }
 
 /**
@@ -193,7 +226,7 @@ function scheduleDefectSearch(form) {
 }
 
 async function runDefectSearch(form) {
-  const text = field(form, "#form-defect-query").value.trim();
+  const text = searchText(form);
   if (!text) {
     form.results = [];
     form.active = -1;
@@ -202,10 +235,10 @@ async function runDefectSearch(form) {
   }
 
   try {
-    const results = await Api.searchDefects(text, CALL_FORM_RESULTS);
+    const results = await findDefects(text);
     // Пока ждали ответ, диспетчер мог дописать запрос — старый ответ
     // не должен перерисовать подсказки под новый текст.
-    if (field(form, "#form-defect-query").value.trim() !== text) {
+    if (searchText(form) !== text) {
       return;
     }
     form.results = results;
@@ -217,6 +250,70 @@ async function runDefectSearch(form) {
 }
 
 /**
+ * По каким словам искать тип: по набранным, а пока поле пусто при разборе
+ * сообщения — по словам самого экипажа.
+ */
+function searchText(form) {
+  const typed = field(form, "#form-defect-query").value.trim();
+  if (typed || !form.report) {
+    return typed;
+  }
+  return (form.report.description || "").trim();
+}
+
+/**
+ * Типы неисправностей под фразу экипажа.
+ *
+ * Сервер ищет типы, в которых есть все слова запроса: для «течь» или
+ * «ATA 32» это точно, но целая фраза «течь у левой основной стойки» так
+ * не найдёт ничего. Поэтому, если фраза целиком не подошла, она
+ * разбирается по словам: каждое ищется на сервере отдельно, и выше
+ * встаёт тип, под который подошло больше слов. Ранжирование внутри
+ * каждого ответа остаётся серверным.
+ */
+async function findDefects(text) {
+  const whole = await Api.searchDefects(text, CALL_FORM_RESULTS);
+  const words = phraseWords(text);
+  if (whole.length || words.length < 2) {
+    return whole;
+  }
+  const lists = await Promise.all(words.map(searchByWord));
+  return mergeByHits(lists).slice(0, CALL_FORM_RESULTS);
+}
+
+function searchByWord(word) {
+  return Api.searchDefects(word, CALL_FORM_RESULTS);
+}
+
+/** Значимые слова фразы без повторов. */
+function phraseWords(text) {
+  const words = text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+  const long = words.filter((word) => word.length >= CALL_FORM_WORD_MIN);
+  return [...new Set(long)].slice(0, CALL_FORM_WORDS_MAX);
+}
+
+/**
+ * Сводит ответы по отдельным словам в один список.
+ * Больше совпавших слов — выше; при равенстве — кто стоял выше у сервера.
+ */
+function mergeByHits(lists) {
+  const found = new Map();
+  for (const list of lists) {
+    list.forEach((defect, place) => {
+      const entry = found.get(defect.code) || { defect, hits: 0, place };
+      entry.hits += 1;
+      entry.place = Math.min(entry.place, place);
+      found.set(defect.code, entry);
+    });
+  }
+  return [...found.values()].sort(compareHits).map((entry) => entry.defect);
+}
+
+function compareHits(left, right) {
+  return right.hits - left.hits || left.place - right.place;
+}
+
+/**
  * Подсказки под полем поиска.
  *
  * Последняя строка всегда «завести новый тип»: даже если что-то нашлось,
@@ -225,12 +322,15 @@ async function runDefectSearch(form) {
  */
 function renderDefectResults(form, text) {
   const box = field(form, "#form-defect-results");
+  const hint = field(form, "#form-defect-hint");
   box.replaceChildren();
 
   if (!text) {
     box.hidden = true;
+    hint.hidden = false;
     return;
   }
+  hint.hidden = true;
 
   form.results.forEach((defect, index) => {
     box.append(buildDefectOption(form, defect, index));
@@ -239,14 +339,14 @@ function renderDefectResults(form, text) {
   const create = document.createElement("button");
   create.type = "button";
   create.className = "defect-option defect-option-new";
-  create.innerHTML = `＋ Завести новый тип: <b>«${escapeHtml(text)}»</b>`;
+  create.textContent = "＋ Подходящего нет — завести новый тип";
   create.addEventListener("click", () => startNewDefect(form, text));
   box.append(create);
 
   if (!form.results.length) {
     const empty = document.createElement("div");
     empty.className = "defect-empty";
-    empty.textContent = "В справочнике такого нет";
+    empty.textContent = "По этим словам в справочнике ничего нет";
     box.prepend(empty);
   }
 
@@ -279,11 +379,11 @@ function onDefectKeydown(form, event) {
   if (event.key === "ArrowDown" && total) {
     event.preventDefault();
     form.active = (form.active + 1) % total;
-    renderDefectResults(form, field(form, "#form-defect-query").value.trim());
+    renderDefectResults(form, searchText(form));
   } else if (event.key === "ArrowUp" && total) {
     event.preventDefault();
     form.active = (form.active - 1 + total) % total;
-    renderDefectResults(form, field(form, "#form-defect-query").value.trim());
+    renderDefectResults(form, searchText(form));
   } else if (event.key === "Enter") {
     event.preventDefault();
     if (form.active >= 0 && form.results[form.active]) {
@@ -294,13 +394,13 @@ function onDefectKeydown(form, event) {
   }
 }
 
-/** Выбран существующий тип: поиск сворачивается в плашку с кнопкой «изменить». */
+/** Выбран существующий тип: подсказки сворачиваются в плашку с кнопкой «изменить». */
 function pickDefect(form, defect) {
   form.selected = defect;
   form.mode = "search";
   field(form, "#form-defect-new").hidden = true;
   field(form, "#form-defect-results").hidden = true;
-  field(form, "#form-defect-search").hidden = true;
+  field(form, "#form-defect-hint").hidden = true;
 
   const picked = field(form, "#form-defect-picked");
   picked.hidden = false;
@@ -318,7 +418,8 @@ function pickDefect(form, defect) {
 
   hideFormError(form);
   updateSubmitState(form);
-  field(form, "#form-description").focus();
+  // Тип выбран — следующим действием остаётся только отправка.
+  field(form, "#form-submit").focus();
 }
 
 function resetDefect(form) {
@@ -326,9 +427,7 @@ function resetDefect(form) {
   form.mode = "search";
   field(form, "#form-defect-picked").hidden = true;
   field(form, "#form-defect-new").hidden = true;
-  field(form, "#form-defect-search").hidden = false;
-  const query = field(form, "#form-defect-query");
-  query.focus();
+  field(form, "#form-defect-query").focus();
   runDefectSearch(form);
   updateSubmitState(form);
 }
@@ -340,7 +439,9 @@ async function startNewDefect(form, text) {
   form.mode = "new";
   field(form, "#form-defect-results").hidden = true;
   field(form, "#form-defect-new").hidden = false;
-  field(form, "#form-new-name").value = text;
+  // Короткий запрос («обледенение датчика») годится в название как есть,
+  // а целая фраза экипажа — нет: название диспетчер сформулирует сам.
+  field(form, "#form-new-name").value = text.length <= CALL_FORM_NAME_FROM_TEXT_MAX ? text : "";
 
   try {
     await fillChapters(form);
@@ -437,7 +538,8 @@ async function submitCallForm(form, options) {
       : await Api.createCall(
           aircraftId,
           code,
-          field(form, "#form-description").value.trim() || null,
+          // Слова экипажа из единственного поля — они же описание для инженера.
+          field(form, "#form-defect-query").value.trim() || null,
           urgent
         );
     closeCallForm(form);
@@ -445,10 +547,13 @@ async function submitCallForm(form, options) {
   } catch (error) {
     if (error.status === 409 && form.mode === "new") {
       showFormError(form, `${error.detail}. Выберите его в списке.`);
-      field(form, "#form-defect-query").value = field(form, "#form-new-name").value;
+      const name = field(form, "#form-new-name").value.trim();
       field(form, "#form-defect-new").hidden = true;
       form.mode = "search";
-      await runDefectSearch(form);
+      // Слова экипажа в поле не трогаем: показываем найденный тип по названию.
+      form.results = await Api.searchDefects(name, CALL_FORM_RESULTS);
+      form.active = form.results.length ? 0 : -1;
+      renderDefectResults(form, name);
     } else {
       showFormError(form, error.detail);
     }

@@ -6,10 +6,12 @@
  * исполнителя и помечает вызовы, по которым срок будет сорван, уже сорван,
  * исполнителя нет или его координатам нельзя верить. Здесь эти пометки
  * превращаются в то, что диспетчер не пропустит:
- *   - плашка над списком вызовов с причиной и подсказкой, что делать;
- *   - счётчик в шапке — виден, даже когда открыт другой вызов;
+ *   - счётчик в шапке — виден, даже когда открыт другой вызов; щелчок
+ *     ведёт к самой срочной карточке;
  *   - звуковой сигнал и мигающий заголовок вкладки при новой тревоге:
  *     диспетчер может смотреть на перрон в окно, а не в экран.
+ * Причина и подсказка, что делать, написаны на карточке вызова
+ * (panels.js): отдельная плашка над списком повторяла бы её слово в слово.
  *
  * Решает, что тревожно, сервер. Клиент только показывает — иначе
  * у диспетчера и в базе были бы разные представления о нарушении.
@@ -28,13 +30,6 @@ const alertState = {
   baseTitle: document.title,
 };
 
-const ALERT_TITLES = {
-  late: "Не успевает",
-  overdue: "Срок истёк",
-  unassigned: "Без исполнителя",
-  no_signal: "Нет сигнала",
-};
-
 /**
  * Перерисовывает уведомления по свежему списку вызовов.
  *
@@ -46,7 +41,6 @@ function renderAlerts(calls, onSelect) {
   // Самые срочные первыми: меньше всего минут до срока.
   alerts.sort(compareByMinutesLeft);
 
-  renderAlertBox(alerts, onSelect);
   renderAlertPill(alerts, onSelect);
   signalNewAlerts(alerts);
 }
@@ -55,52 +49,27 @@ function compareByMinutesLeft(left, right) {
   return left.control.minutes_left - right.control.minutes_left;
 }
 
-function renderAlertBox(alerts, onSelect) {
-  const box = document.getElementById("alert-box");
-  box.replaceChildren();
-  box.hidden = alerts.length === 0;
-
-  for (const call of alerts) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "alert-item";
-    // Две строки, а не одна: панель вызовов узкая, и в одну строку
-    // «НЕ УСПЕВАЕТ», бортовой номер и минуты переносились по слогам.
-    item.innerHTML = `
-      <div class="alert-item-top">
-        <span class="alert-kind">${escapeHtml(ALERT_TITLES[call.control.level] || "Тревога")}</span>
-        <span class="alert-left num">${minutesLeftText(call.control)}</span>
-      </div>
-      <div class="alert-item-board">
-        <span class="call-board">${escapeHtml(call.board_number)}</span>
-        <span>${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(call.stand_ref || "—")}</span>
-      </div>
-      <div class="alert-reason">${escapeHtml(call.control.reason)}</div>
-      ${
-        call.control.advice
-          ? `<div class="alert-advice">${escapeHtml(call.control.advice)}</div>`
-          : ""
-      }
-    `;
-    item.addEventListener("click", () => onSelect(call));
-    box.append(item);
-  }
-}
-
 function renderAlertPill(alerts, onSelect) {
   const pill = document.getElementById("alert-pill");
   pill.hidden = alerts.length === 0;
   pill.textContent = `${ALARM_TITLE_PREFIX}Под угрозой: ${alerts.length}`;
-  pill.onclick = alerts.length ? () => onSelect(alerts[0]) : null;
+  pill.title = "Вызовы, по которым срок прибытия сорван или будет сорван. Щелчок откроет самый срочный";
+  pill.onclick = alerts.length ? () => openMostUrgent(alerts[0], onSelect) : null;
 }
 
-/** «ост. 4 мин» или «просрочен 3 мин» — главная цифра тревоги. */
+/** Самый срочный вызов стоит первым в списке — открыть его и показать начало списка. */
+function openMostUrgent(call, onSelect) {
+  onSelect(call);
+  document.getElementById("calls-list").scrollTop = 0;
+}
+
+/** «ост. 4 мин» или «просрочен 1 ч 3 мин» — главная цифра карточки вызова. */
 function minutesLeftText(control) {
   const left = control.minutes_left;
   if (left < 0) {
-    return `просрочен ${Math.ceil(-left)} мин`;
+    return `просрочен ${durationText(Math.ceil(-left))}`;
   }
-  return `ост. ${Math.floor(left)} мин`;
+  return `ост. ${durationText(Math.floor(left))}`;
 }
 
 /* --- Сигнал о новой тревоге --- */

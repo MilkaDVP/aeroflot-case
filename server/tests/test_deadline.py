@@ -18,7 +18,14 @@ from clock import utc_now
 from database import SessionLocal
 from models.call import Call
 from models.employee import Employee
-from services.deadline import minutes_text, minutes_until, overrun_text
+from services.deadline import (
+    ADVICE_ASSIGN,
+    ADVICE_ASSIGN_OVERDUE,
+    ADVICE_NOBODY,
+    minutes_text,
+    minutes_until,
+    overrun_text,
+)
 from tests.test_api import ApiTestCase, auth_header
 
 
@@ -383,3 +390,29 @@ class TestWording(DeadlineCase):
         # 12 секунд опоздания — «1 мин», а не «0 мин» и не «меньше минуты».
         self.assertEqual(overrun_text(0.2), "1 мин")
         self.assertEqual(overrun_text(3.01), "4 мин")
+
+    def test_опоздание_от_часа_показывается_часами(self):
+        # «204 мин» приходится пересчитывать в уме, «3 ч 24 мин» читается сразу.
+        self.assertEqual(overrun_text(59.2), "1 ч")
+        self.assertEqual(overrun_text(203.4), "3 ч 24 мин")
+        self.assertEqual(overrun_text(120), "2 ч")
+
+    def test_совет_соответствует_положению_дел(self):
+        # Срок ещё идёт — «назначьте»; срок сорван — об этом сказано прямо,
+        # без «время под угрозой» через три часа после срока.
+        call = self.register()
+        self.age_call(call["id"], 5)
+        self.assertEqual(self.control(call["id"])["advice"], ADVICE_ASSIGN)
+
+        self.age_call(call["id"], 200)
+        control = self.control(call["id"])
+        self.assertEqual(control["advice"], ADVICE_ASSIGN_OVERDUE)
+        self.assertNotIn("под угрозой", control["advice"])
+
+    def test_когда_назначать_некого_совет_другой(self):
+        # На A330 в дневной смене допуска нет ни у кого: подбор пуст,
+        # и совет «назначьте исполнителя» был бы невыполним.
+        call = self.register(board="VQ-BQX", defect="engine_start_fault")
+        self.assertIsNone(self.suggest(call["id"])["best"])
+        self.age_call(call["id"], 5)
+        self.assertEqual(self.control(call["id"])["advice"], ADVICE_NOBODY)

@@ -32,6 +32,18 @@ function transportLabel(candidate) {
   return "пешком";
 }
 
+/**
+ * Длительность в минутах словами: «14 мин», «3 ч 24 мин».
+ * От часа — часами: «204 мин» приходится пересчитывать в уме.
+ */
+function durationText(minutes) {
+  if (minutes < 60) {
+    return `${minutes} мин`;
+  }
+  const rest = minutes % 60;
+  return `${Math.floor(minutes / 60)} ч` + (rest ? ` ${rest} мин` : "");
+}
+
 /** Человекочитаемое время: минуты без лишней точности. */
 function formatMinutes(minutes) {
   return minutes >= 10 ? Math.round(minutes) : minutes.toFixed(1);
@@ -51,48 +63,78 @@ function renderCalls(container, calls, selectedId, onSelect) {
   container.replaceChildren();
 
   if (!calls.length) {
-    container.innerHTML = '<div class="empty">Активных вызовов нет</div>';
+    container.innerHTML =
+      '<div class="empty">Вызовов нет.<br>Новый появится здесь, когда экипаж сообщит о неисправности ' +
+      "или вы зарегистрируете его кнопкой ниже.</div>";
     return;
   }
 
-  for (const call of calls) {
-    const item = document.createElement("div");
-    item.className = "call";
-    item.classList.add(callStateClass(call));
-    const controlCls = controlClass(call);
-    if (controlCls) {
-      item.classList.add(controlCls);
-    }
-    if (call.id === selectedId) {
-      item.classList.add("selected");
-    }
-
-    const assignee = assigneeLine(call);
-
-    item.innerHTML = `
-      <div class="call-top">
-        <span class="call-board">${escapeHtml(call.board_number)}</span>
-        ${callFlags(call)}
-        <span class="call-stand">${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(
-          call.stand_ref || "—"
-        )}</span>
-      </div>
-      <div class="call-defect">${escapeHtml(call.defect_name)}</div>
-      ${descriptionLine(call)}
-      <div class="call-meta">
-        <span class="mark">${escapeHtml(call.required_mark)}</span>
-        <span class="num" title="${call.reported_at ? "сообщение экипажа" : "регистрация"}">${formatClock(
-          call.reported_at || call.created_at
-        )}</span>
-        <span>${escapeHtml(statusWithStage(call))}</span>
-        ${controlBadge(call)}
-      </div>
-      ${assignee}
-    `;
-
-    item.addEventListener("click", () => onSelect(call));
-    container.append(item);
+  for (const call of attentionFirst(calls)) {
+    container.append(buildCallCard(call, selectedId, onSelect));
   }
+}
+
+/**
+ * Тревожные вызовы — наверх, самые срочные первыми.
+ *
+ * Раньше тревога жила отдельной плашкой над списком и повторяла карточку
+ * того же вызова: борт, стоянку и минуты диспетчер читал дважды и не
+ * понимал, куда нажимать. Теперь тревога — это сама карточка: она поднята
+ * наверх и окрашена, а остальные идут в порядке сервера.
+ */
+function attentionFirst(calls) {
+  const alerts = calls.filter(isAlertCall).sort(compareByMinutesLeft);
+  return alerts.concat(calls.filter((call) => !isAlertCall(call)));
+}
+
+function isAlertCall(call) {
+  return Boolean(call.control && call.control.alert);
+}
+
+/**
+ * Карточка вызова. Каждый факт — один раз:
+ *   строка 1 — борт и главная цифра (минуты до срока);
+ *   строка 2 — где стоит и какой нужен допуск;
+ *   строка 3 — что случилось;
+ *   строка 4 — кто занимается и на каком он шаге;
+ *   строка 5 — только у тревожных: причина и что сделать.
+ */
+function buildCallCard(call, selectedId, onSelect) {
+  const item = document.createElement("div");
+  item.className = "call";
+  item.dataset.callId = call.id;
+  if (!call.assigned_employee_id && call.status !== "queued") {
+    item.classList.add("is-new");
+  }
+  const controlCls = controlClass(call);
+  if (controlCls) {
+    item.classList.add(controlCls);
+  }
+  if (call.id === selectedId) {
+    item.classList.add("selected");
+  }
+
+  item.innerHTML = `
+    <div class="call-top">
+      <span class="call-board">${escapeHtml(call.board_number)}</span>
+      ${callFlags(call)}
+      ${deadlineLabel(call)}
+    </div>
+    <div class="call-where">
+      ${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(call.stand_ref || "—")} ·
+      <span class="mark" data-term="mark">${escapeHtml(call.required_mark)}</span> ·
+      <span class="num" title="${
+        call.reported_at ? "Экипаж сообщил в это время" : "Вызов зарегистрирован в это время"
+      }. От него идут 15 минут">с ${formatClock(call.reported_at || call.created_at)}</span>
+    </div>
+    <div class="call-defect">${escapeHtml(call.defect_name)}</div>
+    ${descriptionLine(call)}
+    ${whoLine(call)}
+    ${controlNote(call)}
+  `;
+
+  item.addEventListener("click", () => onSelect(call));
+  return item;
 }
 
 /**
@@ -108,14 +150,20 @@ function descriptionLine(call) {
   return `<div class="call-description">«${escapeHtml(call.defect_description)}»</div>`;
 }
 
+/**
+ * Статус вызова словами, которые нельзя понять двояко.
+ *
+ * «Подобран» читалось как «назначен», хотя исполнителя ещё нет:
+ * система лишь нашла кандидата и ждёт решения диспетчера.
+ */
 function statusTitle(status) {
   const titles = {
-    new: "новый",
-    suggested: "подобран",
+    new: "ждёт назначения",
+    suggested: "ждёт назначения",
     queued: "в очереди",
-    assigned: "назначен",
-    accepted: "принят",
-    arrived: "прибыл",
+    assigned: "ещё не принял вызов",
+    accepted: "принял, едет",
+    arrived: "у борта",
     closed: "закрыт",
   };
   return titles[status] || status;
@@ -311,15 +359,6 @@ function callFlags(call) {
   );
 }
 
-/** Статус вызова вместе с этапом работ: «прибыл · ждёт запчасти». */
-function statusWithStage(call) {
-  const title = statusTitle(call.status);
-  return call.work_stage_title && call.status === "arrived"
-    ? `${title} · ${call.work_stage_title}`
-    : title;
-}
-
-/** Класс карточки вызова: новый, в очереди или назначенный. */
 /* --- Контроль регламента --- */
 
 // Короткие подписи уровней контроля для отметки на вызове.
@@ -348,62 +387,105 @@ function controlClass(call) {
 }
 
 /**
- * Отметка на вызове: состояние и минуты до контрольного срока.
+ * Главная цифра карточки: сколько осталось до контрольного срока.
  *
- * Минуты показываются у каждого незавершённого вызова, а не только у
- * тревожных: «ост. 11 мин» у нового вызова — то, что подгоняет назначение.
+ * Показывается у каждого незавершённого вызова, а не только у тревожных:
+ * «ост. 11 мин» у нового вызова — то, что подгоняет назначение. После
+ * прибытия отсчёт окончен, и на его месте — итог: в срок или с опозданием.
  */
-function controlBadge(call) {
+function deadlineLabel(call) {
   const control = call.control;
-  if (!control || control.level === "arrived" || control.level === "closed") {
+  if (!control || control.level === "closed") {
     return "";
   }
   if (control.level === "paused") {
-    // Срок прибытия по приостановленному вызову уже исполнен —
-    // минуты до него показывать незачем.
-    return `<span class="control-badge">приостановлен</span>`;
+    // Срок прибытия по приостановленному вызову уже исполнен.
+    return '<span class="call-deadline">приостановлен</span>';
   }
-  const label = CONTROL_LABELS[control.level];
+  if (control.level === "arrived") {
+    return arrivalLabel(control);
+  }
   return (
-    `<span class="control-badge level-${escapeHtml(control.level)}">` +
-    (label ? `${escapeHtml(label)} · ` : "") +
-    `<span class="num">${escapeHtml(minutesLeftText(control))}</span></span>`
+    `<span class="call-deadline num level-${escapeHtml(control.level)}">` +
+    `${escapeHtml(minutesLeftText(control))}</span>`
   );
 }
 
-function callStateClass(call) {
-  if (call.status === "queued") {
-    return "is-queued";
+function arrivalLabel(control) {
+  if (control.margin_min === null || control.margin_min === undefined) {
+    return "";
   }
-  return call.assigned_employee_id ? "is-assigned" : "is-new";
+  if (control.margin_min >= 0) {
+    return '<span class="call-deadline is-done">прибыл в срок</span>';
+  }
+  return (
+    '<span class="call-deadline num level-late">опоздал на ' +
+    `${escapeHtml(durationText(Math.ceil(-control.margin_min)))}</span>`
+  );
 }
 
 /**
- * Строка исполнителя под вызовом.
+ * Причина и действие — только там, где нужно вмешаться или присмотреться.
+ *
+ * Причина сервера показывается, когда она сообщает новое: прогноз опоздания,
+ * потерю сигнала. Для вызова без исполнителя и с истёкшим сроком она лишь
+ * повторила бы статус и цифру, которые уже есть на карточке.
+ */
+const NOTE_WITH_REASON = ["late", "warn", "no_signal", "paused"];
+
+function controlNote(call) {
+  const control = call.control;
+  if (!control) {
+    return "";
+  }
+  const reason = NOTE_WITH_REASON.includes(control.level) ? control.reason : "";
+  if (!reason && !control.advice) {
+    return "";
+  }
+  return (
+    `<div class="call-note level-${escapeHtml(control.level)}">` +
+    (reason ? `<div>${escapeHtml(reason)}</div>` : "") +
+    (control.advice ? `<div class="call-note-advice">${escapeHtml(control.advice)}</div>` : "") +
+    `</div>`
+  );
+}
+
+/**
+ * Кто занимается вызовом и на каком он шаге — одной строкой.
  *
  * Для вызова в очереди показывается абсолютное время прибытия, а не
  * «через N минут»: исполнитель сначала закончит текущие работы, и главный
  * вопрос диспетчера здесь — насколько будет нарушен регламент.
  */
-function assigneeLine(call) {
+function whoLine(call) {
   if (!call.assigned_employee_name) {
-    return "";
+    // Подбор уже был и никого не нашёл — это не «ждёт», а «некого».
+    const nobody = call.status === "suggested" && !call.suggested_employee_id;
+    return `<div class="call-who${nobody ? " is-danger" : ""}">${
+      nobody ? "некого назначить" : "ждёт назначения"
+    }</div>`;
   }
   const name = escapeHtml(call.assigned_employee_name);
 
   if (call.status === "queued") {
     return (
-      `<div class="call-assignee is-queued">в очереди к ${name}` +
+      `<div class="call-who is-queued">в очереди к <b>${name}</b>` +
       (call.eta_at ? ` · прибытие ~<span class="num">${formatClock(call.eta_at)}</span>` : "") +
       `</div>`
     );
   }
+  if (call.status === "arrived") {
+    return (
+      `<div class="call-who"><b>${name}</b> у борта` +
+      (call.work_stage_title ? ` · ${escapeHtml(call.work_stage_title)}` : "") +
+      `</div>`
+    );
+  }
 
+  const forecast = call.control && call.control.forecast_at;
   return (
-    `<div class="call-assignee">→ ${name}` +
-    (call.eta_minutes !== null
-      ? ` · <span class="num">${formatMinutes(call.eta_minutes)}</span> мин`
-      : "") +
+    `<div class="call-who"><b>${name}</b> · ${escapeHtml(statusTitle(call.status))}` +
+    (forecast ? ` · будет ~<span class="num">${formatClock(forecast)}</span>` : "") +
     `</div>`
   );
 }

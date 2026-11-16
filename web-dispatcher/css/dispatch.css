@@ -114,9 +114,14 @@
 
 /* --- Список вызовов --- */
 
+/*
+ * Карточка вызова. Обычная карточка спокойна: без цветной полосы и заливки.
+ * Цвет появляется только там, где нужно вмешаться (красный) или
+ * присмотреться (жёлтый), — иначе на экране «горит» всё и не видно главного.
+ */
 .call {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border-strong);
+  border-left: 3px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
   padding: var(--gap-sm) var(--gap);
@@ -135,22 +140,7 @@
 }
 
 .call.is-new {
-  border-left-color: var(--danger);
   animation: call-appear 2.5s ease-out;
-}
-
-.call.is-assigned {
-  border-left-color: var(--ok);
-}
-
-/* Вызов в очереди к занятому: жёлтый — к исполнителю привязан,
-   но выедет он не сразу, и регламент под угрозой. */
-.call.is-queued {
-  border-left-color: var(--warn);
-}
-
-.call-assignee.is-queued {
-  color: var(--warn);
 }
 
 /* Кнопка постановки в очередь в строке занятого сотрудника. */
@@ -174,7 +164,6 @@
 
 .call-top {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
   gap: var(--gap-sm);
 }
@@ -182,33 +171,94 @@
 .call-board {
   font-family: var(--font-mono);
   font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* Главная цифра карточки — минуты до срока. Справа, крупнее остального. */
+.call-deadline {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.call-deadline.level-ok,
+.call-deadline.is-done {
+  color: var(--ok);
+}
+
+.call-deadline.is-done {
+  font-weight: 400;
+}
+
+.call-deadline.level-warn {
+  color: var(--warn);
+}
+
+.call-deadline.level-late,
+.call-deadline.level-overdue,
+.call-deadline.level-unassigned,
+.call-deadline.level-no_signal {
+  color: var(--danger);
   font-size: 13px;
 }
 
-.call-stand {
+.call-where {
+  margin-top: 2px;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.call-where .mark {
+  font-size: 10px;
+  padding: 0 4px;
 }
 
 .call-defect {
-  margin-top: 2px;
-  font-size: 12px;
+  margin-top: var(--gap-xs);
+  font-size: 13px;
 }
 
-.call-meta {
+.call-who {
   margin-top: var(--gap-xs);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-xs) var(--gap-sm);
-  align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
-.call-assignee {
-  margin-top: var(--gap-xs);
-  font-size: 11px;
-  color: var(--ok);
+.call-who b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.call-who.is-queued {
+  color: var(--warn);
+}
+
+.call-who.is-danger {
+  color: var(--danger);
+}
+
+/* Причина и действие у вызова, который требует внимания. */
+.call-note {
+  margin-top: var(--gap-sm);
+  padding-top: var(--gap-sm);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.call-note.level-warn {
+  color: var(--warn);
+}
+
+.call-note-advice {
+  color: var(--text);
+}
+
+.call-note-advice::before {
+  content: "→ ";
+  color: var(--danger);
 }
 
 /* --- Карта --- */
@@ -838,8 +888,17 @@
   border-color: var(--route);
 }
 
-.defect-search {
-  position: relative;
+/* Пока слов экипажа нет — подсказка, откуда возьмётся тип. */
+.defect-hint {
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.defect-hint[hidden] {
+  display: none;
 }
 
 /* Подсказки лежат в потоке, а не всплывают поверх: форма короткая,
@@ -963,6 +1022,11 @@
   font-style: italic;
 }
 
+.call-stand {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* --- Контроль регламента: тревоги --- */
 
 .eta-message.is-warn {
@@ -1010,70 +1074,6 @@
   }
 }
 
-.alert-box {
-  flex-shrink: 0;
-  max-height: 46%;
-  overflow-y: auto;
-  padding: var(--gap-sm);
-  border-bottom: 1px solid var(--danger);
-  background: var(--danger-soft);
-}
-
-.alert-box[hidden] {
-  display: none;
-}
-
-.alert-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: var(--bg-panel);
-  border: 1px solid var(--danger);
-  border-left: 3px solid var(--danger);
-  border-radius: var(--radius);
-  padding: 7px 10px;
-  margin-bottom: var(--gap-xs);
-  animation: alert-pulse 1.4s ease-in-out infinite;
-}
-
-.alert-item:last-child {
-  margin-bottom: 0;
-}
-
-.alert-item-top,
-.alert-item-board {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  white-space: nowrap;
-}
-
-.alert-item-board {
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.alert-kind {
-  color: var(--danger);
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.alert-left {
-  margin-left: auto;
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.alert-reason {
-  margin-top: 3px;
-  font-size: 12px;
-}
-
-.alert-advice,
 .assignment-advice {
   margin-top: 3px;
   font-size: 11px;
@@ -1092,37 +1092,12 @@
   background: var(--danger-soft);
 }
 
+.call.is-alert .call-note {
+  border-top-color: rgba(242, 86, 77, 0.35);
+}
+
 .call.is-warn {
   border-left-color: var(--warn);
-}
-
-.control-badge {
-  margin-left: auto;
-  padding: 0 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  white-space: nowrap;
-  color: var(--text-muted);
-  border: 1px solid var(--border-strong);
-}
-
-.control-badge.level-ok {
-  color: var(--ok);
-  border-color: rgba(53, 196, 106, 0.4);
-}
-
-.control-badge.level-warn {
-  color: var(--warn);
-  border-color: var(--warn);
-}
-
-.control-badge.level-late,
-.control-badge.level-overdue,
-.control-badge.level-unassigned,
-.control-badge.level-no_signal {
-  color: #fff;
-  background: var(--danger);
-  border-color: var(--danger);
 }
 
 /* Метка сотрудника, чьи GPS-координаты устарели: точка на карте уже
