@@ -17,11 +17,14 @@
 
   --text: #e4ecf4;
   --text-muted: #8b9bad;
-  --text-dim: #5d6b7a;
+  /* Третий уровень текста: контраст не ниже 4,5:1 — экран читают на солнце. */
+  --text-dim: #7b8a9a;
 
   --ok: #35c46a;
   --warn: #e3a72c;
   --danger: #f2564d;
+  /* Красный для текста: на тёмной и красной подложке контраст выше 4,5:1. */
+  --danger-text: #ff766d;
   --route: #3d8bfd;
 
   --ok-soft: rgba(53, 196, 106, 0.14);
@@ -166,7 +169,7 @@ button {
 button:disabled { opacity: 0.5; }
 
 .error {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
   border: 1px solid var(--danger);
   border-radius: var(--radius);
@@ -323,8 +326,8 @@ button:disabled { opacity: 0.5; }
 }
 
 .deadline.is-warn .deadline-value { color: var(--warn); }
-.deadline.is-danger .deadline-value { color: var(--danger); }
-.deadline.is-danger .deadline-label { color: var(--danger); }
+.deadline.is-danger .deadline-value { color: var(--danger-text); }
+.deadline.is-danger .deadline-label { color: var(--danger-text); }
 .deadline.is-done .deadline-value { color: var(--ok); }
 
 .target {
@@ -559,7 +562,7 @@ button:disabled { opacity: 0.5; }
 }
 
 .toast[hidden] { display: none; }
-.toast.is-alert { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.toast.is-alert { border-color: var(--danger); color: var(--danger-text); background: var(--danger-soft); }
 
 /* Прогноз сервера под обратным отсчётом: успеваете ли вы оттуда, где вы сейчас. */
 .deadline-forecast {
@@ -599,7 +602,7 @@ button:disabled { opacity: 0.5; }
 .aog-toggle {
   min-height: 48px;
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
   background: transparent;
   font-weight: 600;
 }
@@ -626,3 +629,67 @@ button:disabled { opacity: 0.5; }
 }
 
 .link-banner[hidden] { display: none; }
+
+/* --- Подсказки: что делать и что даст нажатие --- */
+
+/* GPS не дал координат. Жёлтая строка с действием: это не авария,
+   и закрывать ею маршрут на карте нельзя. */
+.geo-notice {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 1px solid var(--warn);
+  border-radius: 0;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 14px;
+  text-align: left;
+}
+
+.geo-notice[hidden] { display: none; }
+
+.chip.is-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* Строка над главной кнопкой. */
+.action-hint {
+  margin: 0 14px 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.action-hint[hidden] { display: none; }
+
+.at-aircraft-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.at-aircraft-title .muted {
+  font-weight: 400;
+}
+
+.at-aircraft-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Справка в меню. */
+.help-steps {
+  margin: 12px 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.help-steps b {
+  color: var(--text);
+}

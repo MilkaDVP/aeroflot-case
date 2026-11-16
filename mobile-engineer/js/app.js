@@ -33,11 +33,26 @@ let heartbeatTimer = null;
 
 // Действие инженера: что показывает кнопка и что уходит на сервер.
 // Порядок в жизненном цикле вызова: назначен -> принял -> прибыл -> завершил.
+// hint — что даст нажатие: строка над кнопкой, чтобы не гадать.
 const ACTIONS = {
-  assigned: { label: "Принять вызов", action: "accepted" },
-  accepted: { label: "Я на месте", action: "arrived" },
-  arrived: { label: "Работы завершены", action: "closed" },
+  assigned: {
+    label: "Принять вызов",
+    action: "accepted",
+    hint: "Диспетчер назначил вас. Примите вызов — он увидит, что вы выехали",
+  },
+  accepted: {
+    label: "Я у борта",
+    action: "arrived",
+    hint: "Нажмите, когда подойдёте к самолёту: по этой отметке считается срок",
+  },
+  arrived: {
+    label: "Закрыть вызов — работы завершены",
+    action: "closed",
+    hint: "Закрывайте, когда всё сделано. Отменить закрытие нельзя",
+  },
 };
+
+const CLOSE_CONFIRM = "Работы завершены? Закрытый вызов вернуть нельзя.";
 
 const el = (id) => document.getElementById(id);
 
@@ -295,17 +310,18 @@ function renderLink() {
   if (banner.hidden) {
     return;
   }
+  // Простыми словами: можно ли работать и что будет с отметками.
   const parts = [];
   if (state.offline) {
-    parts.push("Нет связи");
+    parts.push("Нет связи. Работайте как обычно — отметки уйдут сами, когда появится сеть");
     if (state.snapshotAt) {
-      parts.push(`данные на ${clockText(state.snapshotAt)}`);
+      parts.push(`Данные на ${clockText(state.snapshotAt)}`);
     }
   }
   if (pending) {
-    parts.push(`не отправлено действий: ${pending}`);
+    parts.push(state.offline ? `Ждут отправки: ${pending}` : `Отправляем отметки: ${pending}`);
   }
-  banner.textContent = parts.join(" · ");
+  banner.textContent = parts.join(". ");
 }
 
 function clockText(timestamp) {
@@ -367,6 +383,7 @@ function renderWork() {
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
   el("call-action").hidden = !hasCall;
+  el("action-hint").hidden = !hasCall;
 
   // Карта рисуется в любом случае: без вызова она показывает, где стоит
   // сам инженер, и позволяет поставить точку в режиме имитации.
@@ -407,6 +424,7 @@ function renderWork() {
   const step = ACTIONS[call.status];
   el("call-action").textContent = step ? step.label : "Ожидание";
   el("call-action").disabled = !step;
+  el("action-hint").textContent = step ? step.hint : "";
 
   el("work-status").textContent = statusTitle(call.status);
   el("work-status-dot").className = "status-dot busy";
@@ -434,6 +452,9 @@ function renderAtAircraft(call) {
   el("aog-toggle").textContent = call.aog
     ? "AOG поставлен — снять"
     : "AOG: борт не может лететь";
+  el("aog-hint").textContent = call.aog
+    ? "Диспетчер видит AOG: вызов стоит первым в его списке."
+    : "AOG ставьте после осмотра, если борт нельзя выпускать в рейс.";
 }
 
 async function changeStage(stage) {
@@ -489,7 +510,7 @@ function statusTitle(status) {
   const titles = {
     assigned: "назначен вызов",
     accepted: "в пути",
-    arrived: "на месте",
+    arrived: "у борта",
   };
   return titles[status] || status;
 }
@@ -537,7 +558,7 @@ function updateCountdown() {
 
   block.className = `deadline ${countdownClass(leftMin, call.control)}`;
   value.textContent = Math.floor(leftMin);
-  label.textContent = "до контрольного срока";
+  label.textContent = "осталось, чтобы быть у борта";
 }
 
 /**
@@ -640,6 +661,11 @@ el("call-action").addEventListener("click", async () => {
   if (!step) {
     return;
   }
+  // Закрытие необратимо для инженера, а кнопка — во всю ширину экрана:
+  // случайное касание в перчатке закрывало вызов без вопросов.
+  if (step.action === "closed" && !window.confirm(CLOSE_CONFIRM)) {
+    return;
+  }
 
   el("call-action").disabled = true;
   el("call-error").hidden = true;
@@ -679,6 +705,9 @@ el("call-action").addEventListener("click", async () => {
  */
 function onPosition(position) {
   state.position = position;
+  if (!el("geo-notice").hidden) {
+    clearGeoNotice();
+  }
   updateDistance();
   drawRoute();
   if (!state.call) {
@@ -725,9 +754,27 @@ function sendHeartbeat() {
 }
 
 function onGeoError(message) {
-  showToast(message, true);
+  // Отказ GPS на перроне — обычное дело, а не авария: вместо красной
+  // плашки поверх маршрута — спокойная строка с действием.
+  el("geo-notice").hidden = false;
+  el("geo-mode").textContent = "Место: нет GPS";
+  el("geo-mode").classList.add("is-warn");
   el("geo-error").hidden = false;
   el("geo-error").textContent = message;
+}
+
+/** Место определено — напоминание про GPS больше не нужно. */
+function clearGeoNotice() {
+  el("geo-notice").hidden = true;
+  el("geo-mode").classList.remove("is-warn");
+  el("geo-mode").textContent = locator.mode === "simulation" ? "Место: вручную" : "Место: GPS";
+}
+
+/** Из строки «GPS недоступен»: сразу ручной режим и подсказка, что делать. */
+function switchToManualPlace() {
+  setGeoMode("simulation");
+  clearGeoNotice();
+  showToast("Коснитесь карты там, где вы стоите");
 }
 
 /**
@@ -738,7 +785,7 @@ function onGeoError(message) {
  */
 function onMapTap(point) {
   if (locator.mode !== "simulation") {
-    showToast("Чтобы ставить точку вручную, включите режим имитации");
+    showToast("Чтобы указать место пальцем, нажмите «Место» вверху и выберите «Вручную»");
     return;
   }
   applySimulated(point.lat, point.lon);
@@ -759,6 +806,9 @@ function bindEvents() {
     button.addEventListener("click", () => changeStage(button.dataset.stage));
   }
   el("aog-toggle").addEventListener("click", toggleAog);
+  el("geo-notice").addEventListener("click", switchToManualPlace);
+  el("menu-help").addEventListener("click", openHelpSheet);
+  el("help-close").addEventListener("click", () => closeSheet("help-sheet"));
 
   // Переключатель подложки: снимок требует сети, схема работает всегда.
   el("map-toggle").addEventListener("click", () => {
@@ -811,13 +861,15 @@ function setGeoMode(mode) {
 
   if (mode === "gps") {
     locator.startGps();
-    el("geo-mode").textContent = "GPS";
-    el("geo-explain").textContent = "Координаты берутся с приёмника телефона.";
+    el("geo-mode").textContent = "Место: GPS";
+    el("geo-explain").textContent = "Ваше место определяет приёмник телефона.";
   } else {
-    el("geo-mode").textContent = "Имитация";
+    el("geo-mode").textContent = "Место: вручную";
+    el("geo-mode").classList.remove("is-warn");
+    el("geo-notice").hidden = true;
     el("geo-explain").textContent =
-      "Координаты задаются вручную. Реальный GPS по условиям задания " +
-      "не обязателен, и этот режим используется для демонстрации.";
+      "Вы сами показываете, где находитесь. Нужно, когда GPS не ловит, " +
+      "и для показа без выхода на перрон.";
     // Отталкиваемся от последней известной точки, чтобы не вводить
     // координаты Шереметьево с нуля.
     const base = state.position || (state.call ? targetPoint() : null);
@@ -831,6 +883,12 @@ function setGeoMode(mode) {
   if (state.call) {
     drawRoute();
   }
+}
+
+/** Справка открывается из меню: меню закрывается, чтобы листы не наслаивались. */
+function openHelpSheet() {
+  closeSheet("menu-sheet");
+  openSheet("help-sheet");
 }
 
 function openSheet(id) {
