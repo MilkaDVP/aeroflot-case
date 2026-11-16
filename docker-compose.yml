@@ -7,6 +7,11 @@
 # С телефона адреса те же, но вместо localhost — адрес компьютера в сети,
 # и серверу нужно указать его явно: http://192.168.x.x:8081/?api=http://192.168.x.x:8000
 
+# Если порт на машине занят, его можно сменить переменной окружения:
+#   SERVER_PORT=8010 WEB_PORT=8090 MOBILE_PORT=8091 docker compose up --build
+# При нестандартном порте сервера клиентам его нужно назвать один раз:
+#   http://localhost:8090/?api=http://localhost:8010
+
 services:
   server:
     build:
@@ -16,7 +21,7 @@ services:
       dockerfile: server/Dockerfile
     container_name: aeroflot-server
     ports:
-      - "8000:8000"
+      - "${SERVER_PORT:-8000}:8000"
     environment:
       # Наполнение тестовыми данными при первом запуске: жюри должно
       # увидеть работающую систему сразу, а не пустые экраны.
@@ -32,7 +37,7 @@ services:
       dockerfile: web-dispatcher/Dockerfile
     container_name: aeroflot-web
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-8080}:80"
     # Зависимость только на порядок запуска: браузер обращается к API
     # напрямую, поэтому статика поднимется и без готового сервера.
     depends_on:
@@ -45,7 +50,7 @@ services:
       dockerfile: mobile-engineer/Dockerfile
     container_name: aeroflot-mobile
     ports:
-      - "8081:80"
+      - "${MOBILE_PORT:-8081}:80"
     depends_on:
       - server
     restart: unless-stopped
