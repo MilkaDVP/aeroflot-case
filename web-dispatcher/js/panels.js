@@ -59,6 +59,9 @@ function formatClock(isoString) {
 
 /* --- Список вызовов --- */
 
+// Сколько длится подсветка нового вызова; совпадает с анимацией call-appear.
+const FRESH_CALL_MS = 2500;
+
 function renderCalls(container, calls, selectedId, onSelect) {
   container.replaceChildren();
 
@@ -71,6 +74,26 @@ function renderCalls(container, calls, selectedId, onSelect) {
 
   for (const call of attentionFirst(calls)) {
     container.append(buildCallCard(call, selectedId, onSelect));
+  }
+  rememberShownCalls(calls);
+}
+
+/**
+ * Запоминает показанные вызовы — через время подсветки, а не сразу:
+ * иначе следующая же перерисовка (щелчок по вызову) оборвала бы её.
+ */
+function rememberShownCalls(calls) {
+  const ids = calls.map((call) => call.id);
+  if (shownCallIds === null) {
+    shownCallIds = new Set(ids);
+    return;
+  }
+  setTimeout(addShownCalls, FRESH_CALL_MS, ids);
+}
+
+function addShownCalls(ids) {
+  for (const id of ids) {
+    shownCallIds.add(id);
   }
 }
 
@@ -85,6 +108,21 @@ function renderCalls(container, calls, selectedId, onSelect) {
 function attentionFirst(calls) {
   const alerts = calls.filter(isAlertCall).sort(compareByMinutesLeft);
   return alerts.concat(calls.filter((call) => !isAlertCall(call)));
+}
+
+// Вызовы, которые диспетчер уже видел в списке. null — список ещё не рисовался.
+let shownCallIds = null;
+
+/**
+ * Вызов появился в списке только что.
+ *
+ * Список перерисовывается на каждом опросе, и подсветка «новый вызов»,
+ * привязанная к статусу, вспыхивала каждые четыре секунды у всех
+ * неназначенных. Теперь она срабатывает один раз — когда вызов впервые
+ * попал в список; то, что было на экране при открытии, не мигает.
+ */
+function isFreshCall(call) {
+  return shownCallIds !== null && !shownCallIds.has(call.id);
 }
 
 function isAlertCall(call) {
@@ -103,8 +141,8 @@ function buildCallCard(call, selectedId, onSelect) {
   const item = document.createElement("div");
   item.className = "call";
   item.dataset.callId = call.id;
-  if (!call.assigned_employee_id && call.status !== "queued") {
-    item.classList.add("is-new");
+  if (isFreshCall(call)) {
+    item.classList.add("is-fresh");
   }
   const controlCls = controlClass(call);
   if (controlCls) {
@@ -122,7 +160,7 @@ function buildCallCard(call, selectedId, onSelect) {
     </div>
     <div class="call-where">
       ${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(call.stand_ref || "—")} ·
-      <span class="mark" data-term="mark">${escapeHtml(call.required_mark)}</span> ·
+      <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span> ·
       <span class="num" title="${
         call.reported_at ? "Экипаж сообщил в это время" : "Вызов зарегистрирован в это время"
       }. От него идут 15 минут">с ${formatClock(call.reported_at || call.created_at)}</span>
@@ -189,7 +227,13 @@ function renderSuggestion(container, result, selectedEmployeeId, onPick, queueOp
   container.append(buildEtaBlock(result));
 
   if (result.candidates.length) {
-    container.append(sectionTitle(`Кандидаты (${result.candidates.length})`));
+    container.append(
+      sectionTitle(
+        `Могут выехать сейчас (${result.candidates.length})`,
+        "Свободные сотрудники с допуском на этот борт, первым — кто приедет быстрее. " +
+          "Щелчок по строке покажет маршрут; назначить не первого вправе начальник смены"
+      )
+    );
     for (const candidate of result.candidates) {
       container.append(
         buildCandidateRow(candidate, result.best, selectedEmployeeId, onPick)
@@ -198,14 +242,19 @@ function renderSuggestion(container, result, selectedEmployeeId, onPick, queueOp
   }
 
   if (result.busy.length) {
-    container.append(sectionTitle("Заняты, допуск есть"));
+    container.append(sectionTitle("Заняты, допуск есть", TERMS.queue.text));
     for (const busy of result.busy) {
       container.append(buildBusyRow(busy, queueOptions));
     }
   }
 
   if (result.rejected.length) {
-    container.append(sectionTitle(`Не подходят (${result.rejected.length})`));
+    container.append(
+      sectionTitle(
+        `Не подходят (${result.rejected.length})`,
+        "Система показывает и тех, кого отсеяла, с причиной: решение остаётся за диспетчером"
+      )
+    );
     for (const rejected of result.rejected) {
       container.append(buildRejectedRow(rejected));
     }
@@ -218,12 +267,18 @@ function buildEtaBlock(result) {
   block.className = "eta-block";
 
   if (!result.best) {
+    // Не прочерк на месте цифры, а слова: прочерк выглядел как поломка.
     block.innerHTML = `
-      <div class="eta-value is-danger">—</div>
+      <div class="eta-nobody">Назначить некого</div>
       <div class="eta-message is-danger">${escapeHtml(result.message)}</div>
-      <div class="eta-sub">Требуется отметка <span class="mark">${escapeHtml(
+      <div class="eta-sub">Нужна отметка <span class="mark"${term("mark")}>${escapeHtml(
         result.required_mark
-      )}</span></div>
+      )}</span> и <span${term("rating")}>допуск на тип</span></div>
+      <div class="eta-next">${
+        result.busy.length
+          ? "Что можно сделать: поставить вызов в очередь к занятому — список ниже."
+          : "Что можно сделать: сообщить начальнику смены — нужен сотрудник с допуском."
+      }</div>
     `;
     return block;
   }
@@ -233,13 +288,14 @@ function buildEtaBlock(result) {
 
   block.innerHTML = `
     <div>
-      <span class="eta-value ${cls}">${formatMinutes(best.minutes)}</span
-      ><span class="eta-unit">мин</span>
+      <span class="eta-value ${cls}" title="Время в пути до борта">${formatMinutes(best.minutes)}</span
+      ><span class="eta-unit">мин в пути</span>
     </div>
     <div class="eta-name">${escapeHtml(best.full_name)}</div>
+    <div class="eta-why">будет у борта быстрее всех свободных с допуском</div>
     <div class="eta-sub">
-      <span class="mark">${escapeHtml(best.mark)}</span>
-      ${transportLabel(best)} ·
+      <span class="mark"${term("mark")}>${escapeHtml(best.mark)}</span>
+      <span${best.vehicle_call_sign ? term("vehicle") : ""}>${transportLabel(best)}</span> ·
       <span class="num">${Math.round(best.route.distance_m)}</span> м
     </div>
     <div class="eta-message ${result.within_regulation ? "is-ok" : "is-danger"}">
@@ -266,8 +322,8 @@ function buildCandidateRow(candidate, best, selectedEmployeeId, onPick) {
     <span class="candidate-body">
       <span class="candidate-name">${escapeHtml(candidate.full_name)}</span>
       <span class="candidate-sub">
-        <span class="mark">${escapeHtml(candidate.mark)}</span>
-        ${transportLabel(candidate)}
+        <span class="mark"${term("mark")}>${escapeHtml(candidate.mark)}</span>
+        <span${candidate.vehicle_call_sign ? term("vehicle") : ""}>${transportLabel(candidate)}</span>
         · <span class="num">${Math.round(candidate.route.distance_m)}</span> м
       </span>
     </span>
@@ -354,7 +410,7 @@ function busyStageLine(busy) {
  */
 function callFlags(call) {
   return (
-    (call.aog ? '<span class="flag flag-aog" title="Борт не может лететь. Статус поставил инженер">AOG</span>' : "") +
+    (call.aog ? `<span class="flag flag-aog"${term("aog")}>AOG</span>` : "") +
     (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "")
   );
 }
@@ -490,10 +546,14 @@ function whoLine(call) {
   );
 }
 
-function sectionTitle(text) {
+function sectionTitle(text, hint) {
   const element = document.createElement("div");
   element.className = "section-title";
   element.textContent = text;
+  if (hint) {
+    element.title = hint;
+    element.dataset.term = "section";
+  }
   return element;
 }
 
@@ -526,10 +586,10 @@ function renderAssignment(container, call, onUnassign) {
   const block = document.createElement("div");
   block.className = "eta-block";
   block.innerHTML = `
-    <div>${headline}</div>
+    <div${call.status === "arrived" ? "" : term("forecast")}>${headline}</div>
     <div class="eta-name">${escapeHtml(call.assigned_employee_name || "—")}</div>
     <div class="eta-sub">${escapeHtml(call.defect_name)}${
-      call.defect_ata ? ` · ATA ${escapeHtml(call.defect_ata)}` : ""
+      call.defect_ata ? ` · <span${term("ata")}>ATA ${escapeHtml(call.defect_ata)}</span>` : ""
     }</div>
     ${descriptionLine(call)}
     <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${assignmentTiming(

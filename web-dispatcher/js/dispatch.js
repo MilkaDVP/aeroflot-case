@@ -13,6 +13,8 @@ const state = {
   aircraft: [],
   calls: [],
   vehicles: [],
+  // Входящие сообщения экипажа, ещё не разобранные.
+  reports: [],
   selectedCall: null,
   suggestion: null,
   // Кандидат, выбранный диспетчером вручную. null — согласие с системой.
@@ -91,6 +93,7 @@ async function refresh() {
       Api.shiftFeed(1),
     ]);
     state.drill = drill.enabled;
+    state.reports = reports;
 
     state.employees = employees;
     state.aircraft = aircraft;
@@ -108,6 +111,7 @@ async function refresh() {
 
     renderAll();
     renderDrill();
+    updateGuide();
     renderInbox(reports, processReport, rejectReport);
 
     // Прогноз по назначенному вызову меняется вместе с координатами
@@ -205,6 +209,7 @@ function showAssignment(call) {
   elements.assignButton.disabled = true;
 
   renderAssignedCard(call);
+  updateGuide();
   if (call.route_node_ids && call.route_node_ids.length > 1) {
     airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
   } else {
@@ -230,6 +235,7 @@ async function selectCall(call) {
   try {
     const suggestion = await Api.suggest(call.id);
     state.suggestion = suggestion;
+    updateGuide();
     elements.calcTime.textContent = `${suggestion.elapsed_ms} мс`;
 
     renderSuggestion(elements.suggestBody, suggestion, null, pickCandidate, queueOptions());
@@ -565,16 +571,33 @@ async function rejectReport(report) {
 /**
  * Значок учений в шапке и переключатель.
  *
- * Значок виден всем: диспетчер должен понимать, что сотрудники на карте
- * движутся по учебному сценарию и прибытие подтверждается само.
+ * Значок «идут учения» виден всем и стоит в строке под шапкой вместе с
+ * объяснением: диспетчер должен понимать, что сотрудники на карте движутся
+ * по учебному сценарию и прибытие подтверждается само.
  * Включает и выключает учения только администратор.
  */
 function renderDrill() {
-  const badge = document.getElementById("drill-badge");
   const toggle = document.getElementById("drill-toggle");
-  badge.hidden = !state.drill;
   toggle.hidden = Session.user.role !== "admin";
   toggle.textContent = state.drill ? "Завершить учения" : "Начать учения";
+  toggle.title = `${DRILL_EXPLAIN} ${DRILL_WHO}`;
+}
+
+/**
+ * Строка «что сейчас» под шапкой и значок учений в ней.
+ * Обновляется на каждом опросе и при каждом действии диспетчера.
+ */
+function updateGuide() {
+  renderGuide(
+    {
+      reports: state.reports,
+      calls: state.calls,
+      selectedCall: state.selectedCall,
+      suggestion: state.suggestion,
+      drill: state.drill,
+    },
+    openCallById
+  );
 }
 
 async function toggleDrill() {
@@ -610,7 +633,13 @@ function renderAssignedCard(call) {
     ? "Учения: отпустить исполнителя"
     : "Учения: задержать исполнителя";
   button.addEventListener("click", () => toggleHold(employee));
-  elements.suggestBody.append(button);
+
+  // Что имитирует кнопка — рядом с ней: без пояснения «задержать»
+  // выглядит как настоящее действие над настоящим человеком.
+  const note = document.createElement("div");
+  note.className = "hold-note";
+  note.textContent = employee.held ? HELD_EXPLAIN : HOLD_EXPLAIN;
+  elements.suggestBody.append(button, note);
 }
 
 async function toggleHold(employee) {
@@ -669,6 +698,8 @@ function showMapNotice(message) {
 for (const button of document.querySelectorAll("#basemap-switch button")) {
   button.addEventListener("click", () => applyBasemap(button.dataset.basemap));
 }
+
+document.getElementById("help-open").addEventListener("click", openHelp);
 
 document.getElementById("shift-summary").addEventListener("click", () => {
   openShiftSummary(openCallById);

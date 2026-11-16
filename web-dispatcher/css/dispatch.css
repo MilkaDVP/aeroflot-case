@@ -9,10 +9,11 @@
 .workspace {
   height: 100vh;
   display: grid;
-  grid-template-rows: 44px 1fr 30px;
+  grid-template-rows: 44px 32px 1fr 30px;
   grid-template-columns: 300px 1fr 330px;
   grid-template-areas:
     "header header header"
+    "guide  guide  guide"
     "calls  map    suggest"
     "status status status";
 }
@@ -59,6 +60,171 @@
 .header button {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+/* --- Строка «что сейчас» --- */
+
+/* Под шапкой во всю ширину: следующее действие должно быть там, куда
+   человек смотрит первым, и не должно отнимать место у карты. */
+.guide {
+  grid-area: guide;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 0 var(--gap);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.guide-label {
+  flex-shrink: 0;
+  color: var(--route);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.guide-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guide-text.is-link {
+  cursor: pointer;
+  text-decoration: underline dotted var(--text-dim);
+  text-underline-offset: 3px;
+}
+
+.guide-text.is-link:hover {
+  color: var(--route);
+}
+
+/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
+   видеть, что картина на карте учебная. */
+.guide-drill {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  background: var(--warn-soft);
+  font-size: 12px;
+}
+
+.guide-drill[hidden] {
+  display: none;
+}
+
+/* Термин с пояснением при наведении. */
+[data-term] {
+  cursor: help;
+}
+
+/* --- Звук тревоги: состояние и проверка --- */
+
+.sound-control {
+  position: relative;
+}
+
+.sound-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  width: 340px;
+  padding: var(--gap);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.sound-panel[hidden] {
+  display: none;
+}
+
+.sound-panel p {
+  margin: var(--gap-sm) 0 var(--gap);
+  color: var(--text-muted);
+}
+
+.sound-state {
+  font-weight: 600;
+}
+
+.sound-state.is-waiting {
+  color: var(--warn);
+}
+
+.sound-actions {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+/* --- Окно справки --- */
+
+.modal.help {
+  width: 680px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal.help .section-title {
+  margin-top: var(--gap-lg);
+}
+
+.help-steps {
+  margin: var(--gap-sm) 0;
+  padding-left: 20px;
+}
+
+.help-steps li {
+  margin-bottom: var(--gap-xs);
+  color: var(--text-muted);
+}
+
+.help-steps b,
+.help-list dt {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.help-note {
+  margin: var(--gap-sm) 0 0;
+  color: var(--text-muted);
+}
+
+.help-list {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: var(--gap-xs) var(--gap);
+  margin: var(--gap-sm) 0 0;
+}
+
+.help-list dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.help-colors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-xs) var(--gap);
+  margin-top: var(--gap-sm);
+  color: var(--text-muted);
+}
+
+.help-color {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
 }
 
 /* --- Панели --- */
@@ -139,7 +305,8 @@
   background: var(--route-soft);
 }
 
-.call.is-new {
+/* Подсветка только что появившегося вызова — один раз, при появлении. */
+.call.is-fresh {
   animation: call-appear 2.5s ease-out;
 }
 
@@ -633,6 +800,26 @@
   color: var(--danger);
 }
 
+/* Подбор никого не нашёл: слова вместо цифры. */
+.eta-nobody {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: var(--gap-sm);
+}
+
+.eta-next {
+  margin-top: var(--gap-sm);
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Почему предложен именно этот кандидат. */
+.eta-why {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .eta-unit {
   font-size: 18px;
   color: var(--text-muted);
@@ -1063,6 +1250,12 @@
   border-style: dashed;
 }
 
+/* Звук включён, но браузер его ещё не разрешил — это нужно заметить. */
+.sound-toggle.is-waiting {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 /* Пульсирует рамка, а не фон: тревога должна бросаться в глаза,
    но текст причины должен оставаться читаемым. */
 @keyframes alert-pulse {
@@ -1223,24 +1416,6 @@
 
 /* --- Режим учений --- */
 
-/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
-   видеть, что картина на карте учебная. */
-.drill-badge {
-  padding: 3px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
-  background: var(--warn-soft);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-}
-
-.drill-badge[hidden] {
-  display: none;
-}
-
 .hold-button {
   width: 100%;
   margin-top: var(--gap-sm);
@@ -1250,6 +1425,12 @@
 
 .hold-button.is-held {
   background: var(--warn-soft);
+}
+
+.hold-note {
+  margin-top: var(--gap-xs);
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* --- Входящие сообщения экипажа --- */

@@ -20,6 +20,14 @@
 const SOUND_STORAGE = "aeroflot.alarm-sound";
 const ALARM_TITLE_PREFIX = "⚠ ";
 
+// Когда звучит сигнал — одним абзацем. Показывается в панели звука и в справке.
+const SOUND_EXPLAIN =
+  "Сигнал — три коротких тона. Звучит один раз, когда по вызову появляется новая тревога: " +
+  "исполнитель не успевает, срок истёк, вызов долго без исполнителя или пропал сигнал. " +
+  "Тревоги, которые уже были при открытии экрана, не звучат — они видны в списке вызовов.";
+const SOUND_BLOCKED =
+  "Браузер не даёт странице звучать, пока вы по ней не щёлкнули. Щёлкните в любом месте.";
+
 const alertState = {
   // Уже показанные тревоги: «вызов:уровень». Сигнал звучит только на новую —
   // тревога, которая висит пять минут, не должна пищать каждые четыре секунды.
@@ -129,10 +137,37 @@ function setSoundEnabled(enabled) {
   renderSoundToggle();
 }
 
+/**
+ * Звук готов: включён и браузер его разрешил.
+ *
+ * Браузер разрешает звук только после действия пользователя на странице.
+ * Раньше до первого щелчка сигнал молча не звучал, а кнопка при этом
+ * показывала «вкл» — диспетчер думал, что звук сломан.
+ */
+function soundReady() {
+  return Boolean(alertState.audio && alertState.audio.state === "running");
+}
+
+/** Кнопка в шапке и панель под ней: три состояния звука словами. */
 function renderSoundToggle() {
   const button = document.getElementById("sound-toggle");
-  button.textContent = soundEnabled() ? "Звук тревоги: вкл" : "Звук тревоги: выкл";
-  button.classList.toggle("is-off", !soundEnabled());
+  const state = document.getElementById("sound-state");
+  const enabled = soundEnabled();
+  const waiting = enabled && !soundReady();
+
+  button.textContent = !enabled ? "Звук: выкл" : waiting ? "Звук: ждёт щелчка" : "Звук: вкл";
+  button.classList.toggle("is-off", !enabled);
+  button.classList.toggle("is-waiting", waiting);
+  button.title = "Звуковой сигнал тревоги: когда звучит и как проверить";
+
+  state.textContent = !enabled
+    ? "Звук выключен: о тревоге скажут только красная карточка и счётчик в шапке."
+    : waiting
+      ? SOUND_BLOCKED
+      : "Звук включён и разрешён браузером.";
+  state.classList.toggle("is-waiting", waiting);
+  document.getElementById("sound-explain").textContent = SOUND_EXPLAIN;
+  document.getElementById("sound-switch").textContent = enabled ? "Выключить звук" : "Включить звук";
 }
 
 /**
@@ -140,7 +175,7 @@ function renderSoundToggle() {
  *
  * Браузер разрешает звук только после действия пользователя на странице,
  * поэтому звуковой контекст создаётся при первом щелчке (см. unlockAudio).
- * До этого сигнал молча не звучит — плашка и заголовок всё равно видны.
+ * До этого сигнал не звучит — и кнопка в шапке прямо об этом говорит.
  */
 function playAlarm() {
   const audio = alertState.audio;
@@ -182,14 +217,31 @@ function unlockAudio() {
 
 function initAlerts() {
   renderSoundToggle();
-  document.getElementById("sound-toggle").addEventListener("click", () => {
-    setSoundEnabled(!soundEnabled());
-    // Включение сразу проигрывает сигнал: диспетчер слышит, как он звучит,
-    // и убеждается, что колонки не выключены.
-    if (soundEnabled()) {
-      unlockAudio().then(playAlarm);
-    }
-  });
-  // Любой щелчок по странице разблокирует звук на будущее.
-  document.addEventListener("click", unlockAudio, { once: true });
+  document.getElementById("sound-toggle").addEventListener("click", toggleSoundPanel);
+  document.getElementById("sound-test").addEventListener("click", testSound);
+  document.getElementById("sound-switch").addEventListener("click", switchSound);
+  // Любой щелчок по странице разблокирует звук на будущее;
+  // кнопка в шапке сразу перестаёт показывать «ждёт щелчка».
+  document.addEventListener("click", unlockAndRender, { once: true });
+}
+
+function unlockAndRender() {
+  return unlockAudio().then(renderSoundToggle);
+}
+
+function toggleSoundPanel() {
+  const panel = document.getElementById("sound-panel");
+  panel.hidden = !panel.hidden;
+}
+
+/** Проверка звука: диспетчер слышит сигнал и убеждается, что колонки включены. */
+function testSound() {
+  unlockAndRender().then(playAlarm);
+}
+
+function switchSound() {
+  setSoundEnabled(!soundEnabled());
+  if (soundEnabled()) {
+    testSound();
+  }
 }

@@ -17,24 +17,44 @@
         <span>Смена <b id="ctx-shift">—</b></span>
       </div>
       <div class="header-spacer"></div>
-      <!-- Учения: сервер сам двигает сотрудников без телефона -->
-      <span class="drill-badge" id="drill-badge" hidden>Учения</span>
-      <button type="button" class="sound-toggle" id="drill-toggle" hidden></button>
+      <!-- Учения включает администратор; значок «идут учения» — в строке ниже -->
+      <button type="button" id="drill-toggle" hidden></button>
       <!-- Тревога по регламенту видна, даже когда открыт другой вызов -->
       <button type="button" class="alert-pill" id="alert-pill" hidden></button>
-      <button type="button" class="sound-toggle" id="sound-toggle"></button>
+      <div class="sound-control">
+        <button type="button" class="sound-toggle" id="sound-toggle"></button>
+        <!-- Когда звучит сигнал и как его проверить -->
+        <div class="sound-panel" id="sound-panel" hidden>
+          <div class="sound-state" id="sound-state"></div>
+          <p id="sound-explain"></p>
+          <div class="sound-actions">
+            <button type="button" id="sound-test">Проверить звук</button>
+            <button type="button" id="sound-switch"></button>
+          </div>
+        </div>
+      </div>
       <!-- Разбор решений диспетчера — по кнопке, а не на рабочем экране -->
       <button type="button" id="shift-summary"
               title="Как прошла смена: сколько прибытий в срок и разбор каждого решения">Итог смены</button>
+      <button type="button" id="help-open" title="Путь вызова, устройство экрана, цвета и словарь">Как это работает</button>
       <span class="clock" id="clock">--:--:--</span>
       <span class="muted" id="ctx-user">—</span>
       <button id="logout">Выход</button>
     </header>
 
+    <!-- Что делать сейчас — одной фразой. Новичку не нужно гадать, куда нажать -->
+    <div class="guide">
+      <span class="guide-label">Что сейчас</span>
+      <span class="guide-text" id="guide-text">Загрузка…</span>
+      <span class="guide-drill" id="guide-drill" hidden>
+        <b>Идут учения</b> — сотрудники без телефона едут сами, прибытие отмечается само
+      </span>
+    </div>
+
     <!-- Вызовы -->
     <section class="panel panel-calls">
       <div class="panel-head">
-        <span>Активные вызовы</span>
+        <span title="Вызовы, по которым работа не закончена. Требующие вмешательства — наверху">Активные вызовы</span>
         <span class="num" id="calls-count">0</span>
       </div>
       <!-- Входящие сообщения экипажа: вызовом они станут после разбора -->
@@ -91,7 +111,8 @@
            нажатием на карту. Кнопка включает режим, в котором клик
            по сотруднику и затем по карте переставляет его. -->
       <div class="map-tools">
-        <button type="button" id="move-mode">Переместить сотрудника</button>
+        <button type="button" id="move-mode"
+                title="Для показа без телефонов: щёлкните по сотруднику, затем по месту на перроне">Переместить сотрудника</button>
         <span class="map-tools-hint" id="move-hint" hidden></span>
       </div>
 
@@ -106,10 +127,10 @@
     <section class="panel panel-suggest">
       <div class="panel-head">
         <span>Подбор исполнителя</span>
-        <span class="num dim" id="calc-time"></span>
+        <span class="num dim" id="calc-time" title="Время подбора: проверка допусков и маршруты по перрону"></span>
       </div>
       <div class="panel-body" id="suggest-body">
-        <div class="empty">Выберите вызов в списке слева</div>
+        <div class="empty">Щёлкните по вызову слева — здесь появится, кого отправить и почему</div>
       </div>
       <div class="panel-foot">
         <button class="primary" id="assign" style="width:100%" disabled>
@@ -140,6 +161,7 @@
   <script src="js/tiles.js?v=__BUILD__"></script>
   <script src="js/map.js?v=__BUILD__"></script>
   <script src="js/panels.js?v=__BUILD__"></script>
+  <script src="js/help.js?v=__BUILD__"></script>
   <script src="js/alerts.js?v=__BUILD__"></script>
   <script src="js/mentor.js?v=__BUILD__"></script>
   <script src="js/inbox.js?v=__BUILD__"></script>
