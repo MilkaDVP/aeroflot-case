@@ -78,14 +78,17 @@ async function start() {
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
   try {
-    const [employees, aircraft, calls, vehicles, mentorFeed, drill, reports] = await Promise.all([
+    const [employees, aircraft, calls, vehicles, drill, reports] = await Promise.all([
       Api.employees(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
-      Api.shiftFeed(),
       Api.drillState(),
       Api.reports(),
+      // Ответ здесь не нужен: при чтении ленты сервер записывает замечания
+      // о бездействии (вызов без исполнителя, сорванный срок). Без этого
+      // запроса они попали бы в итог смены только в момент его открытия.
+      Api.shiftFeed(1),
     ]);
     state.drill = drill.enabled;
 
@@ -104,7 +107,6 @@ async function refresh() {
     }
 
     renderAll();
-    renderMentor(mentorFeed, openCallById);
     renderDrill();
     renderInbox(reports, processReport, rejectReport);
 
@@ -668,7 +670,7 @@ for (const button of document.querySelectorAll("#basemap-switch button")) {
   button.addEventListener("click", () => applyBasemap(button.dataset.basemap));
 }
 
-document.getElementById("mentor-summary").addEventListener("click", () => {
+document.getElementById("shift-summary").addEventListener("click", () => {
   openShiftSummary(openCallById);
 });
 

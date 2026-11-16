@@ -1108,53 +1108,12 @@
   stroke-dasharray: 2 2;
 }
 
-/* --- Наставник: лента оценок и итог смены --- */
+/* --- Итог смены: разбор решений диспетчера --- */
 
-/* Блок занимает нижнюю треть правой панели: оценка должна быть видна
-   рядом с решением, но не вытеснять кандидатов, по которым оно принимается. */
-.mentor {
-  flex: 0 0 36%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border-strong);
-}
-
-.mentor .panel-head {
-  gap: var(--gap-sm);
-}
-
-.mentor-score {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.verdict-count {
-  min-width: 20px;
-  padding: 0 5px;
-  border-radius: 3px;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0;
-}
-
-.verdict-count.is-good { color: var(--ok); background: var(--ok-soft); }
-.verdict-count.is-fair { color: var(--warn); background: var(--warn-soft); }
-.verdict-count.is-bad { color: var(--danger); background: var(--danger-soft); }
-
-.mentor-summary-button {
-  padding: 2px 8px;
-  font-size: 11px;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.mentor-feed {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--gap-sm);
+.summary-legend {
+  margin-bottom: var(--gap-sm);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .mentor-item {

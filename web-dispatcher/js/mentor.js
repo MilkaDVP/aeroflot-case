@@ -1,10 +1,15 @@
 /*
- * Наставник — лента замечаний и итог смены.
+ * Итог смены: разбор решений диспетчера.
  *
- * Наставник — вымышленный опытный диспетчер: он смотрит за каждым решением
- * и говорит «хорошо», «не очень» или «плохо» — с причиной в цифрах.
- * Оценки выносит сервер по детерминированным правилам; здесь они только
- * показываются. Клиент не может ни смягчить оценку, ни придумать свою.
+ * Каждое назначение, снятие, постановку в очередь и каждое прибытие сервер
+ * оценивает по правилам — «хорошо», «не очень» или «плохо», с причиной
+ * в цифрах. Здесь оценки только показываются: клиент не может ни смягчить
+ * оценку, ни придумать свою.
+ *
+ * Раньше лента оценок («Наставник») занимала треть правой панели рабочего
+ * экрана. Во время работы она отвлекала и отнимала место у кандидатов,
+ * по которым принимается решение, поэтому разбор открывается кнопкой
+ * «Итог смены» в шапке: это разговор после дела, а не во время.
  */
 
 const VERDICT_TITLES = {
@@ -13,43 +18,7 @@ const VERDICT_TITLES = {
   bad: "плохо",
 };
 
-const MENTOR_FEED_VISIBLE = 12;
 const MENTOR_FULL_LIMIT = 200;
-
-/**
- * Перерисовывает блок Наставника в правой панели.
- *
- * @param {Object} payload ответ /api/shift/feed: events и summary
- * @param {Function} onOpenCall открыть вызов, к которому относится замечание
- */
-function renderMentor(payload, onOpenCall) {
-  renderMentorScore(payload.summary);
-
-  const list = document.getElementById("mentor-feed");
-  list.replaceChildren();
-
-  if (!payload.events.length) {
-    list.innerHTML =
-      '<div class="empty">Замечаний пока нет. Наставник оценит первое же решение.</div>';
-    return;
-  }
-
-  for (const event of payload.events.slice(0, MENTOR_FEED_VISIBLE)) {
-    list.append(buildMentorItem(event, onOpenCall));
-  }
-}
-
-/** Счётчики оценок в заголовке блока: смена одним взглядом. */
-function renderMentorScore(summary) {
-  const score = document.getElementById("mentor-score");
-  score.innerHTML = ["good", "fair", "bad"]
-    .map(
-      (verdict) =>
-        `<span class="verdict-count is-${verdict}" title="${VERDICT_TITLES[verdict]}">` +
-        `${summary.verdicts[verdict] || 0}</span>`
-    )
-    .join("");
-}
 
 function buildMentorItem(event, onOpenCall) {
   const item = document.createElement("div");
@@ -74,10 +43,9 @@ function buildMentorItem(event, onOpenCall) {
 /* --- Итог смены --- */
 
 /**
- * Окно разбора смены: общая оценка, цифры и полная лента.
+ * Окно разбора смены: общая оценка, цифры и все оценённые решения.
  *
- * Открывается кнопкой, а не висит постоянно: во время работы диспетчеру
- * нужна карта, а разбор — это разговор после.
+ * @param {Function} onOpenCall открыть вызов, к которому относится оценка
  */
 async function openShiftSummary(onOpenCall) {
   let payload;
@@ -97,7 +65,12 @@ async function openShiftSummary(onOpenCall) {
         payload.summary.grade
       )}</div>
       <div class="summary-tiles">${summaryTiles(payload.summary)}</div>
-      <div class="section-title">Все замечания (${payload.events.length})</div>
+      <div class="section-title">Разбор решений (${payload.events.length})</div>
+      <div class="summary-legend">
+        Каждое решение оценено по правилам: успел ли исполнитель в 15 минут,
+        был ли выбран ближайший с допуском, не ждал ли вызов назначения.
+        Щелчок по записи откроет вызов.
+      </div>
       <div class="summary-feed" id="summary-feed"></div>
       <div class="modal-actions">
         <button id="summary-close">Закрыть</button>
@@ -108,10 +81,11 @@ async function openShiftSummary(onOpenCall) {
 
   const list = backdrop.querySelector("#summary-feed");
   if (!payload.events.length) {
-    list.innerHTML = '<div class="empty">Замечаний нет</div>';
+    list.innerHTML =
+      '<div class="empty">Решений пока нет. Первая оценка появится после первого назначения.</div>';
   }
   for (const event of payload.events) {
-    list.append(buildMentorItem(event, null));
+    list.append(buildMentorItem(event, (callId) => openFromSummary(backdrop, callId, onOpenCall)));
   }
 
   backdrop.querySelector("#summary-close").addEventListener("click", () => backdrop.remove());
@@ -120,6 +94,12 @@ async function openShiftSummary(onOpenCall) {
       backdrop.remove();
     }
   });
+}
+
+/** Переход от оценки к вызову: окно закрывается, вызов открывается на экране. */
+function openFromSummary(backdrop, callId, onOpenCall) {
+  backdrop.remove();
+  onOpenCall(callId);
 }
 
 function gradeClass(summary) {

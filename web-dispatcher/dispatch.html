@@ -23,6 +23,9 @@
       <!-- Тревога по регламенту видна, даже когда открыт другой вызов -->
       <button type="button" class="alert-pill" id="alert-pill" hidden></button>
       <button type="button" class="sound-toggle" id="sound-toggle"></button>
+      <!-- Разбор решений диспетчера — по кнопке, а не на рабочем экране -->
+      <button type="button" id="shift-summary"
+              title="Как прошла смена: сколько прибытий в срок и разбор каждого решения">Итог смены</button>
       <span class="clock" id="clock">--:--:--</span>
       <span class="muted" id="ctx-user">—</span>
       <button id="logout">Выход</button>
@@ -112,20 +115,6 @@
         <button class="primary" id="assign" style="width:100%" disabled>
           Назначить
         </button>
-      </div>
-
-      <!-- Наставник: оценка каждого решения с причиной в цифрах -->
-      <div class="mentor">
-        <div class="panel-head">
-          <span>Наставник</span>
-          <span class="mentor-score" id="mentor-score"></span>
-          <button type="button" class="mentor-summary-button" id="mentor-summary">
-            Итог смены
-          </button>
-        </div>
-        <div class="mentor-feed" id="mentor-feed">
-          <div class="empty">Загрузка…</div>
-        </div>
       </div>
     </section>
 
