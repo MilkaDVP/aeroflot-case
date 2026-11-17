@@ -406,6 +406,19 @@ def live_minutes(call, employee):
         return None
 
     vehicle = employee.vehicle
+    if vehicle is None and call.vehicle is not None and call.pickup_node_id:
+        # Пассажир в машине ответственного: считается, что он ещё идёт
+        # к ней. После посадки прогноз выходит с запасом в худшую сторону —
+        # лучше, чем ложное «успевает».
+        vehicle = call.vehicle
+        walk = route_from_point(
+            graph, employee.lat, employee.lon, call.pickup_node_id, MODE_WALK, employee.speed_kmh
+        )
+        drive = shortest_path(graph, call.pickup_node_id, call.stand_node_id, MODE_VEHICLE)
+        if walk is None or drive is None:
+            return None
+        return walk.minutes + travel_time_minutes(drive.distance_m, MODE_VEHICLE, vehicle.speed_kmh)
+
     if vehicle is not None and vehicle.status == VEHICLE_RESERVED and call.pickup_node_id:
         walk = route_from_point(
             graph, employee.lat, employee.lon, call.pickup_node_id, MODE_WALK, employee.speed_kmh

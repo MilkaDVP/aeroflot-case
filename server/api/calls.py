@@ -18,7 +18,7 @@ from auth.dependencies import (
     require_roles,
 )
 from clock import to_iso_utc, utc_now, utc_today
-from constants import DEFECT_TYPES, WORK_STAGES
+from constants import DEFECT_TYPES, TRAVEL_MODES, TRAVEL_WALK, TRAVEL_WITH_LEAD, WORK_STAGES
 from database import get_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
@@ -99,6 +99,9 @@ ERROR_SUPPORT_NEEDS_MAIN = (
     "Второго инженера добавляют к вызову, у которого уже есть исполнитель"
 )
 ERROR_ALREADY_ON_CALL = "{name} уже назначен на этот вызов"
+ERROR_BAD_TRAVEL = "Способ передвижения должен быть одним из: {modes}"
+ERROR_NO_LEAD_VEHICLE = "У ответственного инженера нет машины — ехать с ним не на чем"
+ERROR_LEAD_ONLY_FOR_SUPPORT = "Ехать с ответственным может только второй инженер"
 ERROR_NOT_ASSIGNED = "У вызова нет исполнителя: снимать нечего"
 ERROR_CLOSED_CALL = "Вызов закрыт. Снять исполнителя с закрытого вызова нельзя"
 ERROR_UNASSIGN_NEEDS_REASON = (
@@ -459,14 +462,27 @@ def assign_employee(
     return to_response(call, db)
 
 
-def perform_assign(db, context, call, payload, free_choice=False):
+def perform_assign(db, context, call, payload, free_choice=False, lead=None):
     """
     Назначает исполнителя на вызов; коммит остаётся за вызывающим.
 
     free_choice — для второго инженера: предложение системы на него не
     распространяется, поэтому выбор диспетчера не считается
-    переопределением и причины не требует.
+    переопределением и причины не требует. lead — основной вызов группы:
+    его машина нужна, если второй едет вместе с ответственным.
     """
+    if payload.travel not in TRAVEL_MODES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ERROR_BAD_TRAVEL.format(modes=", ".join(TRAVEL_MODES)),
+        )
+    ride_vehicle = None
+    if payload.travel == TRAVEL_WITH_LEAD:
+        if lead is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_LEAD_ONLY_FOR_SUPPORT)
+        ride_vehicle = lead.vehicle
+        if ride_vehicle is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_LEAD_VEHICLE)
     employee = db.get(Employee, payload.employee_id)
     if employee is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
@@ -512,13 +528,26 @@ def perform_assign(db, context, call, payload, free_choice=False):
             raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_OVERRIDE_FORBIDDEN)
 
     plan, pickup_vehicle = plan_route(
-        db, employee, call.stand_node_id, get_graph(call.airport_icao)
+        db,
+        employee,
+        call.stand_node_id,
+        get_graph(call.airport_icao),
+        payload.travel,
+        ride_vehicle,
     )
     if plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)
 
     call.override_reason = payload.override_reason if is_override else None
     assign_now(db, call, employee, plan, pickup_vehicle)
+    if payload.travel == TRAVEL_WALK:
+        # Своя машина, если она есть, остаётся там, где стоит: в этот
+        # вызов она не входит, и на карточке её быть не должно.
+        call.vehicle = None
+    elif ride_vehicle is not None:
+        # Машина остаётся за ответственным: он её забирает и отвечает за
+        # неё; второй едет пассажиром, поэтому за ним она не числится.
+        call.vehicle = ride_vehicle
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
 
 
@@ -571,7 +600,7 @@ def add_support(
     db.add(extra)
     db.flush()
     try:
-        perform_assign(db, context, extra, payload, free_choice=True)
+        perform_assign(db, context, extra, payload, free_choice=True, lead=root)
     except HTTPException:
         db.rollback()
         raise

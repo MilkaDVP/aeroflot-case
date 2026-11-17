@@ -587,18 +587,57 @@ button:disabled { opacity: 0.5; }
 
 .deadline-forecast[hidden] { display: none; }
 
-/* --- У борта: две отметки и связь с диспетчером --- */
+/* --- Лист «Диспетчеру»: отметки, готовые фразы, переписка --- */
 
-.at-aircraft {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+.icon-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+
+.icon-chip[hidden] { display: none; }
+
+.chip-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #fff;
+  background: var(--danger-strong);
+}
+
+.chip-badge[hidden] { display: none; }
+
+.quick-marks {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
-.at-aircraft[hidden] { display: none; }
+.quick-marks[hidden] { display: none; }
+
+.quick-texts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.quick-text {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  background: transparent;
+}
 
 /* Отметка-переключатель: включена — залита. */
 .mark-toggle {
@@ -625,16 +664,12 @@ button:disabled { opacity: 0.5; }
   color: #fff;
 }
 
-.chat {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
 .chat-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 32vh;
+  overflow-y: auto;
   margin-bottom: 8px;
 }
 
@@ -657,6 +692,7 @@ button:disabled { opacity: 0.5; }
 .chat-form {
   display: flex;
   gap: 8px;
+  margin-bottom: 8px;
 }
 
 .chat-form input {

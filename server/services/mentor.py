@@ -428,7 +428,7 @@ def observe(db, airport_icao, now=None):
 
     created = []
     for call in calls:
-        if call.status == STATUS_QUEUED:
+        if call.status == STATUS_QUEUED or call.parent_call_id is not None:
             continue
         control = assess(call, now)
         watch = WATCH_BY_LEVEL.get(control.level)

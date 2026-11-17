@@ -70,6 +70,7 @@
   --gap: 12px;
   --gap-lg: 16px;
   --radius: 4px;
+  --radius-lg: 8px;
 
   /* Четыре размера текста на весь интерфейс. Мельче 11px не бывает:
      десятый кегль на проекторе не читается. */
@@ -232,4 +233,129 @@ label {
     background: var(--bg-raised);
     border-color: var(--border);
   }
+}
+
+/* --- Свои окна, всплывающие списки, уведомления (js/ui.js) --- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 8, 12, 0.6);
+}
+
+.dialog {
+  width: 380px;
+  max-width: 100%;
+  padding: var(--gap-lg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dialog-title {
+  font-size: var(--fs-lg);
+}
+
+.dialog-text {
+  margin: var(--gap-sm) 0 0;
+  color: var(--text-muted);
+}
+
+.dialog-input {
+  width: 100%;
+  margin-top: var(--gap);
+  padding: 8px 10px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.dialog-input.is-invalid {
+  border-color: var(--danger);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-lg);
+}
+
+button.danger-fill {
+  background: var(--danger-strong);
+  border-color: var(--danger-strong);
+  color: #fff;
+  font-weight: 600;
+}
+
+.popover {
+  position: fixed;
+  z-index: 90;
+  width: 320px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.popover-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--gap-sm) var(--gap);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.popover-close {
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.popover-body {
+  overflow-y: auto;
+  padding: var(--gap-sm) var(--gap);
+}
+
+.toast-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  z-index: 110;
+  transform: translateX(-50%);
+  max-width: 480px;
+  padding: var(--gap-sm) var(--gap-lg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.toast-bar[hidden] {
+  display: none;
+}
+
+.toast-bar.is-error {
+  color: var(--danger-text);
+  border-color: var(--danger);
 }

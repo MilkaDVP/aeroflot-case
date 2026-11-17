@@ -66,6 +66,14 @@
     <span id="work-status">на смене</span>
     <span class="spacer"></span>
     <button class="chip" id="geo-mode">Место: GPS</button>
+    <!-- Связь с диспетчером: отметки и сообщения в одном листе -->
+    <button class="chip icon-chip" id="chat-open" aria-label="Сообщения диспетчеру" hidden>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M4 5h16v11H8l-4 4z" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linejoin="round"/>
+      </svg>
+      <span class="chip-badge" id="chat-badge" hidden></span>
+    </button>
     <button class="chip" id="work-menu">⋯</button>
   </header>
 
@@ -117,25 +125,6 @@
       <div class="queue-note" id="call-queue" hidden></div>
       <div class="vehicle-note" id="call-vehicle" hidden></div>
 
-      <!--
-        У борта — две отметки, которые нужны системе: «жду запчасти»
-        (инженера можно переключить на срочный борт) и AOG (ставит только
-        инженер, после осмотра). Всё остальное инженер пишет словами.
-      -->
-      <div class="at-aircraft" id="at-aircraft" hidden>
-        <button class="mark-toggle" id="parts-toggle">Жду запчасти</button>
-        <button class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
-      </div>
-
-      <!-- Связь с диспетчером: свободный текст вместо набора статусов -->
-      <div class="chat">
-        <div class="chat-list" id="chat-list"></div>
-        <form class="chat-form" id="chat-form">
-          <input id="chat-input" maxlength="500" autocomplete="off"
-                 placeholder="Написать диспетчеру">
-          <button type="submit" class="primary" id="chat-send">Отправить</button>
-        </form>
-      </div>
     </div>
   </div>
 
@@ -192,6 +181,41 @@
     <button class="big ghost" id="menu-leave">Уйти со смены</button>
     <button class="big ghost" id="menu-logout">Выйти из учётной записи</button>
     <button class="big ghost" id="menu-close">Закрыть</button>
+  </div>
+</div>
+
+<!--
+  Сообщения диспетчеру. У борта сверху две отметки, которые нужны
+  системе: «Жду запчасти» (инженера можно переключить на срочный борт)
+  и AOG (ставит только инженер, после осмотра). Всё остальное — словами.
+-->
+<div class="sheet-backdrop" id="chat-sheet" hidden>
+  <div class="sheet">
+    <h3>Диспетчеру</h3>
+    <div class="quick-marks" id="quick-marks" hidden>
+      <button class="mark-toggle" id="parts-toggle">Жду запчасти</button>
+      <button class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
+    </div>
+    <div class="quick-texts">
+      <button class="quick-text" data-text="Нужен второй инженер">Нужен второй инженер</button>
+      <button class="quick-text" data-text="Нужен инструмент">Нужен инструмент</button>
+      <button class="quick-text" data-text="Задерживаюсь">Задерживаюсь</button>
+    </div>
+    <div class="chat-list" id="chat-list"></div>
+    <form class="chat-form" id="chat-form">
+      <input id="chat-input" maxlength="500" autocomplete="off" placeholder="Написать диспетчеру">
+      <button type="submit" class="primary" id="chat-send">Отправить</button>
+    </form>
+    <button class="big ghost" id="chat-close">Закрыть</button>
+  </div>
+</div>
+
+<!-- Подтверждение действия: своё окно, браузерные confirm встроенные браузеры блокируют -->
+<div class="sheet-backdrop" id="confirm-sheet" hidden>
+  <div class="sheet">
+    <h3 id="confirm-title">—</h3>
+    <button class="big primary" id="confirm-yes">Да</button>
+    <button class="big ghost" id="confirm-no">Отмена</button>
   </div>
 </div>
 

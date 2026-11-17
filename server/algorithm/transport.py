@@ -209,3 +209,26 @@ def plan_for(graph, employee, goal_id, vehicles):
     prepared = prepare_vehicles(graph, vehicles)
     drive_map = drive_distances_to(graph, goal_id) if prepared else None
     return best_plan(graph, employee, goal_id, prepared, drive_map)
+
+
+def plan_walk(graph, employee, goal_id):
+    """Весь путь пешком, даже если рядом есть машина: так решил диспетчер."""
+    route = route_from_point(
+        graph, employee["lat"], employee["lon"], goal_id, MODE_WALK, employee.get("speed_kmh")
+    )
+    return Plan([route]) if route is not None else None
+
+
+def plan_via(graph, employee, goal_id, vehicle):
+    """
+    Дойти до указанной машины и ехать на ней — вторым в машине ответственного.
+
+    Машина может быть уже занята: в ней поедет ответственный инженер, и
+    второй идёт к ней, а не к свободной. Поэтому расчёт по одной заданной
+    машине, без сравнения с остальными.
+    """
+    entry, approach_m = graph.nearest_node(employee["lat"], employee["lon"], MODE_WALK)
+    prepared = prepare_vehicles(graph, [vehicle])
+    if entry is None or not prepared:
+        return None
+    return pickup_plan(graph, entry["id"], goal_id, approach_m, employee.get("speed_kmh"), prepared[0])

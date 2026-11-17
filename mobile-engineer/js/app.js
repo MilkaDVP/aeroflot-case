@@ -23,6 +23,10 @@ const state = {
   // Опорная точка аэропорта: на неё центрируется карта, пока нет
   // ни вызова, ни координат.
   airportPoint: null,
+  // Самое позднее сообщение, которое инженер уже видел в листе «Диспетчеру».
+  chatSeenId: 0,
+  // Ожидающее ответа подтверждение (см. askConfirm).
+  confirmResolve: null,
 };
 
 let locator = null;
@@ -43,7 +47,7 @@ const ACTIONS = {
 const STAGE_WAITING_PARTS = "waiting_parts";
 const STAGE_WORKING = "repair";
 // Сколько последних сообщений переписки видно на экране вызова.
-const CHAT_SHOWN = 3;
+const CHAT_SHOWN = 20;
 
 const CLOSE_CONFIRM = "Работы завершены? Закрытый вызов вернуть нельзя.";
 
@@ -376,6 +380,10 @@ function renderWork() {
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
   el("call-action").hidden = !hasCall;
+  el("chat-open").hidden = !hasCall;
+  if (!hasCall) {
+    closeSheet("chat-sheet");
+  }
 
   // Карта рисуется в любом случае: без вызова она показывает, где стоит
   // сам инженер, и позволяет поставить точку в режиме имитации.
@@ -432,11 +440,8 @@ function renderWork() {
  * до осмотра ни этапа, ни диагноза ещё нет.
  */
 function renderAtAircraft(call) {
-  const arrived = call.status === "arrived";
-  el("at-aircraft").hidden = !arrived;
-  if (!arrived) {
-    return;
-  }
+  // Отметки имеют смысл только у борта: до осмотра ни запчастей, ни AOG нет.
+  el("quick-marks").hidden = call.status !== "arrived";
   el("parts-toggle").classList.toggle("active", call.work_stage === STAGE_WAITING_PARTS);
   el("aog-toggle").classList.toggle("active", call.aog);
 }
@@ -455,8 +460,9 @@ function toggleWaitingParts() {
 
 /* --- Связь с диспетчером --- */
 
-/** Последние сообщения переписки по вызову: свои справа, диспетчера слева. */
+/** Переписка по вызову: свои справа, диспетчера слева. Значок — о новых ответах. */
 function renderChat(call) {
+  renderChatBadge(call);
   const list = el("chat-list");
   const messages = (call.messages || []).slice(-CHAT_SHOWN);
   // Перерисовка только при изменении: список обновляется на каждом опросе,
@@ -476,8 +482,38 @@ function renderChat(call) {
   }
 }
 
+/**
+ * Число ответов диспетчера, которых инженер ещё не видел.
+ * «Видел» — открывал лист сообщений после того, как ответ пришёл.
+ */
+function renderChatBadge(call) {
+  const fromDispatcher = (call.messages || []).filter((item) => item.author_role === "dispatcher");
+  const seen = state.chatSeenId || 0;
+  const unread = fromDispatcher.filter((item) => item.id > seen).length;
+  el("chat-badge").hidden = unread === 0;
+  el("chat-badge").textContent = unread;
+}
+
+function openChat() {
+  const call = state.call && state.call.call;
+  if (call) {
+    const ids = (call.messages || []).map((item) => item.id);
+    state.chatSeenId = ids.length ? Math.max(...ids) : 0;
+    renderChatBadge(call);
+  }
+  openSheet("chat-sheet");
+}
+
+/** Готовая фраза — одним касанием, без набора текста в перчатках. */
+function sendQuickText(button) {
+  el("chat-input").value = button.dataset.text;
+  sendChatMessage(null);
+}
+
 async function sendChatMessage(event) {
-  event.preventDefault();
+  if (event) {
+    event.preventDefault();
+  }
   const input = el("chat-input");
   const text = input.value.trim();
   if (!text) {
@@ -489,6 +525,9 @@ async function sendChatMessage(event) {
     input.value = "";
     state.call.call = call;
     renderChat(call);
+    // Своё сообщение прочитано сразу; новые ответы считаются от него.
+    state.chatSeenId = Math.max(...(call.messages || []).map((item) => item.id), 0);
+    renderChatBadge(call);
   } catch (error) {
     // Текст остаётся в поле: без связи сообщение не теряется, его можно
     // отправить ещё раз, когда сеть вернётся.
@@ -517,7 +556,7 @@ async function toggleAog() {
   if (!call) {
     return;
   }
-  if (!call.aog && !window.confirm("Поставить AOG? Борт не сможет выполнять полёт.")) {
+  if (!call.aog && !(await askConfirm("Поставить AOG? Борт не сможет выполнять полёт.", "Поставить AOG"))) {
     return;
   }
   try {
@@ -704,7 +743,7 @@ el("call-action").addEventListener("click", async () => {
   }
   // Закрытие необратимо для инженера, а кнопка — во всю ширину экрана:
   // случайное касание в перчатке закрывало вызов без вопросов.
-  if (step.action === "closed" && !window.confirm(CLOSE_CONFIRM)) {
+  if (step.action === "closed" && !(await askConfirm(CLOSE_CONFIRM, "Закрыть вызов"))) {
     return;
   }
 
@@ -846,6 +885,13 @@ function bindEvents() {
   el("parts-toggle").addEventListener("click", toggleWaitingParts);
   el("aog-toggle").addEventListener("click", toggleAog);
   el("chat-form").addEventListener("submit", sendChatMessage);
+  el("chat-open").addEventListener("click", openChat);
+  el("chat-close").addEventListener("click", () => closeSheet("chat-sheet"));
+  for (const button of document.querySelectorAll(".quick-text")) {
+    button.addEventListener("click", () => sendQuickText(button));
+  }
+  el("confirm-yes").addEventListener("click", () => answerConfirm(true));
+  el("confirm-no").addEventListener("click", () => answerConfirm(false));
   el("geo-notice").addEventListener("click", switchToManualPlace);
 
   // Переключатель подложки: снимок требует сети, схема работает всегда.
@@ -920,6 +966,31 @@ function setGeoMode(mode) {
 
   if (state.call) {
     drawRoute();
+  }
+}
+
+/**
+ * Подтверждение своим листом, а не window.confirm: встроенные браузеры
+ * (предпросмотр в редакторе, киоск на стенде) confirm блокируют, и он
+ * сразу отвечает «нет» — кнопка «Закрыть вызов» просто не работала.
+ */
+function askConfirm(question, yesLabel) {
+  el("confirm-title").textContent = question;
+  el("confirm-yes").textContent = yesLabel;
+  openSheet("confirm-sheet");
+  return new Promise(rememberConfirm);
+}
+
+function rememberConfirm(resolve) {
+  state.confirmResolve = resolve;
+}
+
+function answerConfirm(answer) {
+  closeSheet("confirm-sheet");
+  const resolve = state.confirmResolve;
+  state.confirmResolve = null;
+  if (resolve) {
+    resolve(answer);
   }
 }
 

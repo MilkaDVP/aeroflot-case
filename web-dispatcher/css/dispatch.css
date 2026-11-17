@@ -100,9 +100,26 @@
   border-right: 1px solid var(--border);
 }
 
+/* Правая колонка — стопка карточек на глубоком фоне: каждая карточка
+   отвечает на один вопрос, и их не путаешь между собой. */
 .panel-suggest {
   grid-area: suggest;
   border-left: 1px solid var(--border);
+  background: var(--bg-deep);
+}
+
+.panel-suggest .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.panel-suggest .panel-foot {
+  border-top: none;
+}
+
+.panel-foot[hidden] {
+  display: none;
 }
 
 .panel-head {
@@ -716,26 +733,6 @@
   color: var(--warn);
 }
 
-/* Снятие исполнителя — обратимое, но заметное действие: обычная кнопка
-   в рамке, без заливки, чтобы её не нажимали вместо «Назначить». */
-.unassign-button {
-  width: 100%;
-  margin-top: var(--gap);
-  padding: 10px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.unassign-button:hover {
-  border-color: var(--danger);
-  color: var(--danger-text);
-}
-
 .section-title {
   font-size: var(--fs-xs);
   text-transform: uppercase;
@@ -1212,131 +1209,7 @@
   stroke-dasharray: 2 2;
 }
 
-/* --- Итог смены: разбор решений диспетчера --- */
-
-.summary-legend {
-  margin-bottom: var(--gap-sm);
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
-.mentor-item {
-  border-left: 3px solid var(--border-strong);
-  background: var(--bg-raised);
-  border-radius: var(--radius);
-  padding: 6px 9px;
-  margin-bottom: var(--gap-xs);
-}
-
-.mentor-item.is-good { border-left-color: var(--ok); }
-.mentor-item.is-fair { border-left-color: var(--warn); }
-.mentor-item.is-bad { border-left-color: var(--danger); }
-
-.mentor-item.is-clickable { cursor: pointer; }
-.mentor-item.is-clickable:hover { background: var(--bg-hover); }
-
-.mentor-item-top {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  font-size: var(--fs-xs);
-}
-
-.verdict-badge {
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: var(--fs-xs);
-}
-
-.verdict-badge.is-good { color: var(--ok); }
-.verdict-badge.is-fair { color: var(--warn); }
-.verdict-badge.is-bad { color: var(--danger-text); }
-
-.mentor-time {
-  margin-left: auto;
-  color: var(--text-dim);
-}
-
-.mentor-text {
-  margin-top: 2px;
-  font-size: var(--fs-sm);
-  line-height: 1.4;
-}
-
-/* Окно итога смены. */
-.modal.shift-summary {
-  width: 640px;
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.summary-grade {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: var(--gap);
-}
-
-.summary-grade.is-good { color: var(--ok); }
-.summary-grade.is-fair { color: var(--warn); }
-.summary-grade.is-bad { color: var(--danger-text); }
-
-.summary-tiles {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--gap-sm);
-}
-
-.summary-tile {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--gap-sm) var(--gap);
-}
-
-.summary-tile-title {
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-muted);
-}
-
-.summary-tile-value {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 2px 0;
-  white-space: nowrap;
-}
-
-.summary-tile-value .verdict-badge {
-  font-size: inherit;
-  letter-spacing: 0;
-}
-
-.summary-tile-note {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
-.summary-feed {
-  flex: 1;
-  min-height: 80px;
-  overflow-y: auto;
-}
-
 /* --- Режим учений --- */
-
-.hold-button {
-  width: 100%;
-  margin-top: var(--gap-sm);
-  border-color: var(--warn);
-  color: var(--warn);
-}
-
-.hold-button.is-held {
-  background: var(--warn-soft);
-}
 
 /* --- Входящие сообщения экипажа --- */
 
@@ -1504,4 +1377,147 @@
   stroke-linejoin: round;
   stroke-dasharray: 1 5;
   vector-effect: non-scaling-stroke;
+}
+
+/* --- Карточки правой колонки --- */
+
+.widget {
+  flex-shrink: 0;
+  padding: var(--gap);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.widget-head {
+  margin-bottom: var(--gap-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.widget .eta-block {
+  padding: var(--gap-xs) 0 var(--gap);
+  border-bottom: none;
+}
+
+.widget-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--gap-sm);
+}
+
+.widget-actions:empty {
+  display: none;
+}
+
+.candidate-list {
+  margin-top: var(--gap-xs);
+}
+
+/* Способ передвижения выбранного кандидата: под строкой, во всю ширину. */
+.candidate {
+  flex-wrap: wrap;
+}
+
+.travel-choice {
+  flex-basis: 100%;
+  display: flex;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-xs);
+}
+
+.travel-choice button {
+  flex: 1;
+  min-width: 0;
+  padding: 3px var(--gap-xs);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.travel-choice button.active {
+  color: #fff;
+  background: var(--route-strong);
+  border-color: var(--route-strong);
+}
+
+/* Кнопки-«пилюли»: открывают длинные списки во всплывающем окне. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-sm);
+}
+
+.chip {
+  padding: 3px var(--gap-sm);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.chip.is-open {
+  color: var(--text);
+  border-color: var(--route);
+}
+
+/* Действие словом, без рамки: «Снять исполнителя», «снять». */
+.link-button {
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.link-button.is-danger:hover:not(:disabled) {
+  color: var(--danger-text);
+}
+
+.link-button.is-warn {
+  color: var(--warn);
+}
+
+.team {
+  margin-top: var(--gap-xs);
+}
+
+.team-row {
+  border-bottom: none;
+  padding: var(--gap-xs) 0;
+}
+
+.messages-empty {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.popover .busy-row,
+.popover .rejected-row {
+  padding: var(--gap-sm) 0;
+}
+
+.popover .busy-row:last-child,
+.popover .rejected-row:last-child {
+  border-bottom: none;
+}
+
+.popover-note {
+  padding-bottom: var(--gap-sm);
+  margin-bottom: var(--gap-xs);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--warn);
 }

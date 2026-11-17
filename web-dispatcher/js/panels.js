@@ -212,53 +212,114 @@ function statusTitle(status) {
 /* --- Панель подбора --- */
 
 /**
- * Результат подбора.
+ * Правая колонка — стопка отдельных карточек: «Кого отправить»,
+ * «Исполнитель», «Связь с инженером». Раньше всё шло одним длинным
+ * списком, и поле ответа инженеру терялось между кандидатами.
  *
- * Показывается целиком, включая отсеянных и занятых: диспетчер отвечает
- * за назначение лично и должен видеть, кого система от него скрыла
- * и на каком основании.
+ * Длинные справочные списки — занятые с допуском и отсеянные — не
+ * растягивают карточку: они открываются по щелчку всплывающим окном.
+ *
+ * ctx — всё, что нужно карточкам от экрана:
+ *   picked, travel     — кого выбрал диспетчер и как каждый поедет;
+ *   leadVehicle        — машина ответственного, если второй едет с ним;
+ *   onPick, onTravel   — щелчок по кандидату и по способу передвижения;
+ *   queue              — права и действия для занятых (очередь, переключение).
  */
-function renderSuggestion(container, result, pickedIds, onPick, queueOptions) {
+function renderSuggestion(container, result, ctx) {
   container.replaceChildren();
-
   if (!result) {
-    container.innerHTML = '<div class="empty">Выберите вызов в списке слева</div>';
+    container.innerHTML = '<div class="empty">Выберите вызов слева</div>';
     return;
   }
+  container.append(
+    widget("Кого отправить", [
+      buildEtaBlock(result),
+      buildCandidateList(result.candidates, ctx),
+      buildMoreChips(result, result.busy, ctx),
+    ])
+  );
+}
 
-  container.append(buildEtaBlock(result));
+/** Карточка: заголовок и содержимое. Пустые части пропускаются. */
+function widget(title, parts, extraClass) {
+  const card = document.createElement("section");
+  card.className = extraClass ? `widget ${extraClass}` : "widget";
+  const head = document.createElement("div");
+  head.className = "widget-head";
+  head.textContent = title;
+  card.append(head);
+  for (const part of parts) {
+    if (part) {
+      card.append(part);
+    }
+  }
+  return card;
+}
 
-  if (result.candidates.length) {
-    container.append(
-      sectionTitle(
-        `Могут выехать сейчас (${result.candidates.length})`,
-        "Свободные сотрудники с допуском на этот борт, первым — кто приедет быстрее. " +
-          "Щелчок по строке покажет маршрут; назначить не первого вправе начальник смены"
+function buildCandidateList(candidates, ctx) {
+  if (!candidates.length) {
+    return null;
+  }
+  const list = document.createElement("div");
+  list.className = "candidate-list";
+  for (const candidate of candidates) {
+    list.append(buildCandidateRow(candidate, ctx));
+  }
+  return list;
+}
+
+/**
+ * Кнопки «Заняты · N» и «Не подходят · N».
+ * По щелчку — всплывающее окно со списком целиком.
+ */
+function buildMoreChips(result, busy, ctx) {
+  if (!busy.length && !result.rejected.length) {
+    return null;
+  }
+  const row = document.createElement("div");
+  row.className = "chip-row";
+  if (busy.length) {
+    row.append(
+      chipButton(`Заняты, допуск есть · ${busy.length}`, (anchor) =>
+        openPopover(anchor, "Заняты, допуск есть", busyRows(busy, ctx.queue))
       )
     );
-    for (const candidate of result.candidates) {
-      container.append(buildCandidateRow(candidate, pickedIds, onPick));
-    }
   }
-
-  if (result.busy.length) {
-    container.append(sectionTitle("Заняты, допуск есть", TERMS.queue.text));
-    for (const busy of result.busy) {
-      container.append(buildBusyRow(busy, queueOptions));
-    }
-  }
-
   if (result.rejected.length) {
-    container.append(
-      sectionTitle(
-        `Не подходят (${result.rejected.length})`,
-        "Система показывает и тех, кого отсеяла, с причиной: решение остаётся за диспетчером"
+    row.append(
+      chipButton(`Не подходят · ${result.rejected.length}`, (anchor) =>
+        openPopover(anchor, "Не подходят", result.rejected.map(buildRejectedRow))
       )
     );
-    for (const rejected of result.rejected) {
-      container.append(buildRejectedRow(rejected));
-    }
   }
+  return row;
+}
+
+function chipButton(text, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "chip";
+  button.textContent = text;
+  button.addEventListener("click", () => onClick(button));
+  return button;
+}
+
+/**
+ * Строки занятых для всплывающего окна.
+ *
+ * Ставить в очередь и переключать вправе только начальник смены. Обычный
+ * диспетчер видит список без кнопок и одну строку о том, кто это решает:
+ * кнопка, которая не нажимается, выглядела бы как поломка.
+ */
+function busyRows(busy, queue) {
+  const rows = busy.map((item) => buildBusyRow(item, queue.allowed ? queue : null));
+  if (!queue.allowed) {
+    const note = document.createElement("div");
+    note.className = "popover-note";
+    note.textContent = queue.denyReason;
+    rows.unshift(note);
+  }
+  return rows;
 }
 
 /** Главный блок: крупное время прибытия предложенного кандидата. */
@@ -302,12 +363,13 @@ function buildEtaBlock(result) {
 /**
  * Строка кандидата. Щелчок выбирает или снимает выбор; выбрать можно
  * нескольких — тогда на вызов поедут все выбранные. Номер показывает
- * порядок: первый — ответственный исполнитель.
+ * порядок: первый — ответственный исполнитель. У выбранного под именем
+ * появляется выбор, как он поедет.
  */
-function buildCandidateRow(candidate, pickedIds, onPick) {
+function buildCandidateRow(candidate, ctx) {
   const row = document.createElement("div");
   row.className = "candidate";
-  const order = pickedIds.indexOf(candidate.employee_id);
+  const order = ctx.picked.indexOf(candidate.employee_id);
   if (order !== -1) {
     row.classList.add("is-picked");
   }
@@ -325,16 +387,65 @@ function buildCandidateRow(candidate, pickedIds, onPick) {
       </span>
     </span>
     ${
-      order !== -1 && pickedIds.length > 1
+      order !== -1 && ctx.picked.length > 1
         ? `<span class="candidate-order num" title="${
             order === 0 ? "Ответственный исполнитель" : "Едет в помощь"
           }">${order + 1}</span>`
         : ""
     }
   `;
+  row.addEventListener("click", () => ctx.onPick(candidate));
 
-  row.addEventListener("click", () => onPick(candidate));
+  if (order !== -1) {
+    const choice = travelChoice(candidate, order, ctx);
+    if (choice) {
+      row.append(choice);
+    }
+  }
   return row;
+}
+
+/**
+ * Как поедет выбранный инженер.
+ *
+ * «Как быстрее» — расчёт системы: пешком или через свободную машину.
+ * «Пешком» — машину не занимать. «С первым» — второй садится в машину
+ * ответственного. Вариант, который ничего не меняет, не показывается:
+ * тому, кто и так идёт пешком, выбирать не из чего.
+ */
+function travelChoice(candidate, order, ctx) {
+  const options = [];
+  if (candidate.vehicle_call_sign) {
+    options.push(["auto", candidate.pickup ? `через ${candidate.vehicle_call_sign}` : candidate.vehicle_call_sign]);
+    options.push(["walk", "пешком"]);
+  }
+  if (order > 0 && ctx.leadVehicle) {
+    if (!options.length) {
+      options.push(["auto", "пешком"]);
+    }
+    options.push(["with_lead", "с первым"]);
+  }
+  if (options.length < 2) {
+    return null;
+  }
+
+  const current = ctx.travel[candidate.employee_id] || "auto";
+  const box = document.createElement("div");
+  box.className = "travel-choice";
+  for (const [mode, label] of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = mode === "with_lead" ? `В машине ответственного, ${ctx.leadVehicle}` : label;
+    button.classList.toggle("active", mode === current);
+    button.addEventListener("click", (event) => {
+      // Щелчок по способу не должен снимать выбор с самого кандидата.
+      event.stopPropagation();
+      ctx.onTravel(candidate, mode);
+    });
+    box.append(button);
+  }
+  return box;
 }
 
 function buildRejectedRow(rejected) {
@@ -352,9 +463,8 @@ function buildRejectedRow(rejected) {
  *
  * Кнопка «В очередь» делает этот список рабочим инструментом, а не
  * справкой: во внештатной ситуации §7 диспетчер видит, кто освободится
- * первым, и может сразу закрепить за ним вызов. Обычному диспетчеру
- * кнопка видна, но недоступна — с объяснением, почему: пропавшая кнопка
- * выглядела бы как ошибка интерфейса.
+ * первым, и может сразу закрепить за ним вызов. queueOptions = null —
+ * кнопок нет (нет права, см. busyRows).
  */
 function buildBusyRow(busy, queueOptions) {
   const row = document.createElement("div");
@@ -371,10 +481,7 @@ function buildBusyRow(busy, queueOptions) {
     const button = document.createElement("button");
     button.className = "queue-button switch-button";
     button.textContent = "Переключить";
-    button.disabled = !queueOptions.allowed;
-    button.title = queueOptions.allowed
-      ? "Сотрудник ждёт запчасти: переключить его на этот вызов, к прежнему борту он вернётся"
-      : queueOptions.denyReason;
+    button.title = "Ждёт запчасти: переключить на этот вызов, к прежнему борту он вернётся";
     button.addEventListener("click", () => queueOptions.onSwitch(busy));
     row.append(button);
   }
@@ -383,10 +490,7 @@ function buildBusyRow(busy, queueOptions) {
     const button = document.createElement("button");
     button.className = "queue-button";
     button.textContent = "В очередь";
-    button.disabled = !queueOptions.allowed;
-    button.title = queueOptions.allowed
-      ? "Поставить вызов в очередь к этому сотруднику"
-      : queueOptions.denyReason;
+    button.title = "Поставить вызов в очередь к этому сотруднику";
     button.addEventListener("click", () => queueOptions.onQueue(busy));
     row.append(button);
   }
@@ -550,68 +654,83 @@ function whoLine(call) {
   );
 }
 
-function sectionTitle(text, hint) {
-  const element = document.createElement("div");
-  element.className = "section-title";
-  element.textContent = text;
-  if (hint) {
-    element.title = hint;
-    element.dataset.term = "section";
-  }
-  return element;
-}
-
-/* --- Команда вызова и переписка --- */
+/* --- Назначенный вызов: карточки --- */
 
 /**
- * Кого ещё отправить на уже назначенный вызов.
+ * Правая колонка уже назначенного вызова.
  *
- * Те же строки, что в подборе, без крупной цифры и без списка отсеянных:
- * исполнитель уже есть, здесь только выбор подмоги.
+ * ctx дополнительно к подбору: result — свежий подбор (кого ещё
+ * отправить), onUnassign, onRemoveSupport, onSend, draft, extra —
+ * узлы, которые экран добавляет в карточку исполнителя (учения).
  */
-function renderExtraCandidates(container, call, result, pickedIds, onPick, queueOptions) {
-  // Те, кто уже едет на этот вызов, в подборе значатся занятыми —
-  // предлагать поставить их в очередь к самим себе незачем.
-  const team = [call.assigned_employee_id].concat(
-    (call.support || []).map((member) => member.employee_id)
+function renderAssignedPanel(container, call, ctx) {
+  container.replaceChildren();
+
+  const actions = document.createElement("div");
+  actions.className = "widget-actions";
+  if (call.status !== "closed") {
+    actions.append(linkButton("Снять исполнителя", ctx.onUnassign, "is-danger"));
+  }
+  for (const node of ctx.extra || []) {
+    actions.append(node);
+  }
+
+  container.append(
+    widget("Исполнитель", [buildAssignmentBlock(call), buildTeam(call, ctx.onRemoveSupport), actions])
   );
-  const busyOthers = result.busy.filter((busy) => !team.includes(busy.employee_id));
-  if (result.candidates.length) {
-    container.append(sectionTitle(`Отправить ещё инженера (${result.candidates.length})`));
-    for (const candidate of result.candidates) {
-      container.append(buildCandidateRow(candidate, pickedIds, onPick));
+  if (call.status !== "closed") {
+    container.append(widget("Связь с инженером", [buildMessages(call, ctx.draft, ctx.onSend)]));
+  }
+
+  const result = ctx.result;
+  if (result && call.status !== "closed") {
+    // Те, кто уже едет на этот вызов, в подборе значатся занятыми —
+    // предлагать поставить их в очередь к самим себе незачем. Переключение —
+    // только для нового вызова: к назначенному второго ставят в очередь.
+    const team = [call.assigned_employee_id].concat(
+      (call.support || []).map((member) => member.employee_id)
+    );
+    const busy = result.busy
+      .filter((item) => !team.includes(item.employee_id))
+      .map((item) => ({ ...item, switchable: false }));
+    if (result.candidates.length || busy.length) {
+      container.append(
+        widget("Отправить ещё", [
+          buildCandidateList(result.candidates, ctx),
+          buildMoreChips({ rejected: [] }, busy, ctx),
+        ])
+      );
     }
   }
-  if (busyOthers.length) {
-    container.append(sectionTitle("Заняты, допуск есть", TERMS.queue.text));
-    for (const busy of busyOthers) {
-      // Переключение — только для нового вызова; второго ставят в очередь.
-      container.append(buildBusyRow({ ...busy, switchable: false }, queueOptions));
-    }
-  }
+}
+
+function linkButton(text, onClick, extraClass) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = extraClass ? `link-button ${extraClass}` : "link-button";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
 }
 
 /** Вторые инженеры вызова: кто, на каком шаге, когда будет. */
-function renderTeam(container, call, onRemove) {
+function buildTeam(call, onRemove) {
   if (!call.support || !call.support.length) {
-    return;
+    return null;
   }
-  container.append(sectionTitle("Ещё на вызове"));
+  const box = document.createElement("div");
+  box.className = "team";
   for (const member of call.support) {
     const row = document.createElement("div");
     row.className = "team-row";
     row.innerHTML = `
-      <span class="team-name">${escapeHtml(member.employee_name || "—")}</span>
+      <span class="team-name">+ ${escapeHtml(member.employee_name || "—")}</span>
       <span class="team-status">${escapeHtml(supportStatus(member))}</span>
     `;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "team-remove";
-    remove.textContent = "снять";
-    remove.addEventListener("click", () => onRemove(member));
-    row.append(remove);
-    container.append(row);
+    row.append(linkButton("снять", () => onRemove(member), "is-danger"));
+    box.append(row);
   }
+  return box;
 }
 
 /** «принял, едет · будет ~17:44 · ТМ-04» — второй инженер одной строкой. */
@@ -632,26 +751,26 @@ function supportStatus(member) {
  * Инженер пишет свободным текстом — «нужен подъёмник», «запчасть будет
  * к 15:00», — потому что реальных ситуаций больше, чем готовых статусов.
  */
-function renderMessages(container, call, draft, onSend) {
-  if (call.status === "closed") {
-    return;
-  }
-  container.append(sectionTitle("Связь с инженером"));
+function buildMessages(call, draft, onSend) {
+  const box = document.createElement("div");
   const list = document.createElement("div");
   list.className = "messages";
+  if (!(call.messages || []).length) {
+    list.innerHTML = '<div class="messages-empty">Сообщений нет</div>';
+  }
   for (const message of call.messages || []) {
     list.append(buildMessage(message));
   }
-  container.append(list);
+  box.append(list);
 
   const form = document.createElement("form");
   form.className = "message-form";
   form.innerHTML = `
     <input id="message-input" maxlength="500" autocomplete="off" placeholder="Написать инженеру">
-    <button type="submit">Отправить</button>
+    <button type="submit" class="primary">Отправить</button>
   `;
   const input = form.querySelector("input");
-  input.value = draft;
+  input.value = draft || "";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = input.value.trim();
@@ -659,7 +778,8 @@ function renderMessages(container, call, draft, onSend) {
       onSend(call, text);
     }
   });
-  container.append(form);
+  box.append(form);
+  return box;
 }
 
 function buildMessage(message) {
@@ -698,19 +818,16 @@ function lastEngineerMessage(call) {
 /* --- Назначенный вызов --- */
 
 /**
- * Карточка уже назначенного вызова.
+ * Главный блок назначенного вызова: когда исполнитель будет у борта.
  *
- * Для назначенного вызова новый подбор не показывается. Он предложил бы
- * другого сотрудника (назначенный уже занят) и мог бы кричать красным
- * о нарушении регламента по вызову, который уже обслуживается, —
- * ложная тревога. Диспетчеру здесь нужно другое: кто едет, когда будет
- * на месте и успевает ли к контрольному сроку.
+ * Новый подбор здесь на место цифры не ставится: он предложил бы другого
+ * сотрудника и мог бы кричать красным о вызове, который уже обслуживается.
+ * Диспетчеру нужно другое: кто едет, когда будет и успевает ли.
  */
-function renderAssignment(container, call, onUnassign) {
-  container.replaceChildren();
-
+function buildAssignmentBlock(call) {
   const control = call.control;
-  const deadlineIso = control ? control.deadline_at
+  const deadlineIso = control
+    ? control.deadline_at
     : new Date(new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000).toISOString();
   const verdict = assignmentVerdict(call, control);
   // Главная цифра — живой прогноз прибытия, а не расчёт на момент
@@ -726,10 +843,6 @@ function renderAssignment(container, call, onUnassign) {
   block.innerHTML = `
     <div${call.status === "arrived" ? "" : term("forecast")}>${headline}</div>
     <div class="eta-name">${escapeHtml(call.assigned_employee_name || "—")}</div>
-    <div class="eta-sub">${escapeHtml(call.defect_name)}${
-      call.defect_ata ? ` · <span${term("ata")}>ATA ${escapeHtml(call.defect_ata)}</span>` : ""
-    }</div>
-    ${descriptionLine(call)}
     <div class="eta-sub">${escapeHtml(statusTitle(call.status))} · ${assignmentTiming(
       call,
       forecast,
@@ -741,29 +854,13 @@ function renderAssignment(container, call, onUnassign) {
     }</div>
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
     ${
-      control && control.advice
-        ? `<div class="assignment-advice">${escapeHtml(control.advice)}</div>`
-        : ""
-    }
-    ${
       call.override_reason
         ? `<div class="assignment-reason">Причина решения: ${escapeHtml(call.override_reason)}</div>`
         : ""
     }
     ${unassignedNote(call)}
   `;
-  container.append(block);
-
-  // Снятие доступно, пока работа не закрыта: обстановка на перроне меняется
-  // быстрее, чем едет инженер.
-  if (onUnassign) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "unassign-button";
-    button.textContent = "Снять исполнителя";
-    button.addEventListener("click", onUnassign);
-    container.append(button);
-  }
+  return block;
 }
 
 /**

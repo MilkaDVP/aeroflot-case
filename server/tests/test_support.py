@@ -205,3 +205,71 @@ class TestMessages(SupportCase):
             headers=auth_header(self.dispatcher),
         )
         self.assertEqual(len(self.call(call["id"])["messages"]), 1)
+
+
+class TestTravel(SupportCase):
+    """Как добирается каждый: решает диспетчер, по умолчанию — как быстрее."""
+
+    def assign_travel(self, call_id, employee_id, travel):
+        return self.client.post(
+            f"/api/calls/{call_id}/assign",
+            json={"employee_id": employee_id, "travel": travel},
+            headers=auth_header(self.dispatcher),
+        )
+
+    def support_travel(self, call_id, employee_id, travel):
+        return self.client.post(
+            f"/api/calls/{call_id}/support",
+            json={"employee_id": employee_id, "travel": travel},
+            headers=auth_header(self.dispatcher),
+        )
+
+    def test_пешком_машину_не_занимает(self):
+        call = self.register()
+        best = self.suggest(call["id"])["best"]
+        self.assertIsNotNone(best["vehicle_call_sign"], "в данных лучший едет на машине")
+        response = self.assign_travel(call["id"], best["employee_id"], "walk")
+        self.assertEqual(response.status_code, 200, response.text)
+        assigned = response.json()
+        self.assertIsNone(assigned["vehicle_call_sign"])
+        self.assertIsNone(assigned["pickup_node_id"])
+        # Пешком дольше, чем расчёт системы через машину.
+        self.assertGreater(assigned["eta_minutes"], best["minutes"])
+
+    def test_второй_едет_в_машине_ответственного(self):
+        call = self.register()
+        first, second = self.two_candidates(call["id"])
+        lead = self.assign(call["id"], first["employee_id"])
+        self.assertIsNotNone(lead["vehicle_call_sign"])
+
+        response = self.support_travel(call["id"], second["employee_id"], "with_lead")
+        self.assertEqual(response.status_code, 200, response.text)
+        member = response.json()["support"][0]
+        self.assertEqual(member["vehicle_call_sign"], lead["vehicle_call_sign"])
+        self.assertIsNotNone(member["pickup_node_id"])
+
+    def test_один_пешком_другой_на_машине(self):
+        call = self.register()
+        first, second = self.two_candidates(call["id"])
+        lead = self.assign(call["id"], first["employee_id"])
+        member = self.support_travel(call["id"], second["employee_id"], "walk").json()["support"][0]
+        self.assertIsNotNone(lead["vehicle_call_sign"])
+        self.assertIsNone(member["vehicle_call_sign"])
+
+    def test_с_ответственным_без_машины_нельзя(self):
+        call = self.register()
+        first, second = self.two_candidates(call["id"])
+        self.assign_travel(call["id"], first["employee_id"], "walk")
+        response = self.support_travel(call["id"], second["employee_id"], "with_lead")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.call(call["id"])["support"], [])
+
+    def test_с_ответственным_только_для_второго(self):
+        call = self.register()
+        best = self.suggest(call["id"])["best"]
+        self.assertEqual(self.assign_travel(call["id"], best["employee_id"], "with_lead").status_code, 422)
+
+    def test_неизвестный_способ_отклоняется(self):
+        call = self.register()
+        best = self.suggest(call["id"])["best"]
+        self.assertEqual(self.assign_travel(call["id"], best["employee_id"], "вертолёт").status_code, 422)

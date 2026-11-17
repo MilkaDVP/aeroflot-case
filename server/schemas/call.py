@@ -202,6 +202,8 @@ class AssignRequest(BaseModel):
     # Переключить занятого исполнителя, ждущего запчасти: его текущий вызов
     # уходит в его же очередь, а этот становится текущим.
     switch: bool = False
+    # Как добираться: auto, walk или with_lead (см. constants.TRAVEL_MODES).
+    travel: str = "auto"
 
 
 class MessageRequest(BaseModel):

@@ -146,16 +146,22 @@ const Api = {
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   // switchOver — переключить занятого, ждущего запчасти, на этот вызов.
-  assign: (callId, employee_id, override_reason, switchOver) =>
+  // travel — как поедет: auto (как быстрее), walk, with_lead (с первым).
+  assign: (callId, employee_id, override_reason, switchOver, travel) =>
     request("POST", `/api/calls/${callId}/assign`, {
       employee_id,
       override_reason,
       switch: Boolean(switchOver),
+      travel: travel || "auto",
     }),
   // Ещё один инженер на тот же вызов: свободный выезжает сразу,
   // занятый встаёт в очередь (нужна причина).
-  support: (callId, employee_id, override_reason) =>
-    request("POST", `/api/calls/${callId}/support`, { employee_id, override_reason }),
+  support: (callId, employee_id, override_reason, travel) =>
+    request("POST", `/api/calls/${callId}/support`, {
+      employee_id,
+      override_reason,
+      travel: travel || "auto",
+    }),
   sendMessage: (callId, text) => request("POST", `/api/calls/${callId}/message`, { text }),
   setUrgency: (callId, urgent) =>
     request("POST", `/api/calls/${callId}/urgency`, { urgent }),
@@ -178,7 +184,6 @@ const Api = {
     request("POST", `/api/drill/hold/${employeeId}`, { held }),
 
   // Лента Наставника и итог смены одним ответом.
-  shiftFeed: (limit) => request("GET", `/api/shift/feed?limit=${limit || 30}`),
 
   /* --- Администрирование --- */
 

@@ -193,6 +193,11 @@ def next_progress(call, employee, marks, dt_s):
     vehicle = employee.vehicle
     pickup_at = pickup_distance(call, marks)
 
+    if vehicle is None and call.vehicle is not None and pickup_at is not None:
+        # Второй инженер в машине ответственного: идёт до неё пешком,
+        # дальше едет с её скоростью. Статус машины ведёт ответственный.
+        return passenger_progress(call, employee, progress, pickup_at, dt_s)
+
     if vehicle is not None and vehicle.status == VEHICLE_RESERVED and pickup_at is not None:
         walk = speed_mps(employee)
         seconds_to_vehicle = max(pickup_at - progress, 0.0) / walk
@@ -202,6 +207,16 @@ def next_progress(call, employee, marks, dt_s):
         return pickup_at + speed_mps(employee) * (dt_s - seconds_to_vehicle)
 
     return progress + speed_mps(employee) * dt_s
+
+
+def passenger_progress(call, employee, progress, pickup_at, dt_s):
+    """Продвижение пассажира: пешком до точки посадки, затем со скоростью машины."""
+    walk = (employee.speed_kmh or WALK_SPEED_KMH) / 3.6
+    drive = (call.vehicle.speed_kmh or VEHICLE_SPEED_KMH) / 3.6
+    seconds_to_vehicle = max(pickup_at - progress, 0.0) / walk
+    if seconds_to_vehicle > dt_s:
+        return progress + walk * dt_s
+    return max(progress, pickup_at) + drive * (dt_s - seconds_to_vehicle)
 
 
 def pickup_distance(call, marks):

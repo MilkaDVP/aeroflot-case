@@ -25,7 +25,7 @@ from datetime import timedelta
 
 from algorithm.geo import haversine_m
 from algorithm.routing import Route, route_from_point, shortest_path
-from algorithm.transport import plan_for
+from algorithm.transport import plan_for, plan_via, plan_walk
 from clock import utc_now
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
@@ -38,6 +38,8 @@ from constants import (
     STAGE_WAITING_PARTS,
     STATUS_ASSIGNED,
     STATUS_FREE,
+    TRAVEL_WALK,
+    TRAVEL_WITH_LEAD,
     STATUSES_BUSY,
     VEHICLE_FREE,
     VEHICLE_IN_USE,
@@ -115,15 +117,25 @@ def free_vehicles(db, airport_icao):
     )
 
 
-def plan_route(db, employee, stand_node_id, graph):
+def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=None):
     """
-    Как сотрудник доберётся до стоянки — тот же расчёт, что в подборе.
+    Как сотрудник доберётся до стоянки.
+
+    По умолчанию — тот же расчёт, что в подборе: как быстрее. Диспетчер
+    может решить иначе: отправить пешком, не занимая машину, или посадить
+    второго инженера в машину ответственного (ride_vehicle).
 
     Возвращает пару: план и машину парка, которую ему надо забрать
-    (None, если он идёт пешком или машина уже при нём).
+    (None, если он идёт пешком, машина уже при нём или она чужая).
     """
     if employee.lat is None or employee.lon is None:
         return None, None
+    if travel == TRAVEL_WALK:
+        return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id), None
+    if travel == TRAVEL_WITH_LEAD:
+        if ride_vehicle is None:
+            return None, None
+        return plan_via(graph, employee.as_algorithm_dict(), stand_node_id, ride_vehicle.as_algorithm_dict()), None
 
     pool = free_vehicles(db, employee.airport_icao)
     plan = plan_for(
