@@ -12,15 +12,19 @@ from auth.dependencies import (
     require_roles,
     require_roles_in_airport,
 )
-from constants import AIRCRAFT_GROUP_BY_TYPE
+from constants import AIRCRAFT_GROUP_BY_TYPE, MODE_WALK
 from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, STATUS_QUEUED, Call
 from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_LOCAL_ADMIN, ROLE_SHIFT_SUPERVISOR
-from schemas.airport import AircraftCreateRequest, AircraftResponse, AirportGraphResponse
-from schemas.employee import LocationRequest
+from schemas.airport import (
+    AircraftCreateRequest,
+    AircraftMoveRequest,
+    AircraftResponse,
+    AirportGraphResponse,
+)
 from services.assignment import assigned_route, replan_queue, update_assigned_route
 from schemas.auth import AirportBrief, ShiftScheduleRequest
 from services import shift_clock
@@ -29,6 +33,7 @@ router = APIRouter(prefix="/api", tags=["Аэропорты"])
 
 ERROR_AIRPORT_NOT_FOUND = "Аэропорт {icao} не заведён в системе"
 ERROR_FOREIGN_AIRPORT = "Расписание смен меняют только в своём аэропорту"
+ERROR_NO_NETWORK = "Рядом с этой точкой нет рулёжной сети — борт туда не поставить"
 ERROR_NOT_A_STAND = "Узел {node} не является стоянкой этого аэропорта"
 ERROR_UNKNOWN_TYPE = (
     "Тип ВС {type} не описан в справочнике: по нему определяется допуск. "
@@ -129,14 +134,26 @@ def stand_ref(graph, node_id):
 
 
 def aircraft_response(graph, item):
-    """Модель борта в схему ответа с номером стоянки."""
+    """
+    Модель борта в схему ответа: номер стоянки или, если борт не на
+    стоянке, его точное место.
+    """
+    on_stand = item.lat is None or item.lon is None
+    node = graph.node(item.stand_node_id)
+    if on_stand:
+        lat, lon = (node["lat"], node["lon"]) if node else (None, None)
+    else:
+        lat, lon = item.lat, item.lon
     return AircraftResponse(
         id=item.id,
         board_number=item.board_number,
         aircraft_type=item.aircraft_type,
         airport_icao=item.airport_icao,
         stand_node_id=item.stand_node_id,
-        stand_ref=stand_ref(graph, item.stand_node_id),
+        stand_ref=stand_ref(graph, item.stand_node_id) if on_stand else None,
+        on_stand=on_stand,
+        lat=lat,
+        lon=lon,
     )
 
 
@@ -206,10 +223,13 @@ def create_aircraft(
 
 
 def check_stand_available(db, icao, node, aircraft_id=None):
+    # Борт вне стоянки привязан к ближайшей вершине лишь для маршрута —
+    # стоянку он не занимает.
     occupied = db.query(Aircraft).filter(
         Aircraft.airport_icao == icao,
         Aircraft.stand_node_id == node["id"],
         Aircraft.id != aircraft_id,
+        Aircraft.lat.is_(None),
     ).first()
     if occupied:
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -219,22 +239,47 @@ def check_stand_available(db, icao, node, aircraft_id=None):
 @router.post("/aircraft/{aircraft_id}/location", response_model=AircraftResponse, summary="Переместить борт")
 def move_aircraft(
     aircraft_id: int,
-    payload: LocationRequest,
+    payload: AircraftMoveRequest,
     db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles_in_airport(*DISPATCH_ROLES)),
 ):
+    """
+    Переставляет борт: на указанную стоянку, свободно в точку (ВПП,
+    рулёжка — тогда маршрут инженера ведёт к ближайшей вершине сети)
+    или, если не сказано, на ближайшую к точке стоянку.
+    """
     aircraft = db.get(Aircraft, aircraft_id)
     if aircraft is None or aircraft.airport_icao != context.airport_icao:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_AIRCRAFT_NOT_FOUND)
     graph = get_graph(context.airport_icao)
-    stand = min(graph.nodes_of_type("stand"), default=None,
-                key=lambda node: haversine_m(payload.lat, payload.lon, node["lat"], node["lon"]))
-    if stand is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "В аэропорту нет стоянок")
-    check_stand_available(db, context.airport_icao, stand, aircraft.id)
-    if aircraft.stand_node_id == stand["id"]:
-        return aircraft_response(graph, aircraft)
 
+    if payload.free:
+        target, _ = graph.nearest_node(payload.lat, payload.lon, MODE_WALK)
+        if target is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_NETWORK)
+        if (aircraft.lat, aircraft.lon) == (payload.lat, payload.lon):
+            return aircraft_response(graph, aircraft)
+        aircraft.lat, aircraft.lon = payload.lat, payload.lon
+    else:
+        if payload.stand_node_id is not None:
+            target = graph.node(payload.stand_node_id)
+            if target is None or target["type"] != "stand":
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    ERROR_NOT_A_STAND.format(node=payload.stand_node_id),
+                )
+        else:
+            target = min(graph.nodes_of_type("stand"), default=None,
+                         key=lambda node: haversine_m(payload.lat, payload.lon, node["lat"], node["lon"]))
+            if target is None:
+                raise HTTPException(status.HTTP_409_CONFLICT, "В аэропорту нет стоянок")
+        check_stand_available(db, context.airport_icao, target, aircraft.id)
+        was_free = aircraft.lat is not None
+        aircraft.lat = aircraft.lon = None
+        if aircraft.stand_node_id == target["id"] and not was_free:
+            return aircraft_response(graph, aircraft)
+
+    stand = target
     aircraft.stand_node_id = stand["id"]
     calls = db.query(Call).filter(
         Call.aircraft_id == aircraft.id, Call.status.in_(ACTIVE_CALL_STATUSES)
@@ -249,7 +294,7 @@ def move_aircraft(
         if call.status != STATUS_QUEUED:
             plan = assigned_route(call, graph)
             if plan is None:
-                raise HTTPException(status.HTTP_409_CONFLICT, "Нет маршрута до выбранной стоянки")
+                raise HTTPException(status.HTTP_409_CONFLICT, "Нет маршрута до нового места борта")
             update_assigned_route(call, plan)
     for employee in employees:
         if not replan_queue(db, employee):

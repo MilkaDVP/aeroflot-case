@@ -31,15 +31,11 @@ const state = {
   allCalls: [],
   // Идут ли учения: сервер сам двигает сотрудников без телефона.
   drill: false,
-  // Выбранный объект сохраняется при конфликте стоянок.
-  moveMode: false,
   // Вызов, который этот диспетчер держит в работе, и когда последний раз
   // подтвердил захват серверу (services/claim.py: без подтверждения
   // захват истекает через 2 минуты).
   claimedCallId: null,
   claimAt: 0,
-  moving: null,
-  movePending: false,
 };
 
 const elements = {
@@ -99,6 +95,7 @@ async function start() {
 
     airportMap = new AirportMap(elements.map);
     airportMap.onStandClick = openCallFormForStand;
+    airportMap.onAircraftClick = showAircraftCard;
     airportMap.onObjectDrop = dropObject;
     airportMap.onObjectRefused = (kind, item) =>
       showToast(`${item.call_sign} занята — переносить можно только свободную машину`, true);
@@ -921,76 +918,6 @@ async function sendCallMessage(call, text) {
 
 document.getElementById("new-call").addEventListener("click", () => openCallForm(null));
 
-function toggleMoveMode() {
-  state.moveMode = !state.moveMode;
-  state.moving = null;
-  const button = document.getElementById("move-mode");
-  button.classList.toggle("active", state.moveMode);
-  button.setAttribute("aria-pressed", String(state.moveMode));
-  airportMap.onObjectClick = state.moveMode ? pickObjectToMove : null;
-  airportMap.onGroundClick = state.moveMode ? moveTo : null;
-  showMoveHint(state.moveMode ? "Выберите борт, свободную машину или сотрудника" : null);
-}
-
-function pickObjectToMove(kind, item, position, event) {
-  if (state.moving) {
-    moveTo(position);
-    return;
-  }
-  const markers = new Set(document.elementsFromPoint(event.clientX, event.clientY)
-    .map((node) => node.closest("[data-aircraft-id], [data-vehicle-id], [data-employee-id]"))
-    .filter(Boolean));
-  if (markers.size > 1) {
-    const choices = [];
-    for (const marker of markers) {
-      const { aircraftId, vehicleId, employeeId } = marker.dataset;
-      const type = aircraftId ? "aircraft" : vehicleId ? "vehicle" : "employee";
-      const list = aircraftId ? state.aircraft : vehicleId ? state.vehicles : state.employees;
-      const object = list.find((entry) => entry.id === Number(aircraftId || vehicleId || employeeId));
-      if (object) {
-        choices.push(linkButton(object.board_number || object.call_sign || object.full_name, () => {
-          closePopover();
-          selectMovingObject(type, object);
-        }));
-      }
-    }
-    openPopover(event.currentTarget, "Что переместить", choices);
-    return;
-  }
-  selectMovingObject(kind, item);
-}
-
-function selectMovingObject(kind, item) {
-  if (kind === "vehicle" && item.status !== "free") {
-    showMoveHint("Эта машина занята. Выберите свободную машину.");
-    return;
-  }
-  state.moving = { kind, id: item.id };
-  showMoveHint(`${item.board_number || item.call_sign || item.full_name} · укажите новое место`);
-}
-
-async function moveTo(position) {
-  if (state.movePending || !state.moving) return;
-  state.movePending = true;
-  const { kind, id } = state.moving;
-  const point = { lat: position.lat, lon: position.lon };
-  try {
-    if (kind === "aircraft") await Api.moveAircraft(id, point);
-    if (kind === "vehicle") await Api.moveVehicle(id, point);
-    if (kind === "employee") await Api.sendLocation(id, point.lat, point.lon);
-    state.moving = null;
-    await refresh();
-    if (kind !== "aircraft" && isAssignable(state.selectedCall)) {
-      await selectCall(state.selectedCall, { keepView: true });
-    }
-    showMoveHint("Место сохранено. Выберите следующий объект.");
-  } catch (error) {
-    showMoveHint(error.detail);
-  } finally {
-    state.movePending = false;
-  }
-}
-
 /**
  * Машину, сотрудника или борт перетащили мышью на новое место.
  *
@@ -1002,7 +929,8 @@ async function dropObject(kind, item, position, done) {
   const point = { lat: position.lat, lon: position.lon };
   const name = item.board_number || item.call_sign || item.full_name;
   try {
-    if (kind === "aircraft") await Api.moveAircraft(item.id, point);
+    // Борту передаётся и указание «на стоянку N» или «свободно».
+    if (kind === "aircraft") await Api.moveAircraft(item.id, position);
     if (kind === "vehicle") await Api.moveVehicle(item.id, point);
     if (kind === "employee") await Api.sendLocation(item.id, point.lat, point.lon);
   } catch (error) {
@@ -1019,13 +947,51 @@ async function dropObject(kind, item, position, done) {
   }
 }
 
-function showMoveHint(message) {
-  const hint = document.getElementById("move-hint");
-  hint.hidden = !message;
-  hint.textContent = message || "";
+/**
+ * Снять выбор вызова: справа «Выберите вызов слева», на карте — ни
+ * маршрута, ни отметок вызова, как сразу после входа. Вызов, который
+ * диспетчер держал в работе, освобождается для коллег.
+ */
+function deselectCall() {
+  if (!state.selectedCall) return;
+  closePopover();
+  sessionStorage.removeItem(selectionKey());
+  clearSuggestion();
+  state.selectedCall = null;
+  refreshExecutorMenu();
+  renderAll();
 }
 
-document.getElementById("move-mode").addEventListener("click", toggleMoveMode);
+// Щелчок по пустому месту списка вызовов (мимо карточек) снимает выбор.
+elements.callsList.addEventListener("click", (event) => {
+  if (!event.target.closest(".call")) {
+    deselectCall();
+  }
+});
+
+/** Щелчок по борту: кто это и кнопка регистрации вызова на него. */
+function showAircraftCard(aircraft, marker) {
+  const open = state.calls.find((call) => call.aircraft_id === aircraft.id);
+  const items = [
+    linkButton("Зарегистрировать вызов", () => {
+      closePopover();
+      openCallForm(aircraft.id);
+    }),
+  ];
+  if (open) {
+    items.unshift(linkButton(`Открыть вызов: ${open.defect_name}`, () => {
+      closePopover();
+      selectCall(open);
+    }));
+  }
+  openPopover(
+    marker,
+    `${aircraft.board_number} · ${aircraft.aircraft_type} · ${
+      aircraft.on_stand === false ? "вне стоянки" : `ст. ${aircraft.stand_ref}`
+    }`,
+    items
+  );
+}
 
 function openCallFormForStand(node) {
   const aircraft = state.aircraft.find((item) => item.stand_node_id === node.id);

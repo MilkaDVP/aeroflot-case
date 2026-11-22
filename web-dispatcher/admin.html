@@ -29,7 +29,6 @@
     <nav class="admin-tabs" id="tabs">
       <button type="button" data-tab="airports" class="active">Аэропорты</button>
       <button type="button" data-tab="users">Учётные записи</button>
-      <button type="button" data-tab="employees">Сотрудники</button>
       <button type="button" data-tab="shifts">Смены</button>
       <button type="button" data-tab="vehicles">Спецтранспорт</button>
       <button type="button" data-tab="aircraft">Борта</button>
@@ -109,13 +108,8 @@
           <button type="button" data-mode="tech_center">Техцентр</button>
           <button type="button" data-mode="junction">Перекрёсток</button>
           <button type="button" data-mode="link">Соединить</button>
-          <button type="button" data-mode="erase">Удалить</button>
+          <button type="button" data-mode="erase">Удаление</button>
         </div>
-
-        <label class="editor-autolink" title="Новая стоянка и техцентр сразу соединяются с ближайшей точкой">
-          <input type="checkbox" id="editor-autolink" checked>
-          к ближайшей точке
-        </label>
 
         <span class="editor-counts" id="editor-counts">точек 0 · связей 0</span>
         <div class="header-spacer"></div>
@@ -158,7 +152,10 @@
       </div>
     </section>
 
-    <!-- ======================= Сотрудники ======================= -->
+    <!-- ======================= Учётные записи =======================
+         Все люди аэропорта в одном месте: диспетчеры, начальники смены,
+         администраторы и инженеры. У инженера, кроме входа, есть карточка
+         сотрудника — квалификация, смена, место; по ней идёт подбор. -->
     <section class="admin-page" id="page-users" hidden>
       <div class="admin-columns">
 
@@ -166,8 +163,9 @@
           <h2>Учётные записи <span id="users-scope">—</span></h2>
           <p class="muted small">
             Зелёная точка — человек сейчас в системе. Начальник смены может
-            завершить сеанс младшего; заводить и править учётные записи —
-            администратор аэропорта и старше.
+            завершить сеанс младшего и поменять инженеру смену, место
+            и присутствие на смене; заводить и править учётные записи
+            и квалификацию — администратор аэропорта и старше.
           </p>
           <div class="admin-list" id="users-list">
             <div class="empty">Загрузка…</div>
@@ -176,9 +174,10 @@
 
         <div class="admin-card" id="user-form-card">
           <h2 id="user-form-title">Завести учётную запись</h2>
-          <p class="muted small">
-            Учётная запись привязывается ровно к одному аэропорту. Инженер
-            заводится вместе с карточкой — на вкладке «Сотрудники».
+          <p class="muted small" id="user-form-intro">
+            Учётная запись привязывается ровно к одному аэропорту.
+            Для инженера заводится и карточка сотрудника: квалификация
+            определяет, на какие работы и типы ВС его можно назначить.
           </p>
           <form class="admin-form" id="user-form">
             <label for="user-name">ФИО</label>
@@ -195,13 +194,52 @@
               </div>
             </div>
 
+            <!-- Карточка инженера: видна, когда выбрана роль «инженер». -->
+            <div id="user-engineer-fields" class="user-engineer-fields" hidden>
+              <div class="admin-row">
+                <div>
+                  <label for="user-shift">Смена</label>
+                  <select id="user-shift">
+                    <option value="day">дневная</option>
+                    <option value="night">ночная</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="user-mark">Отметка</label>
+                  <select id="user-mark">
+                    <option value="A1">A1 — линейное ТО, самолёты</option>
+                    <option value="B1.1" selected>B1.1 — планер и двигатели</option>
+                    <option value="B1.3">B1.3 — вертолёты</option>
+                    <option value="B2">B2 — авионика</option>
+                    <option value="C">C — базовое ТО</option>
+                  </select>
+                </div>
+              </div>
+
+              <label for="user-types">Типы ВС (через запятую)</label>
+              <input id="user-types" placeholder="A320, A321, SSJ-100">
+
+              <label for="user-valid">Отметка действует до</label>
+              <input id="user-valid" class="num" value="2027-12-31">
+
+              <label for="user-place">Где находится</label>
+              <select id="user-place"></select>
+
+              <label class="checkbox">
+                <input type="checkbox" id="user-on-shift" checked>
+                сразу на смене — участвует в подборе без входа в приложение
+              </label>
+            </div>
+
             <div id="user-login-row">
-              <label for="user-login">Логин</label>
+              <label for="user-login" id="user-login-label">Логин</label>
               <input id="user-login" autocomplete="off" required>
             </div>
 
-            <label for="user-password" id="user-password-label">Пароль</label>
-            <input id="user-password" type="password" autocomplete="new-password" required>
+            <div id="user-password-row">
+              <label for="user-password" id="user-password-label">Пароль</label>
+              <input id="user-password" type="password" autocomplete="new-password" required>
+            </div>
 
             <button type="submit" class="primary" id="user-submit">Завести</button>
             <button type="button" id="user-cancel" hidden>Отмена</button>
@@ -255,82 +293,6 @@
           </form>
           <div class="admin-note" id="shifts-note" hidden></div>
         </div>
-      </div>
-    </section>
-
-    <section class="admin-page" id="page-employees" hidden>
-      <div class="admin-columns">
-
-        <div class="admin-card">
-          <h2>Сотрудники аэропорта <span id="employees-airport">—</span></h2>
-          <div class="admin-list" id="employees-list">
-            <div class="empty">Загрузка…</div>
-          </div>
-        </div>
-
-        <div class="admin-card" id="employee-form-card">
-          <h2 id="employee-form-title">Зарегистрировать сотрудника</h2>
-          <p class="muted small">
-            Квалификация определяет, на какие работы и типы ВС его можно
-            назначить. Отметка с истёкшим сроком в подбор не проходит.
-          </p>
-          <form class="admin-form" id="employee-form">
-            <label for="emp-name">ФИО</label>
-            <input id="emp-name" placeholder="Соколов А. В." required>
-
-            <div class="admin-row">
-              <div>
-                <label for="emp-shift">Смена</label>
-                <select id="emp-shift">
-                  <option value="day">дневная</option>
-                  <option value="night">ночная</option>
-                </select>
-              </div>
-              <div>
-                <label for="emp-mark">Отметка</label>
-                <select id="emp-mark">
-                  <option value="A1">A1 — линейное ТО, самолёты</option>
-                  <option value="B1.1" selected>B1.1 — планер и двигатели</option>
-                  <option value="B1.3">B1.3 — вертолёты</option>
-                  <option value="B2">B2 — авионика</option>
-                  <option value="C">C — базовое ТО</option>
-                </select>
-              </div>
-            </div>
-
-            <label for="emp-types">Типы ВС (через запятую)</label>
-            <input id="emp-types" placeholder="A320, A321, SSJ-100" required>
-
-            <label for="emp-valid">Отметка действует до</label>
-            <input id="emp-valid" class="num" value="2027-12-31" required>
-
-            <label for="emp-place">Где находится</label>
-            <select id="emp-place"></select>
-
-            <label class="checkbox">
-              <input type="checkbox" id="emp-on-shift" checked>
-              сразу на смене — участвует в подборе без входа в приложение
-            </label>
-
-            <!-- При правке карточки учётная запись не трогается: она
-                 заводится один раз вместе с сотрудником. -->
-            <div id="employee-login-row">
-              <label for="emp-login">Логин для приложения инженера (необязательно)</label>
-              <div class="admin-row">
-                <input id="emp-login" placeholder="логин" autocomplete="off">
-                <input id="emp-password" type="password" placeholder="пароль"
-                       autocomplete="new-password">
-              </div>
-            </div>
-
-            <button type="submit" class="primary" id="employee-submit">
-              Зарегистрировать
-            </button>
-            <button type="button" id="employee-cancel" hidden>Отмена</button>
-          </form>
-          <div class="admin-note" id="employee-note" hidden></div>
-        </div>
-
       </div>
     </section>
 

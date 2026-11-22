@@ -162,7 +162,7 @@ function buildCallCard(call, selectedId, onSelect) {
       ${deadlineLabel(call)}
     </div>
     <div class="call-where">
-      ${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(call.stand_ref || "—")} ·
+      ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
       <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span> ·
       <span class="num" title="${
         call.reported_at ? "Экипаж сообщил в это время" : "Вызов зарегистрирован в это время"

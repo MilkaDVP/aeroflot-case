@@ -562,11 +562,10 @@
   stroke: var(--warn);
 }
 
-/* Перенос машин, людей и бортов мышью: щелчок выделяет объект,
-   удержание «поднимает» его — метка увеличивается и тянется сразу. */
+/* Перенос машин, людей и бортов удержанием: метка «поднимается» —
+   крупнее (масштаб задаёт карта), с рамкой и тенью — и идёт за курсором. */
 .hit-area { fill: transparent; }
-.movable-marker.is-movable { cursor: pointer; }
-.movable-marker.is-selected { cursor: grab; }
+.movable-marker.is-movable { cursor: grab; }
 .map.dragging-object,
 .map.dragging-object * { cursor: grabbing !important; }
 
@@ -574,21 +573,24 @@
   fill: var(--route-soft);
   stroke: #fff;
   stroke-width: 2;
-  stroke-dasharray: 4 3;
   display: none;
 }
 
-.movable-marker.is-selected .select-ring { display: inline; }
-.vehicle-marker.is-selected .vehicle { fill: var(--route); stroke: #fff; }
+.movable-marker.is-lifted .select-ring,
+.movable-marker.is-dragging .select-ring { display: inline; }
+.vehicle-marker.is-lifted .vehicle,
+.vehicle-marker.is-dragging .vehicle { fill: var(--route); stroke: #fff; }
 
-/* Поднятый удержанием или перетаскиваемый объект: крупнее (масштаб
-   задаёт карта) и с тенью, как предмет, оторванный от поверхности. */
 .movable-marker.is-lifted,
 .movable-marker.is-dragging {
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.6));
 }
 
-.movable-marker.is-dragging .select-ring { stroke-dasharray: none; }
+/* Борт «прилип» к стоянке: отпустите — встанет на неё. */
+.movable-marker.is-snapped .select-ring {
+  fill: var(--ok-soft);
+  stroke: var(--ok);
+}
 
 
 
@@ -617,40 +619,18 @@
   font-weight: 600;
 }
 
-/* Инструменты имитации — сверху слева: снизу слева легенда, снизу справа
-   кнопки масштаба, сверху справа переключатель подложки. Это единственный
-   свободный угол, и кнопка ни на что не наезжает. */
+/* Поиск по карте — сверху слева: снизу слева легенда, снизу справа
+   кнопки масштаба, сверху справа переключатель подложки. */
 .map-tools {
   position: absolute;
   left: var(--gap);
   top: var(--gap);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--gap-xs);
 }
 
-.map-tools button {
-  padding: 7px 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-/* Включённый режим виден издалека: пока он активен, клик по карте
-   означает не выбор стоянки, а перестановку человека. */
-.map-tools button.active {
-  border-color: var(--warn);
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
 /* --- Поиск по карте --- */
-
-.map-tools { align-items: flex-start; }
 
 .map-search { position: relative; }
 
@@ -767,15 +747,6 @@
 @media (max-width: 900px) {
   .map-search-input { width: 200px; }
   .map-search-list { width: min(340px, calc(100vw - 32px)); }
-}
-
-.map-tools-hint {
-  padding: 6px 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
 }
 
 .map-controls {

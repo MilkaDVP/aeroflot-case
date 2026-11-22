@@ -158,11 +158,12 @@ def list_employees(
     Сотрудники текущего аэропорта.
 
     По умолчанию — смена из контекста сессии: диспетчер работает со своей
-    сменой. Параметр shift позволяет посмотреть состав другой смены.
+    сменой. Параметр shift позволяет посмотреть состав другой смены,
+    shift=all — всех сотрудников аэропорта (для учётных записей).
     """
     query = db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao)
     selected_shift = shift or context.shift
-    if selected_shift:
+    if selected_shift and selected_shift != "all":
         query = query.filter(Employee.shift == selected_shift)
 
     return [to_response(employee) for employee in query.order_by(Employee.full_name).all()]

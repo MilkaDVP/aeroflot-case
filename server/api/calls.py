@@ -158,7 +158,9 @@ def to_response(call, db=None, now=None):
         board_number=aircraft.board_number if aircraft else "—",
         aircraft_type=aircraft.aircraft_type if aircraft else "—",
         stand_node_id=call.stand_node_id,
-        stand_ref=stand_ref_of(call),
+        # Борт вне стоянки: номера нет — вершина сети, к которой он
+        # привязан для маршрута, могла бы оказаться чужой стоянкой.
+        stand_ref=None if aircraft and aircraft.lat is not None else stand_ref_of(call),
         defect_code=call.defect_code,
         defect_name=defect["name"],
         defect_ata=defect["ata"],

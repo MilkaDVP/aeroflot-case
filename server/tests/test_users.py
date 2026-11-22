@@ -218,3 +218,11 @@ class TestUsers(ApiTestCase):
             {"qualifications": [{"category": "C", "aircraft_types": ["A320"], "valid_until": "2030-01-01"}]},
         )
         self.assertEqual(response.status_code, 403, response.text)
+
+    def test_все_сотрудники_аэропорта_без_фильтра_смены(self):
+        local = self.login("local_uuee", "local_uuee", shift="day")
+        day = self.call("GET", local, "/api/employees").json()
+        everyone = self.call("GET", local, "/api/employees?shift=all").json()
+        self.assertTrue(all(item["shift"] == "day" for item in day))
+        self.assertGreater(len(everyone), len(day))
+        self.assertEqual({item["shift"] for item in everyone}, {"day", "night"})

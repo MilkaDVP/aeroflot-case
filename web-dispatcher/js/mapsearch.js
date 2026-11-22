@@ -84,7 +84,11 @@ class MapSearch {
       return items;
     }
     const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
-    const planeAt = new Map((aircraft || []).map((plane) => [plane.stand_node_id, plane]));
+    const planeAt = new Map(
+      (aircraft || [])
+        .filter((plane) => plane.on_stand !== false)
+        .map((plane) => [plane.stand_node_id, plane])
+    );
 
     for (const node of graph.nodes) {
       if (!node.ref || (node.type !== "stand" && node.type !== "tech_center")) continue;
@@ -100,12 +104,13 @@ class MapSearch {
     }
 
     for (const plane of aircraft || []) {
-      const node = nodes.get(plane.stand_node_id);
+      const offStand = plane.on_stand === false && plane.lat != null;
+      const node = offStand ? this.map.projectLatLon(plane.lat, plane.lon) : nodes.get(plane.stand_node_id);
       if (!node) continue;
       items.push({
         kind: "aircraft",
         title: plane.board_number,
-        sub: `${plane.aircraft_type} · стоянка ${plane.stand_ref}`,
+        sub: `${plane.aircraft_type} · ${offStand ? "вне стоянки" : `стоянка ${plane.stand_ref}`}`,
         keys: [plane.board_number, plane.aircraft_type],
         // По номеру стоянки борт тоже находится, но ниже самой стоянки.
         weakKeys: [plane.stand_ref],

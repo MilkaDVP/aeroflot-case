@@ -1,6 +1,6 @@
 """Воздушное судно на стоянке."""
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -22,3 +22,9 @@ class Aircraft(Base):
     aircraft_type: Mapped[str] = mapped_column(String)
     airport_icao: Mapped[str] = mapped_column(ForeignKey("airports.icao"), index=True)
     stand_node_id: Mapped[str] = mapped_column(String)
+
+    # Борт не на стоянке (на ВПП, рулёжке, у ангара): его точное место.
+    # Тогда stand_node_id — ближайшая к нему вершина рулёжной сети, до
+    # которой строится маршрут инженера. Пусто — борт стоит на стоянке.
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
