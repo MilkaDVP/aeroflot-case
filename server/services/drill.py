@@ -37,7 +37,7 @@ from models.airport import Airport
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, Call
 from models.employee import Employee
 from services import mentor
-from services.assignment import mark_arrived, record_position
+from services.assignment import assigned_route, mark_arrived, record_position, working_call_of
 
 MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
@@ -114,6 +114,23 @@ def step(db, airport_icao, dt_s, now=None):
     return moved
 
 
+def reroute_after_move(db, employee):
+    """Перестроить остаток пути, сохранив транспорт и контрольный срок."""
+    call = working_call_of(db, employee)
+    if call is None or call.status not in MOVING_STATUSES:
+        return True
+    graph = get_graph(employee.airport_icao)
+    plan = assigned_route(call, graph)
+    if plan is None or not plan.node_ids:
+        return False
+    entry = graph.node(plan.node_ids[0])
+    call.route_node_ids = plan.node_ids
+    call.pickup_node_id = plan.pickup_node_id
+    # Ноль — первый узел графа. До него остаётся пройти от точки клика.
+    call.sim_progress_m = -haversine_m(employee.lat, employee.lon, entry["lat"], entry["lon"])
+    return True
+
+
 def advance(db, call, dt_s, now):
     """Продвигает исполнителя одного вызова; False — если он не движется."""
     employee = call.assigned_employee
@@ -126,6 +143,8 @@ def advance(db, call, dt_s, now):
     marks = route_marks(graph, call.route_node_ids)
     if not marks:
         return False
+    if (call.sim_progress_m or 0) < 0:
+        marks.insert(0, (call.sim_progress_m, None, employee.lat, employee.lon))
     total = marks[-1][0]
 
     # Движение началось — значит, вызов принят: у сотрудника без телефона

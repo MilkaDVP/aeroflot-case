@@ -128,6 +128,21 @@ class TestMovement(DrillCase):
         self.step(5 * 60)
         self.assertEqual(self.call(call["id"])["status"], "arrived")
 
+    def test_перенос_между_узлами_меняет_начало_пути(self):
+        from algorithm.geo import haversine_m
+
+        self.enable()
+        call = self.register()
+        bot = self.assign_best(call["id"])["employee_id"]
+        self.step(60)
+        lat, lon = 55.98095, 37.42906
+        self.assertEqual(self.send_location(bot, lat, lon).status_code, 200)
+        self.step(1)
+        position = self.employee(bot)
+        distance = haversine_m(lat, lon, position["lat"], position["lon"])
+        self.assertGreater(distance, 0)
+        self.assertLess(distance, 20)
+
     def test_без_учений_никто_не_движется(self):
         call = self.register()
         best = self.assign_best(call["id"])

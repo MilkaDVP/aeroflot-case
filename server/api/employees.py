@@ -29,7 +29,7 @@ from constants import (
 from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
-from services.drill import is_enabled
+from services.drill import is_enabled, reroute_after_move
 from models.employee import Employee
 from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
 from services.assignment import record_position, release_vehicle, working_call_of
@@ -272,6 +272,8 @@ def update_location(
         )
 
     record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
+    if employee.is_training and payload.source == LOCATION_MANUAL and not reroute_after_move(db, employee):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Из выбранной точки нет маршрута к борту")
     db.commit()
     return to_response(employee)
 
