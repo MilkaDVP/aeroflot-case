@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, check_same_airport, require_airport, require_roles
 from database import get_db, get_dispatch_db
-from models.employee import Employee
+from models.employee import RouteParticipant
 from models.user import DISPATCH_ROLES, ROLE_LOCAL_ADMIN
 from services import drill
 
@@ -50,7 +50,7 @@ def set_drill(
     payload: DrillState,
     context: Context = Depends(require_roles(ROLE_LOCAL_ADMIN)),
     airport: Context = Depends(require_airport),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_dispatch_db),
 ):
     """Администратор аэропорта и старше. При выключении все задержки снимаются."""
     drill.set_enabled(db, context.airport_icao, payload.enabled)
@@ -72,13 +72,15 @@ def hold_employee(
     Вне учений недоступно: в настоящей смене сотрудника останавливает
     жизнь, а не кнопка диспетчера.
     """
-    employee = db.get(Employee, employee_id)
+    employee = db.get(RouteParticipant, employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
     if not drill.is_enabled(db, context.airport_icao):
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_DRILL_OFF)
 
+    if not employee.is_training:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Задержать можно только учебного инженера")
     employee.held = payload.held
     db.commit()
     return HoldResponse(employee_id=employee.id, held=employee.held)

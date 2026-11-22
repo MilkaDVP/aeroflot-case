@@ -75,14 +75,11 @@ async function start() {
   } catch (error) {
     // Нет связи при запуске — не повод выбрасывать из учётной записи:
     // с сохранёнными данными инженер продолжает работу.
-    if (error.status === 0 && Session.user) {
+    if (error.status !== 401 && Session.user) {
       state.user = Session.user;
-      state.airportPoint = airportPointOf(state.user);
-      state.onShift = true;
-      enterWork();
+      afterLogin(state.user);
       return;
     }
-    Session.clear();
     showScreen("login");
   }
 }
@@ -158,7 +155,9 @@ function afterLogin(user) {
   el("menu-name").textContent = user.full_name;
 
   state.airportPoint = airportPointOf(user);
-  showScreen("shift");
+  state.onShift = user.on_shift;
+  if (state.onShift) enterWork();
+  else showScreen("shift");
 }
 
 function airportPointOf(user) {
@@ -205,6 +204,7 @@ el("shift-start").addEventListener("click", async () => {
   try {
     await Api.setShift(state.user.employee_id, true);
     state.onShift = true;
+    Session.user = state.user = await Api.me();
     enterWork();
   } catch (error) {
     el("shift-error").hidden = false;
@@ -231,7 +231,13 @@ function enterWork() {
   setGeoMode("gps");
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
-  countdownTimer = setInterval(updateCountdown, 1000);
+  function tick() {
+    updateCountdown();
+    const remaining = Date.parse(state.user?.shift_ends_at) - Date.now();
+    el("extend-shift").hidden = !(remaining <= 15 * 60000);
+  }
+  tick();
+  countdownTimer = setInterval(tick, 1000);
   heartbeatTimer = setInterval(sendHeartbeat, CONFIG.locationIntervalMs);
 }
 
@@ -241,6 +247,15 @@ async function refresh() {
   try {
     // Сначала досылаем накопленное: иначе ответ сервера не учёл бы
     // действия, нажатые без связи, и «откатил» бы экран назад.
+    const user = await Api.me();
+    if (!state.onShift) return;
+    Session.user = state.user = user;
+    if (!user.on_shift) {
+      state.onShift = false;
+      stopWork();
+      showScreen("shift");
+      return;
+    }
     await flushOutbox();
     if (Outbox.items.length) {
       throw new ApiError(0, "Нет связи с сервером");
@@ -259,7 +274,7 @@ async function refresh() {
       logout();
       return;
     }
-    if (error.status === 0) {
+    if (error.status === 0 || error.status >= 500) {
       await goOffline();
       return;
     }
@@ -989,6 +1004,7 @@ async function leaveShift() {
   try {
     await Api.setShift(state.user.employee_id, false);
     state.onShift = false;
+    Session.user = state.user = { ...state.user, on_shift: false, shift_ends_at: null };
     stopWork();
     closeSheet("menu-sheet");
     showScreen("shift");
@@ -998,13 +1014,23 @@ async function leaveShift() {
   }
 }
 
+el("extend-shift").onclick = async () => {
+  try {
+    await Api.setShift(state.user.employee_id, true, true);
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+};
+
 async function logout() {
-  stopWork();
   try {
     await Api.logout();
   } catch (error) {
-    // Токен всё равно стираем: остаться в приложении с мёртвой сессией хуже.
+    if (Session.token) { showToast(error.detail, true); return; }
   }
+  state.onShift = false;
+  stopWork();
   Session.clear();
   state.user = null;
   state.position = null;
@@ -1015,6 +1041,7 @@ async function logout() {
 }
 
 function stopWork() {
+  window.removeEventListener("online", refresh);
   clearInterval(pollTimer);
   clearInterval(countdownTimer);
   clearInterval(heartbeatTimer);

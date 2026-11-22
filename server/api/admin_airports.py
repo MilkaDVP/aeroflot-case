@@ -20,7 +20,7 @@ from database import get_db
 from models.airport import SOURCE_MANUAL, SOURCE_OSM, Airport
 from models.aircraft import Aircraft
 from models.call import Call
-from models.employee import Employee
+from models.employee import RouteParticipant
 from models.user import ROLE_ADMIN, User
 from models.vehicle import Vehicle
 from schemas.airport import (
@@ -294,7 +294,7 @@ def delete_airport(
 
 def airport_has_data(db, icao):
     """Есть ли в аэропорту записи, мешающие его удалить."""
-    for model in (Employee, Aircraft, Vehicle, Call):
+    for model in (RouteParticipant, Aircraft, Vehicle, Call):
         if db.query(model).filter(model.airport_icao == icao).first() is not None:
             return True
     return False

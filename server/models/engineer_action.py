@@ -22,7 +22,7 @@ class EngineerAction(Base):
     __tablename__ = "engineer_actions"
 
     action_id: Mapped[str] = mapped_column(String, primary_key=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("route_participants.id"), index=True)
     call_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"), nullable=True)
     action: Mapped[str] = mapped_column(String)
     # Когда действие совершено на телефоне и когда дошло до сервера:

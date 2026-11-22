@@ -33,6 +33,7 @@ class EmployeeResponse(BaseModel):
     location_source: str | None = None
     seen_at: str | None = None
     # Задержан на месте в режиме учений.
+    is_training: bool = False
     held: bool = False
 
 
@@ -86,5 +87,6 @@ class LocationRequest(BaseModel):
 class ShiftRequest(BaseModel):
     """Выход на смену или уход с неё."""
 
+    extend: bool = False
     on_shift: bool
     shift: str | None = Field(default=None, description="day или night")

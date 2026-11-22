@@ -148,6 +148,18 @@ function bindEvents() {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   }
 
+  el("back-to-dispatch").addEventListener("click", async (event) => {
+    if (state.user.airport_icao && state.user.shift) return;
+    event.preventDefault();
+    const icao = state.user.airport_icao || state.user.airports[0]?.icao;
+    if (!icao) return window.alert("Нет доступного аэропорта");
+    try {
+      await Api.selectAirport(icao, state.user.shift || "day");
+      window.location.href = "dispatch.html";
+    } catch (error) {
+      window.alert(error.detail);
+    }
+  });
   el("logout").addEventListener("click", logout);
   el("ctx-airport").addEventListener("change", switchAirport);
   el("import-form").addEventListener("submit", onImportSubmit);
@@ -562,9 +574,9 @@ async function loadUsers() {
     // Карточки сотрудников есть только в выбранном аэропорту.
     let employees = [];
     if (state.user.airport_icao) {
-      // Все смены сразу: в учётных записях нужны все люди аэропорта,
-      // а не только те, кто на смене текущей сессии.
-      employees = await Api.employees("all");
+      // Весь состав аэропорта, а не только смена текущей сессии:
+      // в учётных записях нужны все люди (учебные инженеры — нет).
+      employees = await Api.airportRoster();
       await loadGraphOnce();
       fillPlaces("user-place");
     }
@@ -812,9 +824,10 @@ function startEngineerEdit(employee, account) {
   }
   el("user-place").value = nearestPlaceId(employee) || el("user-place").value;
   el("user-on-shift").checked = employee.status !== "offline";
-  // Занятого нельзя снять со смены правкой карточки: у него открытый
-  // вызов, освобождать его должен диспетчер снятием вызова.
-  el("user-on-shift").disabled = isBusyStatus(employee.status);
+  // Занятого снять со смены может только технический администратор:
+  // сервер вернёт его вызовы к подбору (services/shifts.end_shift).
+  // Остальным это недоступно — сервер ответит отказом.
+  el("user-on-shift").disabled = isBusyStatus(employee.status) && state.user.role !== "admin";
   for (const id of ENGINEER_CARD_FIELDS) el(id).disabled = !canManageAccounts();
 
   // Новый пароль задаётся, только если вход у инженера есть.
@@ -835,7 +848,9 @@ function openUserEdit(title) {
 
 function engineerHint(employee) {
   if (isBusyStatus(employee.status)) {
-    return "Сотрудник занят на вызове: снять его со смены здесь нельзя";
+    return state.user.role === "admin"
+      ? "Сотрудник занят на вызове. При снятии со смены вызов вернётся к подбору"
+      : "Сотрудник занят на вызове: снять его со смены может технический администратор — вызов вернётся к подбору";
   }
   if (!canManageAccounts()) {
     return "Начальник смены меняет смену, место и присутствие на смене; квалификацию — администратор аэропорта";
@@ -950,7 +965,9 @@ async function saveEngineer({ employee, account }) {
   const changes = canManageAccounts()
     ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications }
     : { shift: card.shift };
-  if (!isBusyStatus(employee.status)) {
+  // Снятие со смены передаётся и для занятого (его вызов вернётся к
+  // подбору); «на смене» для занятого не шлём — он и так на смене.
+  if (!card.on_shift || !isBusyStatus(employee.status)) {
     changes.status = card.on_shift ? "free" : "offline";
   }
   const updated = await Api.updateEmployee(employee.id, changes);

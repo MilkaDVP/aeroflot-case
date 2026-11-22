@@ -6,13 +6,17 @@
 и сообщает клиенту, что шаг можно пропустить.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, get_context
 from auth.security import new_token, session_expiry, verify_password
-from constants import SHIFT_DAY, SHIFT_NIGHT
-from database import get_db
+from clock import to_iso_utc
+from services.shifts import end_shift, start_clock
+from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_OFFLINE
+from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.airport import SOURCE_MANUAL, Airport
 from models.user import ROLE_ADMIN, AuthSession, User
@@ -80,7 +84,7 @@ def brief_of(airport):
 
 
 @router.post("/auth/login", response_model=LoginResponse, summary="Вход")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, db: Session = Depends(get_dispatch_db)):
     """Проверяет учётные данные и открывает сессию."""
     user = db.query(User).filter(User.login == payload.login).one_or_none()
 
@@ -89,6 +93,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if user is None or (user.employee and user.employee.archived) or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_CREDENTIALS)
 
+    # Инженер, который уже на смене, получает срок её окончания
+    # (services/shifts.py) — смена заканчивается по нему, а не по входу.
+    if user.employee and user.employee.status != STATUS_OFFLINE and not user.employee.shift_ends_at:
+        start_clock(user.employee)
     airports = airport_briefs(db, user)
     single = airports[0] if len(airports) == 1 else None
     session = AuthSession(
@@ -98,7 +106,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         # по местному времени (её можно сменить на экране выбора).
         airport_icao=single.icao if single else None,
         shift=single.current_shift if single else None,
-        expires_at=session_expiry(),
+        # Вход инженера не истекает: потеря связи на перроне не должна
+        # выбрасывать его из приложения. Работа ограничена сроком смены,
+        # а не сроком входа.
+        expires_at=datetime.max if user.employee else session_expiry(),
     )
     db.add(session)
     db.commit()
@@ -114,12 +125,15 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/logout", response_model=MessageResponse, summary="Выход")
-def logout(context: Context = Depends(get_context), db: Session = Depends(get_db)):
+def logout(db: Session = Depends(get_dispatch_db), context: Context = Depends(get_context)):
     """
     Закрывает сессию: запись токена удаляется, повторно он не сработает.
-    Вызовы, которые человек разбирал, освобождаются для других.
+    Вызовы, которые человек разбирал, освобождаются для других, а инженер
+    при выходе из приложения уходит со смены.
     """
     claims.release_all(db, context.user.id)
+    if context.user.employee:
+        end_shift(db, context.user.employee, "Выход из приложения")
     db.delete(context.session)
     db.commit()
     return MessageResponse(message="Сессия закрыта")
@@ -130,6 +144,8 @@ def current_user(context: Context = Depends(get_context), db: Session = Depends(
     """Пользователь, его роль, аэропорты и выбранный контекст работы."""
     user = context.user
     return CurrentUserResponse(
+        on_shift=bool(user.employee and user.employee.status != STATUS_OFFLINE),
+        shift_ends_at=to_iso_utc(user.employee.shift_ends_at) if user.employee else None,
         login=user.login,
         role=user.role,
         full_name=user.full_name,

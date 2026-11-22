@@ -842,7 +842,10 @@ class AirportMap {
       // Точка, поставленная вручную (перенос на карте), — не движение:
       // след от старого места к новому выглядел бы как пройденный путь.
       // Такой след сбрасывается и начинается заново с настоящих координат.
-      if (employee.location_source === "manual") {
+      // Учебного инженера сервер ведёт по маршруту тоже «ручными» точками —
+      // это настоящее движение, и след у него остаётся (его ручной перенос
+      // мышью сбрасывает след при отпускании, см. drop()).
+      if (employee.location_source === "manual" && !employee.is_training) {
         this.trails.delete(employee.id);
         continue;
       }
@@ -882,16 +885,26 @@ class AirportMap {
    * пеший — пунктиром, на машине — сплошной линией. Иначе диспетчер
    * не отличил бы «идёт пешком» от «едет».
    */
-  drawRoute(nodeIds, pickupNodeId) {
+  drawRoute(nodeIds, pickupNodeId, employee) {
     this.clearRoute();
 
     const known = (nodeIds || []).filter((id) => this.nodesById.has(id));
     if (known.length === 0) {
       return false;
     }
-    // Сотрудник уже на стоянке: линии нет, но конец маршрута отмечен.
+    // Маршрут из одной вершины. Если известно, где исполнитель (учебный
+    // инженер после ручного переноса, сотрудник у самого борта), линия
+    // идёт от его текущего места; иначе он уже у борта — отмечен конец.
     if (known.length === 1) {
-      this.appendRouteEnd(this.nodesById.get(known[0]), "finish", "Б", "Сотрудник уже у борта");
+      const target = this.nodesById.get(known[0]);
+      if (employee && employee.lat != null && employee.lon != null) {
+        const start = this.projectLatLon(employee.lat, employee.lon);
+        this.appendRouteLine(known, "route", start);
+        this.appendRouteEnd(start, "start", "А", "Исполнитель");
+        this.appendRouteEnd(target, "finish", "Б", "Конец маршрута — стоянка борта");
+      } else {
+        this.appendRouteEnd(target, "finish", "Б", "Сотрудник уже у борта");
+      }
       this.updateMarkerScale();
       return true;
     }
@@ -922,8 +935,8 @@ class AirportMap {
    * Маршрут, а если его нет — явная отметка «маршрут не построен»
    * на стоянке вызова.
    */
-  showRoute(nodeIds, pickupNodeId, standNodeId, missingText) {
-    if (!this.drawRoute(nodeIds, pickupNodeId) && standNodeId) {
+  showRoute(nodeIds, pickupNodeId, standNodeId, missingText, employee) {
+    if (!this.drawRoute(nodeIds, pickupNodeId, employee) && standNodeId) {
       this.drawRouteMissing(standNodeId, missingText);
     }
   }
@@ -961,12 +974,13 @@ class AirportMap {
   }
 
   /** Одна ломаная маршрута по вершинам графа. */
-  appendRouteLine(nodeIds, className) {
+  appendRouteLine(nodeIds, className, start) {
     const points = nodeIds
       .map((id) => this.nodesById.get(id))
       .filter(Boolean)
       .map((node) => `${node.x},${node.y}`);
 
+    if (start) points.unshift(`${start.x},${start.y}`);
     if (points.length < 2) {
       return;
     }

@@ -33,7 +33,7 @@ class DrillCase(MentorCase):
             db.close()
 
     def employee(self, employee_id):
-        employees = self.client.get("/api/employees", headers=auth_header(self.dispatcher)).json()
+        employees = self.client.get("/api/employees?include_training=true", headers=auth_header(self.dispatcher)).json()
         return next(item for item in employees if item["id"] == employee_id)
 
     def call(self, call_id):
@@ -52,6 +52,23 @@ class DrillCase(MentorCase):
 
 class TestSwitch(DrillCase):
     """Кто включает учения и что происходит вне их."""
+
+    def test_учебная_команда_отдельна_от_штата(self):
+        from models.employee import Employee, TrainingEngineer
+
+        self.enable()
+        with SessionLocal() as db:
+            self.assertFalse(db.query(Employee).filter_by(is_training=True).first())
+            self.assertEqual(db.query(TrainingEngineer).filter_by(airport_icao="UUEE").count(), 6)
+        headers = auth_header(self.admin)
+        roster = self.client.get("/api/employees?all_shifts=true", headers=headers).json()
+        names = [person["full_name"] for person in roster]
+        self.assertIn("Соколов А. В.", names)
+        self.assertIn("Тарасов Е. И.", names)
+        self.assertFalse(any(name.startswith("Учебный инженер") for name in names))
+        people = self.client.get("/api/employees?include_training=true", headers=headers).json()
+        self.assertTrue(any(person["full_name"].startswith("Учебный инженер") for person in people))
+        self.assertTrue(any(person["full_name"] == "Соколов А. В." for person in people))
 
     def test_по_умолчанию_выключены(self):
         state = self.client.get("/api/drill", headers=auth_header(self.dispatcher)).json()
@@ -113,11 +130,11 @@ class TestMovement(DrillCase):
         self.assertEqual(self.last("arrival", call["id"])["verdict"], "good")
 
     def test_пеший_забирает_машину_по_пути(self):
-        # Морозов идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
+        # Учебный механик идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
         self.enable()
         call = self.register()
-        morozov = self.employee_id("Морозов Д. С.")
-        self.assign(call["id"], morozov, "учения", self.supervisor)
+        mechanic = self.suggest(call["id"])["best"]["employee_id"]
+        self.assign(call["id"], mechanic, "учения", self.supervisor)
 
         self.step(5 * 60)
         vehicles = self.client.get("/api/vehicles", headers=auth_header(self.dispatcher)).json()
@@ -127,6 +144,42 @@ class TestMovement(DrillCase):
 
         self.step(5 * 60)
         self.assertEqual(self.call(call["id"])["status"], "arrived")
+
+    def test_перенос_между_узлами_меняет_начало_пути(self):
+        from algorithm.geo import haversine_m
+
+        self.enable()
+        call = self.register()
+        bot = self.assign_best(call["id"])["employee_id"]
+        self.step(60)
+        lat, lon = 55.98095, 37.42906
+        self.assertEqual(self.send_location(bot, lat, lon).status_code, 200)
+        self.step(1)
+        position = self.employee(bot)
+        distance = haversine_m(lat, lon, position["lat"], position["lon"])
+        self.assertGreater(distance, 0)
+        self.assertLess(distance, 20)
+
+    def test_перенос_на_последнее_ребро_ведёт_к_борту(self):
+        from algorithm.geo import haversine_m
+        from graph_registry import get_graph
+
+        self.enable()
+        call = self.register()
+        bot = self.assign_best(call["id"])["employee_id"]
+        route = self.call(call["id"])
+        self.assertTrue(route["pickup_node_id"])
+        graph = get_graph("UUEE")
+        start, goal = [graph.node(n) for n in route["route_node_ids"][-2:]]
+        lat, lon = [start[k] * 0.7 + goal[k] * 0.3 for k in ("lat", "lon")]
+        self.assertEqual(self.send_location(bot, lat, lon).status_code, 200)
+        updated = self.call(call["id"])
+        self.assertIsNone(updated["pickup_node_id"])
+        self.assertEqual(updated["route_node_ids"], [goal["id"]])
+        self.step(1)
+        pos = self.employee(bot)
+        self.assertLess(haversine_m(pos["lat"], pos["lon"], goal["lat"], goal["lon"]),
+                        haversine_m(lat, lon, goal["lat"], goal["lon"]))
 
     def test_без_учений_никто_не_движется(self):
         call = self.register()
@@ -144,16 +197,20 @@ class TestMovement(DrillCase):
         )
 
     def test_сотрудника_с_телефоном_сервер_не_двигает(self):
-        self.enable()
         call = self.register()
-        best = self.assign_best(call["id"])
+        real = self.assign_best(call["id"])["employee_id"]
         engineer = self.login("sokolov", "engineer")
-        self.send_location(best["employee_id"], 55.97868, 37.39716, "simulation", token=engineer)
-
-        self.step(120)
-
-        after = self.employee(best["employee_id"])
-        self.assertAlmostEqual(after["lat"], 55.97868, places=5)
+        self.enable()
+        training = self.register()
+        bot = self.assign_best(training["id"])["employee_id"]
+        self.assertNotEqual(bot, real)
+        self.assertEqual(self.hold(real).status_code, 409)
+        for source in ("gps", "simulation", "manual"):
+            response = self.send_location(real, 55.97868, 37.39716, source, token=engineer)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.step(10), 1)
+        self.enable(False)
+        self.assertAlmostEqual(self.employee(real)["lat"], 55.97868, places=5)
         self.assertEqual(self.call(call["id"])["status"], "assigned")
 
 
@@ -196,4 +253,5 @@ class TestHold(DrillCase):
         best = self.assign_best(call["id"])
         self.hold(best["employee_id"])
         self.enable(False)
+        self.enable()
         self.assertFalse(self.employee(best["employee_id"])["held"])

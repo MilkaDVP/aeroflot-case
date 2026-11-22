@@ -13,17 +13,18 @@
 и ускоренное движение при настоящем сроке дало бы картину, в которой
 успевают все.
 
-Двигаются только сотрудники с ручной точкой. Того, чей телефон шлёт
-координаты (GPS или имитация в приложении), сервер не трогает: его место
-определяет он сам.
+Двигаются только учебные инженеры без учётных записей.
 """
 
 from algorithm.geo import haversine_m
+from algorithm.transport import plan_for
 from clock import utc_now
 from constants import (
-    LOCATION_GPS,
+    AIRCRAFT_GROUP_BY_TYPE,
+    SHIFT_DAY,
+    SHIFT_NIGHT,
+    STATUS_FREE,
     LOCATION_MANUAL,
-    LOCATION_SIMULATION,
     MODE_WALK,
     STATUS_BUSY,
     STATUS_EN_ROUTE,
@@ -35,13 +36,30 @@ from constants import (
 from graph_registry import get_graph
 from models.airport import Airport
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, Call
-from models.employee import Employee
-from services import mentor
-from services.assignment import mark_arrived, record_position
+from models.employee import TrainingEngineer
+from services import mentor, support
+from services.assignment import assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
 
 MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
-# Источники координат, при которых место сотрудника задаёт его телефон.
-PHONE_SOURCES = (LOCATION_GPS, LOCATION_SIMULATION)
+
+
+def ensure_training_team(db, icao):
+    if db.query(TrainingEngineer.id).filter_by(airport_icao=icao).first():
+        return
+    graph = get_graph(icao)
+    bases = graph.nodes_of_type("tech_center") or graph.nodes_of_type("stand")
+    for shift in (SHIFT_DAY, SHIFT_NIGHT):
+        for index, mark in enumerate(("B1.1", "B2", "A1")):
+            node = bases[index % len(bases)]
+            db.add(TrainingEngineer(
+                full_name=f"Учебный инженер {index + 1} · {mark}", is_training=True,
+                airport_icao=icao, shift=shift, status=STATUS_FREE,
+                lat=node["lat"], lon=node["lon"], location_source=LOCATION_MANUAL,
+                location_at=utc_now(), qualifications=[{
+                    "category": mark, "aircraft_types": list(AIRCRAFT_GROUP_BY_TYPE),
+                    "valid_until": "9999-12-31",
+                }],
+            ))
 
 
 def is_enabled(db, airport_icao):
@@ -59,9 +77,11 @@ def set_enabled(db, airport_icao, enabled):
     """
     airport = db.get(Airport, airport_icao)
     airport.drill_enabled = enabled
-    if not enabled:
-        held = db.query(Employee).filter(
-            Employee.airport_icao == airport_icao, Employee.held.is_(True)
+    if enabled:
+        ensure_training_team(db, airport_icao)
+    else:
+        held = db.query(TrainingEngineer).filter(
+            TrainingEngineer.airport_icao == airport_icao, TrainingEngineer.held.is_(True)
         )
         for employee in held:
             employee.held = False
@@ -95,10 +115,49 @@ def step(db, airport_icao, dt_s, now=None):
     return moved
 
 
+def reroute_after_move(db, employee):
+    """Перестроить остаток пути, сохранив транспорт и контрольный срок."""
+    call = working_call_of(db, employee)
+    if call is None or call.status not in MOVING_STATUSES:
+        return True
+    graph = get_graph(employee.airport_icao)
+    vehicle = employee.vehicle
+    if vehicle and vehicle.status == VEHICLE_RESERVED and not any(
+        item.vehicle_id == vehicle.id and item.status in MOVING_STATUSES
+        for item in support.support_calls(call)
+    ):
+        # После переноса пешком до борта может быть быстрее, чем через машину.
+        plan = plan_for(graph, employee.as_algorithm_dict(), call.stand_node_id,
+                        [vehicle.as_algorithm_dict()])
+        if plan and not plan.pickup:
+            release_vehicle(employee)
+            call.vehicle = None
+    else:
+        plan = assigned_route(call, graph)
+    if plan is None or not plan.node_ids:
+        return False
+    nodes = plan.node_ids
+    entry = graph.node(nodes[0])
+    if len(nodes) > 1 and nodes[0] != plan.pickup_node_id:
+        ahead = graph.node(nodes[1])
+        to_entry = haversine_m(employee.lat, employee.lon, entry["lat"], entry["lon"])
+        to_ahead = haversine_m(employee.lat, employee.lon, ahead["lat"], ahead["lon"])
+        span = haversine_m(entry["lat"], entry["lon"], ahead["lat"], ahead["lon"])
+        # Точка уже лежит на первом ребре. Продолжаем к дальнему узлу.
+        if to_entry < span and to_ahead < span and to_entry + to_ahead <= span + 1:
+            nodes = nodes[1:]
+            entry = ahead
+    call.route_node_ids = nodes
+    call.pickup_node_id = plan.pickup_node_id
+    # Ноль — первый узел графа. До него остаётся пройти от точки клика.
+    call.sim_progress_m = -haversine_m(employee.lat, employee.lon, entry["lat"], entry["lon"])
+    return True
+
+
 def advance(db, call, dt_s, now):
     """Продвигает исполнителя одного вызова; False — если он не движется."""
     employee = call.assigned_employee
-    if employee is None or employee.held or employee.location_source in PHONE_SOURCES:
+    if employee is None or employee.held or not employee.is_training:
         return False
     if not call.route_node_ids:
         return False
@@ -107,6 +166,8 @@ def advance(db, call, dt_s, now):
     marks = route_marks(graph, call.route_node_ids)
     if not marks:
         return False
+    if (call.sim_progress_m or 0) < 0:
+        marks.insert(0, (call.sim_progress_m, None, employee.lat, employee.lon))
     total = marks[-1][0]
 
     # Движение началось — значит, вызов принят: у сотрудника без телефона

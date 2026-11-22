@@ -29,7 +29,9 @@ from constants import (
 from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
-from models.employee import Employee
+from services.shifts import end_shift, start_clock
+from services.drill import is_enabled, reroute_after_move
+from models.employee import Employee, RouteParticipant
 from models.user import (
     ROLE_ADMIN,
     ROLE_ENGINEER,
@@ -92,11 +94,12 @@ def to_response(employee):
         location_at=to_iso_utc(employee.location_at),
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
+        is_training=employee.is_training,
         held=bool(employee.held),
     )
 
 
-def load_employee(db, context, employee_id):
+def load_employee(db, context, employee_id, model=Employee):
     """
     Сотрудник по идентификатору с проверкой аэропорта сессии.
 
@@ -104,7 +107,7 @@ def load_employee(db, context, employee_id):
     диспетчер одного аэропорта мог бы менять статус сотрудника другого,
     просто подставив чужой идентификатор.
     """
-    employee = db.get(Employee, employee_id)
+    employee = db.get(model, employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
     if context.airport_icao:
@@ -151,6 +154,8 @@ def ensure_own_card(context, employee):
 @router.get("", response_model=list[EmployeeResponse], summary="Сотрудники аэропорта")
 def list_employees(
     shift: str | None = None,
+    include_training: bool = False,
+    all_shifts: bool = False,
     context: Context = Depends(require_airport),
     db: Session = Depends(get_db),
 ):
@@ -161,12 +166,17 @@ def list_employees(
     сменой. Параметр shift позволяет посмотреть состав другой смены,
     shift=all — всех сотрудников аэропорта (для учётных записей).
     """
-    query = db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao)
+    model = RouteParticipant if include_training and is_enabled(db, context.airport_icao) else Employee
+    query = db.query(model).filter_by(
+        archived=False, airport_icao=context.airport_icao,
+    )
     selected_shift = shift or context.shift
-    if selected_shift and selected_shift != "all":
-        query = query.filter(Employee.shift == selected_shift)
+    # all_shifts=true и shift=all — одно и то же: весь состав аэропорта
+    # (учётные записи администрирования), без фильтра по смене сессии.
+    if selected_shift and not all_shifts and selected_shift != "all":
+        query = query.filter(model.shift == selected_shift)
 
-    return [to_response(employee) for employee in query.order_by(Employee.full_name).all()]
+    return [to_response(employee) for employee in query.order_by(model.full_name).all()]
 
 
 @router.post(
@@ -230,6 +240,9 @@ def create_employee(
         employee.location_at = utc_now()
     db.add(employee)
 
+    if login and payload.on_shift:
+        start_clock(employee)
+
     if login:
         # Учётная запись создаётся вместе с карточкой и привязывается к ней:
         # по этой связи приложение инженера находит «свой» вызов.
@@ -287,6 +300,13 @@ def update_employee(
             item.model_dump() for item in payload.qualifications
         ]
 
+    if changes.get("status") == STATUS_OFFLINE:
+        if context.user.role != ROLE_ADMIN and working_call_of(db, employee):
+            raise HTTPException(409, ERROR_LEAVE_WITH_CALL)
+        end_shift(db, employee, "Сотрудник снят со смены")
+    elif employee.status == STATUS_OFFLINE and changes.get("status") == STATUS_FREE:
+        start_clock(employee)
+
     for field, value in changes.items():
         if value is not None:
             setattr(employee, field, value)
@@ -312,7 +332,7 @@ def update_location(
     устареть. Прогноз прибытия по GPS-фиксации, которой больше
     полутора минут, ненадёжен, а точку, поставленную вручную, не обновляют намеренно.
     """
-    employee = load_employee(db, context, employee_id)
+    employee = load_employee(db, context, employee_id, RouteParticipant)
     ensure_own_card(context, employee)
 
     if payload.source not in LOCATION_SOURCES:
@@ -322,6 +342,8 @@ def update_location(
         )
 
     record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
+    if employee.is_training and payload.source == LOCATION_MANUAL and not reroute_after_move(db, employee):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Из выбранной точки нет маршрута к борту")
     db.commit()
     return to_response(employee)
 
@@ -355,7 +377,12 @@ def toggle_shift(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_SHIFT)
         employee.shift = payload.shift
 
+    if payload.extend and (not payload.on_shift or employee.status == STATUS_OFFLINE):
+        raise HTTPException(409, "Смена уже завершена")
+    if payload.on_shift and (not employee.shift_ends_at or payload.extend):
+        start_clock(employee)
     if not payload.on_shift:
+        employee.shift_ends_at = None
         # Уходя со смены, инженер оставляет машину там, где стоит: иначе
         # она числилась бы за человеком, которого на перроне нет.
         release_vehicle(employee)

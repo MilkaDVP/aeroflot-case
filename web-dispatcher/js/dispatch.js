@@ -128,7 +128,7 @@ async function refresh() {
   const version = ++refreshVersion;
   try {
     const [employees, aircraft, calls, vehicles, drill, reports] = await Promise.all([
-      Api.employees(),
+      Api.mapParticipants(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
@@ -186,7 +186,11 @@ async function refresh() {
         refreshExecutorMenu();
         loadExtraCandidates(selected);
       }
+      // Маршрут из одной вершины (исполнитель рядом с бортом или учебный
+      // инженер после переноса) рисуется от его текущего места — оно
+      // меняется на каждом опросе, поэтому перерисовываем всегда.
       if (previous.status !== selected.status ||
+          selected.route_node_ids?.length === 1 ||
           previous.stand_node_id !== selected.stand_node_id ||
           previous.pickup_node_id !== selected.pickup_node_id ||
           String(previous.route_node_ids) !== String(selected.route_node_ids)) {
@@ -596,8 +600,13 @@ function queueOptions() {
  * или вызов закрыт, линия не нужна, и карта остаётся чистой.
  */
 function showCallRoute(call) {
+  // Исполнитель нужен, чтобы маршрут из одной вершины шёл от его места
+  // (учебный инженер после ручного переноса).
+  const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
   if (call.status === "assigned" || call.status === "accepted") {
-    airportMap.showRoute(call.route_node_ids, call.pickup_node_id, call.stand_node_id);
+    airportMap.showRoute(
+      call.route_node_ids, call.pickup_node_id, call.stand_node_id, undefined, employee
+    );
   } else if (call.status === "queued") {
     airportMap.showRoute(
       call.route_node_ids,
@@ -1092,7 +1101,7 @@ function holdButton(call) {
     return [];
   }
   const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
-  if (!employee) {
+  if (!employee?.is_training) {
     return [];
   }
   const button = linkButton(

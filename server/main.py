@@ -31,6 +31,7 @@ from api import (
 from database import SessionLocal, begin_dispatch_write, create_all
 from graph_registry import load_from_database, preload_all
 from constants import DRILL_MAX_STEP_S, DRILL_TICK_S
+from services.shifts import expire_shifts, initialize_shift_clocks
 from services import drill as drill_service
 from services.defects import ensure_builtin_defects
 
@@ -58,6 +59,7 @@ def drill_tick(dt_s):
     db = SessionLocal()
     try:
         begin_dispatch_write(db)
+        expire_shifts(db)
         for icao in drill_service.enabled_airports(db):
             drill_service.step(db, icao, dt_s)
         db.commit()
@@ -96,7 +98,12 @@ async def lifespan(app: FastAPI):
     # открываться, хотя запись о них есть.
     db = SessionLocal()
     try:
+        initialize_shift_clocks(db)
+        expire_shifts(db)
         custom = load_from_database(db)
+        for icao in drill_service.enabled_airports(db):
+            drill_service.ensure_training_team(db, icao)
+        db.commit()
     finally:
         db.close()
 
