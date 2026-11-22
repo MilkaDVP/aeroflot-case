@@ -83,6 +83,9 @@ async function start() {
 
     airportMap = new AirportMap(elements.map);
     airportMap.onStandClick = openCallFormForStand;
+    airportMap.onVehicleDrop = dropVehicle;
+    airportMap.onVehicleRefused = (vehicle) =>
+      showToast(`${vehicle.call_sign} занята — переносить можно только свободную машину`, true);
     airportMap.attachTiles(showMapNotice);
 
     state.graph = await Api.airportGraph(user.airport_icao);
@@ -148,7 +151,9 @@ async function refresh() {
     const selected = state.selectedCall;
     if (selected && (isAssignable(previous) !== isAssignable(selected)
         || (isAssignable(selected) && previous.stand_node_id !== selected.stand_node_id))) {
-      await selectCall(selected);
+      // Фоновый опрос не уводит карту: к вызову переходим, только если
+      // сменилась сама стоянка.
+      await selectCall(selected, { keepView: previous.stand_node_id === selected.stand_node_id });
     } else if (selected && !isAssignable(selected)) {
       const changedTeam = previous.assigned_employee_id !== selected.assigned_employee_id ||
         String(previous.support.map((item) => item.call_id)) !== String(selected.support.map((item) => item.call_id));
@@ -159,10 +164,11 @@ async function refresh() {
         refreshExecutorMenu();
         loadExtraCandidates(selected);
       }
-      if (previous.stand_node_id !== selected.stand_node_id ||
+      if (previous.status !== selected.status ||
+          previous.stand_node_id !== selected.stand_node_id ||
           previous.pickup_node_id !== selected.pickup_node_id ||
           String(previous.route_node_ids) !== String(selected.route_node_ids)) {
-        airportMap.drawRoute(selected.route_node_ids, selected.pickup_node_id);
+        showCallRoute(selected);
       }
       renderAssignedCard(state.selectedCall);
       updateAssignButton();
@@ -274,11 +280,7 @@ function showAssignment(call) {
   elements.assignButton.disabled = true;
 
   renderAssignedCard(call);
-  if (call.route_node_ids && call.route_node_ids.length > 1) {
-    airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
-  } else {
-    airportMap.clearRoute();
-  }
+  showCallRoute(call);
   airportMap.drawEmployees(state.employees, employeeClass);
   loadExtraCandidates(call);
 }
@@ -309,7 +311,14 @@ async function loadExtraCandidates(call) {
   }
 }
 
-async function selectCall(call) {
+/**
+ * Открывает вызов и запускает подбор.
+ *
+ * keepView — не переводить карту к стоянке вызова. Нужен, когда подбор
+ * лишь пересчитывается после переноса машины, борта или сотрудника:
+ * диспетчер работает в другом месте карты, и прыжок к вызову сбивал его.
+ */
+async function selectCall(call, { keepView = false } = {}) {
   closePopover();
   state.selectedCall = call;
   sessionStorage.setItem(selectionKey(), call.id);
@@ -319,7 +328,9 @@ async function selectCall(call) {
   state.travel = {};
   renderCalls(elements.callsList, state.calls, call.id, selectCall);
 
-  airportMap.focusOn(call.stand_node_id, 4);
+  if (!keepView) {
+    airportMap.focusOn(call.stand_node_id, 4);
+  }
 
   if (!isAssignable(call)) {
     showAssignment(call);
@@ -339,13 +350,14 @@ async function selectCall(call) {
     airportMap.drawEmployees(state.employees, employeeClass);
 
     if (suggestion.best) {
-      airportMap.drawRoute(
+      airportMap.showRoute(
         suggestion.best.route.node_ids,
-        suggestion.best.route.pickup_node_id
+        suggestion.best.route.pickup_node_id,
+        call.stand_node_id
       );
       elements.assignButton.disabled = !isAssignable(call);
     } else {
-      airportMap.clearRoute();
+      airportMap.drawRouteMissing(call.stand_node_id, "Маршрут не построен: некого отправить");
       elements.assignButton.disabled = true;
     }
   } catch (error) {
@@ -372,7 +384,11 @@ function pickCandidate(candidate) {
   // Ответственный сменился — «ехать с первым» могло потерять смысл.
   dropImpossibleTravel();
   refreshExecutorMenu();
-  airportMap.drawRoute(candidate.route.node_ids, candidate.route.pickup_node_id);
+  airportMap.showRoute(
+    candidate.route && candidate.route.node_ids,
+    candidate.route && candidate.route.pickup_node_id,
+    state.selectedCall && state.selectedCall.stand_node_id
+  );
   updateAssignButton();
 }
 
@@ -528,6 +544,28 @@ function queueOptions() {
  * только к сообщению об ошибке, — дефект интерфейса: подбор по уже
  * назначенному вызову диспетчер открывает для справки, а не для решения.
  */
+/**
+ * Маршрут уже назначенного вызова.
+ *
+ * Пока исполнитель в пути, маршрут обязан быть: если его нет, на стоянке
+ * появляется отметка «маршрут не построен». Когда инженер уже у борта
+ * или вызов закрыт, линия не нужна, и карта остаётся чистой.
+ */
+function showCallRoute(call) {
+  if (call.status === "assigned" || call.status === "accepted") {
+    airportMap.showRoute(call.route_node_ids, call.pickup_node_id, call.stand_node_id);
+  } else if (call.status === "queued") {
+    airportMap.showRoute(
+      call.route_node_ids,
+      call.pickup_node_id,
+      call.stand_node_id,
+      "В очереди: маршрут появится, когда инженер освободится"
+    );
+  } else {
+    airportMap.clearRoute();
+  }
+}
+
 function isAssignable(call) {
   return Boolean(call) && (call.status === "new" || call.status === "suggested");
 }
@@ -803,12 +841,38 @@ async function moveTo(position) {
     if (kind === "employee") await Api.sendLocation(id, point.lat, point.lon);
     state.moving = null;
     await refresh();
-    if (kind !== "aircraft" && isAssignable(state.selectedCall)) await selectCall(state.selectedCall);
+    if (kind !== "aircraft" && isAssignable(state.selectedCall)) {
+      await selectCall(state.selectedCall, { keepView: true });
+    }
     showMoveHint("Место сохранено. Выберите следующий объект.");
   } catch (error) {
     showMoveHint(error.detail);
   } finally {
     state.movePending = false;
+  }
+}
+
+/**
+ * Машину перетащили мышью на новое место.
+ *
+ * Место сохраняется на сервере сразу; если по открытому вызову ещё идёт
+ * подбор, он пересчитывается — от того, где стоит машина, зависит,
+ * успеет ли инженер её забрать.
+ */
+async function dropVehicle(vehicle, position, done) {
+  try {
+    await Api.moveVehicle(vehicle.id, { lat: position.lat, lon: position.lon });
+  } catch (error) {
+    // Отказ сервера: машина возвращается туда, где стояла.
+    done();
+    showToast(error.detail || "Не удалось переместить машину", true);
+    return;
+  }
+  showToast(`${vehicle.call_sign} перемещена`);
+  await refresh();
+  done();
+  if (isAssignable(state.selectedCall)) {
+    await selectCall(state.selectedCall, { keepView: true });
   }
 }
 

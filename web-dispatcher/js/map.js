@@ -66,6 +66,9 @@ class AirportMap {
       aircraft: createGroup("layer-aircraft"),
       vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
+      // Отметки начала и конца маршрута — поверх людей и бортов:
+      // иначе буква «Б» пряталась под силуэтом самолёта на стоянке.
+      routeEnds: createGroup("layer-route-ends"),
       // Слой редактора: точки и связи, которые администратор наносит
       // на карту. На рабочем экране диспетчера остаётся пустым.
       editor: createGroup("layer-editor"),
@@ -87,6 +90,19 @@ class AirportMap {
     this.onObjectClick = null;
     this.onGroundClick = null;
     this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
+
+    // Перетаскивание машины: щелчок выделяет её, затем её можно тянуть
+    // мышью. Колбэк получает машину и новое место в градусах.
+    this.onVehicleDrop = null;
+    this.onVehicleRefused = null;
+    this.selectedVehicleId = null;
+    this.vehicleDrag = null;
+    this.pendingVehicles = null;
+    // Перенесённая, но ещё не подтверждённая сервером машина: до ответа
+    // она рисуется на новом месте, а не прыгает назад по старым данным.
+    this.vehicleOverride = null;
+    this.lastVehicles = [];
+    this.setupVehicleDrag();
 
     this.tiles = null;
     // Следы перемещения: идентификатор сотрудника -> последние точки.
@@ -380,6 +396,15 @@ class AirportMap {
    * Две метки в одной точке только мешали бы.
    */
   drawVehicles(vehicles) {
+    // Пока машину тянут, опрос сервера не должен выдернуть её из-под
+    // курсора: свежий список дорисуется сразу после отпускания.
+    if (this.vehicleDrag) {
+      this.pendingVehicles = vehicles;
+      return;
+    }
+    this.pendingVehicles = null;
+    this.lastVehicles = vehicles;
+
     const layer = this.layers.vehicles;
     layer.replaceChildren();
 
@@ -387,7 +412,9 @@ class AirportMap {
       if (vehicle.status === "in_use") {
         continue;
       }
-      const position = this.projectLatLon(vehicle.lat, vehicle.lon);
+      const override =
+        this.vehicleOverride && this.vehicleOverride.id === vehicle.id ? this.vehicleOverride : vehicle;
+      const position = this.projectLatLon(override.lat, override.lon);
       const marker = this.createMarker(position.x, position.y);
 
       const shape = document.createElementNS(SVG_NS, "rect");
@@ -409,16 +436,190 @@ class AirportMap {
       label.textContent = vehicle.call_sign;
 
       marker.dataset.vehicleId = vehicle.id;
+      marker.classList.add("vehicle-marker");
+      if (vehicle.status === "free") {
+        marker.classList.add("is-movable");
+      }
+
+      // Кольцо выделения и увеличенная невидимая зона захвата: квадрат
+      // в десять пикселей мышью ловится плохо.
+      const ring = document.createElementNS(SVG_NS, "rect");
+      ring.setAttribute("x", -10);
+      ring.setAttribute("y", -10);
+      ring.setAttribute("width", 20);
+      ring.setAttribute("height", 20);
+      ring.setAttribute("rx", 5);
+      ring.setAttribute("class", "vehicle-select-ring");
+
+      const hit = document.createElementNS(SVG_NS, "circle");
+      hit.setAttribute("r", 13);
+      hit.setAttribute("class", "vehicle-hit");
+
+      if (vehicle.id === this.selectedVehicleId) {
+        marker.classList.add("is-selected");
+      }
+
+      marker.addEventListener("mousedown", (event) => this.startVehicleDrag(event, vehicle, marker));
       marker.addEventListener("click", (event) => {
-        if (!this.onObjectClick) return;
         event.stopPropagation();
-        this.onObjectClick("vehicle", vehicle, vehicle, event);
+        if (this.onObjectClick) {
+          this.onObjectClick("vehicle", vehicle, vehicle, event);
+          return;
+        }
+        // Щелчок, завершивший перетаскивание, выделение не переключает.
+        if (this.vehicleJustDropped) {
+          this.vehicleJustDropped = false;
+          return;
+        }
+        if (vehicle.status !== "free") {
+          if (this.onVehicleRefused) this.onVehicleRefused(vehicle);
+          return;
+        }
+        this.selectVehicle(this.selectedVehicleId === vehicle.id ? null : vehicle.id);
       });
-      marker.append(shape, label, title(vehicleTooltip(vehicle)));
+      marker.append(hit, ring, shape, label, title(vehicleTooltip(vehicle)));
       layer.append(marker);
     }
 
+    // Выделенная машина пропала из списка (уехала на вызов, списана) —
+    // выделение снимается, чтобы не тянуть то, чего нет.
+    if (
+      this.selectedVehicleId !== null &&
+      !vehicles.some((item) => item.id === this.selectedVehicleId && item.status === "free")
+    ) {
+      this.selectedVehicleId = null;
+    }
+
     this.updateMarkerScale();
+  }
+
+  /* --- Перетаскивание машины --- */
+
+  selectVehicle(vehicleId) {
+    this.selectedVehicleId = vehicleId;
+    for (const marker of this.layers.vehicles.children) {
+      marker.classList.toggle("is-selected", Number(marker.dataset.vehicleId) === vehicleId);
+    }
+    this.svg.classList.toggle("has-selected-vehicle", vehicleId !== null);
+  }
+
+  /**
+   * Нажатие на выделенную машину начинает перетаскивание.
+   *
+   * Карта при этом не панорамируется: событие дальше не идёт. Нажатие
+   * на невыделенную машину ничего не начинает — сначала её надо выбрать,
+   * иначе любое неловкое движение мышью при панорамировании сдвигало бы
+   * машины по перрону.
+   */
+  startVehicleDrag(event, vehicle, marker) {
+    if (event.button !== 0 || this.onObjectClick) {
+      return;
+    }
+    if (vehicle.id !== this.selectedVehicleId || vehicle.status !== "free") {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+    this.vehicleDrag = {
+      vehicle,
+      marker,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) },
+      moved: false,
+    };
+  }
+
+  setupVehicleDrag() {
+    window.addEventListener("mousemove", (event) => {
+      const drag = this.vehicleDrag;
+      if (!drag) {
+        return;
+      }
+      // Порог в несколько пикселей: дрожание руки при щелчке
+      // не должно превращаться в перенос машины.
+      if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) {
+        return;
+      }
+      drag.moved = true;
+      this.svg.classList.add("dragging-vehicle");
+      drag.marker.classList.add("is-dragging");
+      const point = this.toGraphCoords(event.clientX, event.clientY);
+      this.placeMarker(drag.marker, point.x, point.y);
+    });
+
+    window.addEventListener("mouseup", (event) => {
+      const drag = this.vehicleDrag;
+      if (!drag) {
+        return;
+      }
+      this.vehicleDrag = null;
+      this.svg.classList.remove("dragging-vehicle");
+      drag.marker.classList.remove("is-dragging");
+
+      if (drag.moved) {
+        this.vehicleJustDropped = true;
+        // Щелчок после отпускания может и не прийти (курсор ушёл с карты) —
+        // флаг не должен пережить этот жест.
+        setTimeout(() => { this.vehicleJustDropped = false; }, 0);
+        const point = this.toGraphCoords(event.clientX, event.clientY);
+        const position = this.unprojectXY(point.x, point.y);
+        this.vehicleOverride = { id: drag.vehicle.id, lat: position.lat, lon: position.lon };
+        if (this.onVehicleDrop) {
+          // done(true) — место сохранено и данные уже свежие;
+          // done(false) — сервер отказал, машина возвращается на прежнее место.
+          this.onVehicleDrop(drag.vehicle, position, () => {
+            this.vehicleOverride = null;
+            this.drawVehicles(this.pendingVehicles || this.lastVehicles);
+          });
+        }
+      }
+      if (this.pendingVehicles) {
+        this.drawVehicles(this.pendingVehicles);
+      }
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      const drag = this.vehicleDrag;
+      if (drag) {
+        // Esc во время переноса отменяет его.
+        this.vehicleDrag = null;
+        this.svg.classList.remove("dragging-vehicle");
+        drag.marker.classList.remove("is-dragging");
+        this.placeMarker(drag.marker, drag.origin.x, drag.origin.y);
+        if (this.pendingVehicles) this.drawVehicles(this.pendingVehicles);
+        return;
+      }
+      if (this.selectedVehicleId !== null) {
+        this.selectVehicle(null);
+      }
+    });
+
+    // Щелчок по пустому месту карты снимает выделение. Панорамирование
+    // считается не щелчком: иначе сдвиг карты сбрасывал бы выбор.
+    let down = null;
+    this.svg.addEventListener("mousedown", (event) => {
+      down = { x: event.clientX, y: event.clientY };
+    });
+    this.svg.addEventListener("click", (event) => {
+      if (this.selectedVehicleId === null || event.target.closest(".vehicle-marker")) {
+        return;
+      }
+      if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 4) {
+        return;
+      }
+      this.selectVehicle(null);
+    });
+  }
+
+  /** Переставляет значок в точку графа, сохраняя экранный размер. */
+  placeMarker(marker, x, y) {
+    marker.dataset.x = x;
+    marker.dataset.y = y;
+    marker.setAttribute("transform", `translate(${x} ${y}) scale(${this.markerScale})`);
   }
 
   /**
@@ -543,20 +744,81 @@ class AirportMap {
    * не отличил бы «идёт пешком» от «едет».
    */
   drawRoute(nodeIds, pickupNodeId) {
-    const layer = this.layers.route;
-    layer.replaceChildren();
+    this.clearRoute();
 
-    if (!nodeIds || nodeIds.length < 2) {
+    const known = (nodeIds || []).filter((id) => this.nodesById.has(id));
+    if (known.length === 0) {
+      return false;
+    }
+    // Сотрудник уже на стоянке: линии нет, но конец маршрута отмечен.
+    if (known.length === 1) {
+      this.appendRouteEnd(this.nodesById.get(known[0]), "finish", "Б", "Сотрудник уже у борта");
+      this.updateMarkerScale();
+      return true;
+    }
+
+    const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
+    if (split > 0 && split < known.length) {
+      this.appendRouteLine(known.slice(0, split + 1), "route route-walk");
+      this.appendRouteLine(known.slice(split), "route");
+    } else {
+      this.appendRouteLine(known, "route");
+    }
+
+    // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
+    // а силуэт борта на стоянке легко принять за обычный значок карты —
+    // без отметок было непонятно, откуда и куда идёт линия.
+    const first = this.nodesById.get(known[0]);
+    const last = this.nodesById.get(known[known.length - 1]);
+    if (split > 0 && split < known.length - 1) {
+      this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "М", "Здесь забрать машину");
+    }
+    this.appendRouteEnd(first, "start", "А", "Начало маршрута");
+    this.appendRouteEnd(last, "finish", "Б", "Конец маршрута — стоянка борта");
+    this.updateMarkerScale();
+    return true;
+  }
+
+  /**
+   * Маршрут, а если его нет — явная отметка «маршрут не построен»
+   * на стоянке вызова.
+   */
+  showRoute(nodeIds, pickupNodeId, standNodeId, missingText) {
+    if (!this.drawRoute(nodeIds, pickupNodeId) && standNodeId) {
+      this.drawRouteMissing(standNodeId, missingText);
+    }
+  }
+
+  /**
+   * Маршрут не построен: подсветка стоянки и подпись.
+   *
+   * Раньше в этом случае карта просто оставалась без линии, и на месте
+   * вызова виднелся только мелкий силуэт борта — диспетчер не понимал,
+   * маршрут ещё считается, не нужен или не нашёлся.
+   */
+  drawRouteMissing(standNodeId, text) {
+    this.clearRoute();
+
+    const node = this.nodesById.get(standNodeId);
+    if (!node) {
       return;
     }
 
-    const split = pickupNodeId ? nodeIds.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < nodeIds.length) {
-      this.appendRouteLine(nodeIds.slice(0, split + 1), "route route-walk");
-      this.appendRouteLine(nodeIds.slice(split), "route");
-      return;
-    }
-    this.appendRouteLine(nodeIds, "route");
+    const marker = this.createMarker(node.x, node.y);
+    marker.classList.add("route-missing");
+
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("r", 20);
+    ring.setAttribute("class", "route-missing-ring");
+
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("y", 38);
+    label.setAttribute("class", "route-missing-label");
+    label.textContent = text || "Маршрут не построен";
+
+    marker.append(ring, label, title(text || "Маршрут не построен"));
+    this.layers.routeEnds.append(marker);
+    this.updateMarkerScale();
   }
 
   /** Одна ломаная маршрута по вершинам графа. */
@@ -570,14 +832,49 @@ class AirportMap {
       return;
     }
 
+    // Тёмная подложка под линией: на спутниковом снимке синяя линия
+    // без окантовки сливалась с крышами и рулёжками.
+    const casing = document.createElementNS(SVG_NS, "polyline");
+    casing.setAttribute("points", points.join(" "));
+    casing.setAttribute("class", "route-casing");
+
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.join(" "));
     line.setAttribute("class", className);
-    this.layers.route.append(line);
+    this.layers.route.append(casing, line);
+  }
+
+  /** Отметка конца маршрута постоянного экранного размера с буквой внутри. */
+  appendRouteEnd(node, kind, letter, hint) {
+    if (!node) {
+      return;
+    }
+    const marker = this.createMarker(node.x, node.y);
+    marker.classList.add("route-end", `route-end-${kind}`);
+
+    if (kind === "finish") {
+      const halo = document.createElementNS(SVG_NS, "circle");
+      halo.setAttribute("r", 24);
+      halo.setAttribute("class", "route-end-halo");
+      marker.append(halo);
+    }
+
+    const disc = document.createElementNS(SVG_NS, "circle");
+    disc.setAttribute("r", kind === "pickup" ? 11 : 14);
+    disc.setAttribute("class", "route-end-disc");
+
+    const text = document.createElementNS(SVG_NS, "text");
+    text.setAttribute("y", 0.5);
+    text.setAttribute("class", "route-end-letter");
+    text.textContent = letter;
+
+    marker.append(disc, text, title(hint));
+    this.layers.routeEnds.append(marker);
   }
 
   clearRoute() {
     this.layers.route.replaceChildren();
+    this.layers.routeEnds.replaceChildren();
   }
 
   /**

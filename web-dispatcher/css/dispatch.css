@@ -451,6 +451,76 @@
   stroke-dasharray: 7 6;
 }
 
+/* Тёмная окантовка под линией маршрута — чтобы линия читалась на снимке. */
+.route-casing {
+  fill: none;
+  stroke: var(--bg-deep);
+  stroke-opacity: 0.85;
+  stroke-width: 7.5px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Отметки «А» (начало), «Б» (стоянка) и «М» (забрать машину). */
+.route-end { pointer-events: none; }
+
+.route-end-disc {
+  fill: var(--route);
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.route-end-finish .route-end-disc { fill: var(--danger-strong); }
+.route-end-pickup .route-end-disc { fill: var(--bg-deep); stroke: var(--route); }
+
+.route-end-halo {
+  fill: var(--danger);
+  opacity: 0.25;
+  animation: route-pulse 1.6s ease-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+.route-end-letter {
+  fill: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* Маршрут не построен: пунктирное кольцо вокруг стоянки и подпись. */
+.route-missing { pointer-events: none; }
+
+.route-missing-ring {
+  fill: var(--danger-soft);
+  stroke: var(--danger);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 4;
+}
+
+.route-missing-label {
+  fill: var(--danger-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-deep);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+@keyframes route-pulse {
+  0% { transform: scale(0.7); opacity: 0.45; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-end-halo { animation: none; }
+}
+
 .history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); }
 
 #call-actions {
@@ -472,6 +542,26 @@
 .vehicle.is-reserved {
   stroke: var(--warn);
 }
+
+/* Перетаскивание машины: свободную можно выбрать щелчком и тянуть. */
+.vehicle-hit { fill: transparent; }
+.vehicle-marker.is-movable { cursor: pointer; }
+.vehicle-marker.is-selected { cursor: grab; }
+.map.dragging-vehicle,
+.map.dragging-vehicle * { cursor: grabbing !important; }
+
+.vehicle-select-ring {
+  fill: var(--route-soft);
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  display: none;
+}
+
+.vehicle-marker.is-selected .vehicle-select-ring { display: inline; }
+.vehicle-marker.is-selected .vehicle { fill: var(--route); stroke: #fff; }
+.vehicle-marker.is-dragging { opacity: 0.85; }
+.vehicle-marker.is-dragging .vehicle-select-ring { stroke-dasharray: none; }
 
 .label-vehicle {
   fill: var(--route);
