@@ -133,8 +133,8 @@ const Api = {
   sendMessage: (text) => request("POST", "/api/me/message", { text }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
 
-  setShift: (employeeId, onShift) =>
-    request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift }),
+  setShift: (employeeId, onShift, extend = false) =>
+    request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift, extend }),
   // source — gps или simulation, fixAgeS — сколько секунд назад точка измерена.
   sendLocation: (employeeId, lat, lon, source, fixAgeS) =>
     request("POST", `/api/employees/${employeeId}/location`, {

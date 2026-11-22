@@ -42,6 +42,8 @@ class LoginResponse(BaseModel):
 class CurrentUserResponse(BaseModel):
     """Текущий пользователь и контекст его сессии."""
 
+    on_shift: bool = False
+    shift_ends_at: str | None = None
     login: str
     role: str
     full_name: str

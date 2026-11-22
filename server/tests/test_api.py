@@ -89,6 +89,51 @@ class ApiTestCase(unittest.TestCase):
         self.fail(f"борт {board_number} не найден в тестовых данных")
 
 
+class TestShiftContinuity(ApiTestCase):
+    def test_device_reconnect_extension_expiry_and_admin_removal(self):
+        from datetime import timedelta
+        from clock import utc_now
+        from database import SessionLocal
+        from models.employee import Employee
+        from models.user import AuthSession
+        from services.shifts import expire_shifts
+
+        token = self.login("sokolov", "engineer")
+        headers = auth_header(token)
+        def me():
+            response = self.client.get("/api/auth/me", headers=headers)
+            self.assertEqual(response.status_code, 200)
+            return response.json()
+
+        employee_id = me()["employee_id"]
+        path = f"/api/employees/{employee_id}"
+        with SessionLocal() as db:
+            self.assertGreater(db.get(AuthSession, token).expires_at, utc_now() + timedelta(days=365))
+            db.get(Employee, employee_id).shift_ends_at = utc_now() + timedelta(minutes=5)
+            db.commit()
+        before = me()
+        self.assertTrue(before["on_shift"])
+        response = self.client.post(path + "/shift", headers=headers,
+                                    json={"on_shift": True, "extend": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(me()["shift_ends_at"], before["shift_ends_at"])
+        admin = auth_header(self.login("admin", "admin"))
+        self.assertEqual(self.client.patch(path, headers=admin, json={"status": "offline"}).status_code, 200)
+        self.assertFalse(me()["on_shift"])
+        self.client.post(path + "/shift", headers=headers, json={"on_shift": True})
+        with SessionLocal() as db:
+            db.get(Employee, employee_id).shift_ends_at = utc_now() - timedelta(seconds=1)
+            db.flush()
+            expire_shifts(db)
+            db.commit()
+        self.assertFalse(me()["on_shift"])
+        self.client.post(path + "/shift", headers=headers, json={"on_shift": True})
+        self.assertEqual(self.client.post("/api/auth/logout", headers=headers).status_code, 200)
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Employee, employee_id).status, "offline")
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).status_code, 401)
+
+
 class TestAuth(ApiTestCase):
     """Вход, контекст сессии и разграничение доступа."""
 

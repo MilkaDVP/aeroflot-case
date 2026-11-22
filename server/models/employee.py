@@ -37,6 +37,7 @@ class Employee(Base):
     # [{"category": "B1.1", "aircraft_types": ["A320"], "valid_until": "2027-03-15"}]
     qualifications: Mapped[list] = mapped_column(JSON, default=list)
 
+    shift_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shift: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default=STATUS_OFFLINE)
 

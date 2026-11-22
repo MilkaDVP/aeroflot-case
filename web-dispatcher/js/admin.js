@@ -592,13 +592,13 @@ function startEmployeeEdit(employee) {
   el("employee-login-row").hidden = true;
   // Занятого сотрудника нельзя «снять со смены» правкой карточки: у него
   // открытый вызов, и освобождать его должен диспетчер снятием вызова.
-  el("emp-on-shift").disabled = isBusyStatus(employee.status);
+  el("emp-on-shift").disabled = false;
   setNote("employee-note", editHint(employee), "");
 }
 
 function editHint(employee) {
   if (isBusyStatus(employee.status)) {
-    return "Сотрудник занят на вызове: снять его со смены здесь нельзя";
+    return "При снятии со смены вызов вернётся к подбору";
   }
   return "Меняются квалификация, смена, место и присутствие на смене";
 }
@@ -665,7 +665,7 @@ async function saveEmployeeEdit(payload) {
     shift: payload.shift,
     qualifications: payload.qualifications,
   };
-  if (!isBusyStatus(employee.status)) {
+  if (!payload.on_shift || !isBusyStatus(employee.status)) {
     changes.status = payload.on_shift ? "free" : "offline";
   }
 

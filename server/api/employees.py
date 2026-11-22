@@ -29,6 +29,7 @@ from constants import (
 from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
+from services.shifts import end_shift, start_clock
 from services.drill import is_enabled, reroute_after_move
 from models.employee import Employee
 from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
@@ -182,6 +183,9 @@ def create_employee(
         employee.location_at = utc_now()
     db.add(employee)
 
+    if login and payload.on_shift:
+        start_clock(employee)
+
     if login:
         # Учётная запись создаётся вместе с карточкой и привязывается к ней:
         # по этой связи приложение инженера находит «свой» вызов.
@@ -236,6 +240,13 @@ def update_employee(
         changes["qualifications"] = [
             item.model_dump() for item in payload.qualifications
         ]
+
+    if changes.get("status") == STATUS_OFFLINE:
+        if context.user.role != ROLE_ADMIN and working_call_of(db, employee):
+            raise HTTPException(409, ERROR_LEAVE_WITH_CALL)
+        end_shift(db, employee, "Сотрудник снят со смены")
+    elif employee.status == STATUS_OFFLINE and changes.get("status") == STATUS_FREE:
+        start_clock(employee)
 
     for field, value in changes.items():
         if value is not None:
@@ -307,7 +318,12 @@ def toggle_shift(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_SHIFT)
         employee.shift = payload.shift
 
+    if payload.extend and (not payload.on_shift or employee.status == STATUS_OFFLINE):
+        raise HTTPException(409, "Смена уже завершена")
+    if payload.on_shift and (not employee.shift_ends_at or payload.extend):
+        start_clock(employee)
     if not payload.on_shift:
+        employee.shift_ends_at = None
         # Уходя со смены, инженер оставляет машину там, где стоит: иначе
         # она числилась бы за человеком, которого на перроне нет.
         release_vehicle(employee)
