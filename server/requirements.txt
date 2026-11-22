@@ -7,6 +7,9 @@ starlette>=1.6
 uvicorn[standard]>=0.30
 sqlalchemy>=2.0
 pydantic>=2.7
+# База часовых поясов IANA: смена определяется по местному времени
+# аэропорта, а в Windows и в тонких образах своей базы поясов нет.
+tzdata>=2024.1
 
 # Только для тестов: TestClient из FastAPI работает поверх httpx.
 httpx>=0.27

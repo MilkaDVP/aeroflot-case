@@ -16,7 +16,7 @@ from constants import VEHICLE_FREE
 from database import get_db, get_dispatch_db
 from models.call import ACTIVE_CALL_STATUSES, Call
 from schemas.employee import LocationRequest
-from models.user import DISPATCH_ROLES, ROLE_ADMIN
+from models.user import DISPATCH_ROLES, ROLE_LOCAL_ADMIN
 from models.vehicle import Vehicle
 from schemas.vehicle import VehicleCreateRequest, VehicleResponse
 
@@ -69,7 +69,7 @@ def list_vehicles(
 def create_vehicle(
     payload: VehicleCreateRequest,
     db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     """
     Заводит машину в парке текущего аэропорта.
@@ -112,7 +112,7 @@ def create_vehicle(
 def delete_vehicle(
     vehicle_id: int,
     db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     """
     Убирает машину из парка.

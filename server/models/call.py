@@ -9,7 +9,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from clock import utc_now
@@ -148,7 +148,20 @@ class Call(Base):
     # и своя очередь, и вся эта логика уже работает для вызова целиком.
     parent_call_id: Mapped[int | None] = mapped_column(ForeignKey("calls.id"), nullable=True)
 
+    # Захват вызова диспетчером (services/claim.py): кто разбирает вызов
+    # и когда последний раз подтвердил, что всё ещё разбирает. Внешнего
+    # ключа нет по той же причине, что у типа неисправности: в SQLite его
+    # не добавить к существующей таблице без её пересоздания.
+    claimed_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     aircraft = relationship("Aircraft", lazy="selectin")
+    claimed_by = relationship(
+        "User",
+        primaryjoin="foreign(Call.claimed_by_user_id) == User.id",
+        viewonly=True,
+        lazy="selectin",
+    )
     vehicle = relationship("Vehicle", lazy="selectin")
     # Тип неисправности по коду. Внешнего ключа в схеме нет: таблица вызовов
     # старше справочника, а в SQLite ключ к существующей таблице без её

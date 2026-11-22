@@ -171,7 +171,7 @@ class TestInbox(ReportCase):
 
     def test_чужой_аэропорт_сообщение_не_видит(self):
         self.report()
-        domodedovo = self.login("dispatcher", "dispatcher", airport="UUDD")
+        domodedovo = self.login("dispatcher_uudd", "dispatcher", airport="UUDD")
         self.assertEqual(self.inbox(domodedovo), [])
 
     def test_инженеру_ящик_недоступен(self):

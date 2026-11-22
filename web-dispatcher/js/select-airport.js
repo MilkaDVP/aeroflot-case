@@ -14,6 +14,10 @@ const errorBox = document.getElementById("error");
 const greeting = document.getElementById("greeting");
 
 const selection = { airport: null, shift: null };
+const shiftHint = document.getElementById("shift-hint");
+let airportList = [];
+
+const SHIFT_NAMES = { day: "дневная", night: "ночная" };
 
 // Без токена дальше идти незачем: init() всё равно упал бы на первом
 // запросе, а пользователь увидел бы ошибку вместо экрана входа.
@@ -29,27 +33,20 @@ async function init() {
     Session.user = user;
     greeting.textContent = `${user.full_name} — ${roleTitle(user.role)}`;
 
+    airportList = user.airports;
     renderAirports(user.airports);
-    document.getElementById("admin-link-row").hidden = user.role !== "admin";
+    document.getElementById("admin-link-row").hidden = !roleAtLeast(user.role, "shift_supervisor");
 
     // Аэропорт один — шаг выбора не нужен, остаётся только смена.
     if (user.airports.length === 1) {
       selection.airport = user.airports[0].icao;
       airportSection.hidden = true;
+      applyAutoShift(user.airports[0]);
     }
     refreshContinue();
   } catch (error) {
     showError(error.detail);
   }
-}
-
-function roleTitle(role) {
-  const titles = {
-    dispatcher: "диспетчер",
-    shift_supervisor: "начальник смены",
-    admin: "администратор",
-  };
-  return titles[role] || role;
 }
 
 function renderAirports(airports) {
@@ -68,6 +65,7 @@ function renderAirports(airports) {
     button.addEventListener("click", () => {
       selection.airport = airport.icao;
       markSelected(airportsBox, button);
+      applyAutoShift(airport);
       refreshContinue();
     });
 
@@ -79,8 +77,35 @@ for (const button of shiftsBox.querySelectorAll("[data-shift]")) {
   button.addEventListener("click", () => {
     selection.shift = button.dataset.shift;
     markSelected(shiftsBox, button);
+    describeShift();
     refreshContinue();
   });
+}
+
+/**
+ * Смена по местному времени выбранного аэропорта. Её предлагает сервер
+ * по расписанию, которое задают начальник смены и администраторы.
+ */
+function applyAutoShift(airport) {
+  if (!airport || !airport.current_shift) return;
+  selection.shift = airport.current_shift;
+  markSelected(shiftsBox, shiftsBox.querySelector(`[data-shift="${airport.current_shift}"]`));
+  describeShift();
+}
+
+function describeShift() {
+  const airport = airportList.find((item) => item.icao === selection.airport);
+  if (!airport || !airport.current_shift) {
+    shiftHint.hidden = true;
+    return;
+  }
+  const now = `Сейчас в ${airport.icao} ${airport.local_time} (${airport.timezone}) — ` +
+    `идёт ${SHIFT_NAMES[airport.current_shift]} смена; дневная ${airport.day_start}–${airport.day_end}.`;
+  shiftHint.textContent = selection.shift === airport.current_shift
+    ? `${now} Выбрана автоматически, можно сменить вручную.`
+    : `${now} Вы выбрали ${SHIFT_NAMES[selection.shift]} вручную.`;
+  shiftHint.classList.toggle("is-manual", selection.shift !== airport.current_shift);
+  shiftHint.hidden = false;
 }
 
 function markSelected(container, selected) {

@@ -1,9 +1,11 @@
 """
 Тесты второго аэропорта: выбор контекста и разделение данных.
 
-Аэропортов два не для красоты: §5 требует шага выбора аэропорта, а при
-единственном аэропорте этот экран никогда не показывается. Здесь же
-проверяется главное правило §5 — данные разных аэропортов не смешиваются.
+Каждая учётная запись, кроме технического администратора, привязана
+ровно к одному аэропорту: в Домодедово работает свой диспетчер. Шаг выбора
+аэропорта из §5 виден техническому администратору — ему доступны все.
+Здесь же проверяется главное правило §5 — данные разных аэропортов
+не смешиваются.
 
 Домодедово: пешком в регламент попадают 2 стоянки из 73, поэтому
 спецтранспорт решает всё — это отдельный, непохожий на Шереметьево
@@ -23,18 +25,14 @@ SVO_BOARDS = {"VP-BZQ", "VP-BES", "RA-89001", "VP-BKB", "VP-BGB", "VQ-BQX"}
 
 @unittest.skipUnless(HAS_DME, "нет data/airports/UUDD.json — выполните выгрузку")
 class TestMultiAirport(ApiTestCase):
-    """Диспетчер работает то в одном аэропорту, то в другом."""
+    """Два аэропорта: у каждого свои люди, и данные не смешиваются."""
 
     def setUp(self):
         self.reset_database()
 
-    def in_airport(self, icao, login="dispatcher"):
-        """Вход и выбор аэропорта как контекста сессии."""
-        return self.login(login, login) if icao == "UUEE" else self.login_to(icao, login)
-
-    def login_to(self, icao, login):
+    def login_to(self, icao, login="dispatcher_uudd", password="dispatcher"):
         response = self.client.post(
-            "/api/auth/login", json={"login": login, "password": login}
+            "/api/auth/login", json={"login": login, "password": password}
         )
         token = response.json()["token"]
         chosen = self.client.post(
@@ -52,14 +50,29 @@ class TestMultiAirport(ApiTestCase):
 
     # --- Контекст ---
 
-    def test_диспетчер_видит_оба_аэропорта(self):
-        token = self.login_to("UUDD", "dispatcher")
+    def test_диспетчер_видит_только_свой_аэропорт(self):
+        token = self.login_to("UUDD")
+        me = self.get(token, "/api/auth/me")
+        self.assertEqual([a["icao"] for a in me["airports"]], ["UUDD"])
+        self.assertEqual(me["airport_icao"], "UUDD")
+
+    def test_чужой_аэропорт_выбрать_нельзя(self):
+        token = self.login("dispatcher", "dispatcher")
+        response = self.client.post(
+            "/api/session/airport",
+            json={"airport_icao": "UUDD", "shift": "day"},
+            headers=auth_header(token),
+        )
+        self.assertEqual(response.status_code, 403, response.text)
+
+    def test_технический_администратор_видит_все_аэропорты(self):
+        token = self.login_to("UUDD", "admin", "admin")
         me = self.get(token, "/api/auth/me")
         self.assertEqual({a["icao"] for a in me["airports"]}, {"UUEE", "UUDD"})
         self.assertEqual(me["airport_icao"], "UUDD")
 
     def test_граф_второго_аэропорта_отдаётся(self):
-        token = self.login_to("UUDD", "dispatcher")
+        token = self.login_to("UUDD")
         graph = self.get(token, "/api/airports/UUDD")
         self.assertGreater(len(graph["nodes"]), 500)
         tech = [node for node in graph["nodes"] if node["type"] == "tech_center"]
@@ -68,7 +81,7 @@ class TestMultiAirport(ApiTestCase):
     # --- Разделение данных ---
 
     def test_сотрудники_не_смешиваются(self):
-        dme = self.get(self.login_to("UUDD", "dispatcher"), "/api/employees")
+        dme = self.get(self.login_to("UUDD"), "/api/employees")
         svo = self.get(self.login("dispatcher", "dispatcher"), "/api/employees")
 
         self.assertTrue(dme)
@@ -78,7 +91,7 @@ class TestMultiAirport(ApiTestCase):
         self.assertNotIn("Соколов А. В.", [item["full_name"] for item in dme])
 
     def test_борта_и_машины_не_смешиваются(self):
-        token = self.login_to("UUDD", "dispatcher")
+        token = self.login_to("UUDD")
         boards = {item["board_number"] for item in self.get(token, "/api/aircraft")}
         vehicles = {item["call_sign"] for item in self.get(token, "/api/vehicles")}
 
@@ -89,7 +102,7 @@ class TestMultiAirport(ApiTestCase):
     def test_вызовы_не_смешиваются(self):
         dme_boards = {
             call["board_number"]
-            for call in self.get(self.login_to("UUDD", "dispatcher"), "/api/calls")
+            for call in self.get(self.login_to("UUDD"), "/api/calls")
         }
         self.assertTrue(dme_boards)
         self.assertFalse(dme_boards & SVO_BOARDS)
@@ -100,7 +113,7 @@ class TestMultiAirport(ApiTestCase):
         svo_token = self.login("dispatcher", "dispatcher")
         svo_call = self.get(svo_token, "/api/calls")[0]
 
-        dme_token = self.login_to("UUDD", "dispatcher")
+        dme_token = self.login_to("UUDD")
         response = self.client.post(
             f"/api/calls/{svo_call['id']}/suggest", headers=auth_header(dme_token)
         )
@@ -109,7 +122,7 @@ class TestMultiAirport(ApiTestCase):
     # --- Алгоритм на втором графе ---
 
     def test_подбор_в_домодедово_идёт_через_машины(self):
-        token = self.login_to("UUDD", "dispatcher")
+        token = self.login_to("UUDD")
         call = next(
             item for item in self.get(token, "/api/calls") if item["board_number"] == "VQ-BDU"
         )

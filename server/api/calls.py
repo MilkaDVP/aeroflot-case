@@ -30,17 +30,19 @@ from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
 from models.employee import Employee
-from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_SHIFT_SUPERVISOR
+from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
     CallCreateRequest,
     CallResponse,
     CallStatusRequest,
+    ClaimRequest,
     SuggestResponse,
     UnassignRequest,
     MessageRequest,
     UrgencyRequest,
 )
+from services import claim as claims
 from services import mentor
 from services.assignment import (
     advance_after_close,
@@ -113,7 +115,10 @@ ERROR_UNASSIGNED_REASON = "снят с этого вызова: {reason}"
 # Кто вправе назначить не того, кого предложила система, и поставить вызов
 # в очередь к занятому. Обычный диспетчер такого права не имеет — это прямо
 # следует из разграничения ролей в ТЗ.
-OVERRIDE_ROLES = (ROLE_SHIFT_SUPERVISOR, ROLE_ADMIN)
+def can_override(context):
+    """Переопределять решение системы вправе начальник смены и старше."""
+    return role_at_least(context.user.role, ROLE_SHIFT_SUPERVISOR)
+
 
 # Вызов можно назначить, пока им никто не занят.
 ASSIGNABLE_STATUSES = (CALL_NEW, CALL_SUGGESTED)
@@ -186,6 +191,7 @@ def to_response(call, db=None, now=None):
         parent_call_id=call.parent_call_id,
         support=support.support_summary(call) if call.parent_call_id is None else [],
         messages=support.messages_of(call),
+        **claims.summary(call, now),
     )
 
 
@@ -378,6 +384,9 @@ def create_call(
 
     call = new_call(db, aircraft, defect, payload.description)
     call.urgent = payload.urgent
+    # Кто зарегистрировал вызов, тот его и разбирает: он открывается у него
+    # сразу, и второй диспетчер не должен перехватить его на полпути.
+    claims.take(db, call, context.user)
     db.commit()
     return to_response(call, db)
 
@@ -423,12 +432,18 @@ def suggest_employee(
     call = load_call(db, context, call_id)
     result = run_suggestion(db, context, call)
 
+    # Вызов разбирает другой диспетчер: подбор можно посмотреть, но
+    # записывать предложение в чужой вызов нельзя.
+    if claims.held_by_other(call, context.user):
+        return SuggestResponse(**result.as_dict())
+
     # Предложение фиксируется только пока вызов не назначен. После
     # назначения поле хранит историю: кого система предлагала в момент
     # решения. Повторный подбор (диспетчер просто открыл вызов в списке)
     # переписал бы её, и назначение задним числом стало бы выглядеть
     # как переопределение — или наоборот.
     if call.status in ASSIGNABLE_STATUSES:
+        claims.ensure_can_change(db, call, context.user)
         call.suggested_employee_id = result.best.employee["id"] if result.best else None
         if call.status == CALL_NEW:
             call.status = CALL_SUGGESTED
@@ -458,7 +473,10 @@ def assign_employee(
     call = load_call(db, context, call_id)
     if call.status not in ASSIGNABLE_STATUSES:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_ALREADY_ASSIGNED)
+    claims.ensure_can_change(db, call, context.user)
     perform_assign(db, context, call, payload)
+    # Назначенный вызов больше никто не разбирает.
+    claims.clear(call)
     db.commit()
     return to_response(call, db)
 
@@ -505,7 +523,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
     # борт. Именно так раньше получался второй «текущий» вызов у одного
     # инженера, и первый из них терялся.
     if is_busy(db, employee):
-        if context.user.role not in OVERRIDE_ROLES:
+        if not can_override(context):
             raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_QUEUE_FORBIDDEN)
         if not payload.override_reason:
             raise HTTPException(
@@ -525,7 +543,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_OVERRIDE_NEEDS_REASON
             )
-        if context.user.role not in OVERRIDE_ROLES:
+        if not can_override(context):
             raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_OVERRIDE_FORBIDDEN)
 
     plan, pickup_vehicle = plan_route(
@@ -653,7 +671,42 @@ def set_urgency(
 ):
     """Диспетчер отмечает вызов срочным или снимает отметку."""
     call = load_call(db, context, call_id)
+    claims.ensure_can_change(db, call, context.user)
     call.urgent = payload.urgent
+    db.commit()
+    return to_response(call, db)
+
+
+@router.post("/{call_id}/claim", response_model=CallResponse, summary="Взять в работу")
+def claim_call(
+    call_id: int,
+    payload: ClaimRequest | None = None,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    """
+    Диспетчер берёт вызов в работу — или подтверждает, что всё ещё
+    разбирает его (клиент повторяет запрос раз в полминуты).
+
+    Пока вызов в работе у одного, остальные видят, кто им занят, но
+    назначить или изменить его не могут. Начальник смены и старше
+    забирают чужой вызов флагом takeover.
+    """
+    call = load_call(db, context, call_id)
+    claims.claim(db, call, context.user, takeover=bool(payload and payload.takeover))
+    db.commit()
+    return to_response(call, db)
+
+
+@router.post("/{call_id}/release", response_model=CallResponse, summary="Отпустить")
+def release_call(
+    call_id: int,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    """Диспетчер отпускает свой вызов — его может взять другой."""
+    call = load_call(db, context, call_id)
+    claims.release(call, context.user)
     db.commit()
     return to_response(call, db)
 
@@ -740,6 +793,8 @@ def update_call_status(
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_CLOSED_CALL)
 
     if payload.status == CALL_CANCELLED:
+        claims.ensure_can_change(db, call, context.user)
+        claims.clear(call)
         root = support.root_of(call)
         now = utc_now()
         for item in [root, *support.support_calls(root)]:

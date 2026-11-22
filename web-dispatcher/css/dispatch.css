@@ -275,6 +275,25 @@
   color: var(--text);
 }
 
+/* Вызов разбирает другой диспетчер — карточка приглушена. */
+.call-who.is-claimed { color: var(--busy); }
+.call-who.is-claimed-mine { color: var(--route); }
+.call.is-claimed-other { opacity: 0.7; }
+.call.is-claimed-other.selected { opacity: 1; }
+
+.claim-notice {
+  padding: var(--gap);
+  border: 1px solid var(--busy);
+  border-radius: var(--radius-lg);
+  background: var(--busy-soft);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.claim-notice b { color: var(--busy); }
+.claim-notice .muted { color: var(--text-muted); font-size: var(--fs-sm); }
+.claim-notice button { margin-top: var(--gap-sm); }
+
 .call-who.is-queued {
   color: var(--warn);
 }
@@ -1746,3 +1765,6 @@
   font-size: var(--fs-sm);
   color: var(--warn);
 }
+
+/* Смена сессии не совпадает с идущей по часам аэропорта. */
+#ctx-shift.is-off-schedule { color: var(--warn); }

@@ -119,3 +119,6 @@
   justify-content: center;
   text-align: center;
 }
+
+/* Смена выбрана вручную, не по часам аэропорта. */
+.auth-hint.is-manual { color: var(--warn); }

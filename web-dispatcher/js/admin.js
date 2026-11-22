@@ -18,7 +18,31 @@ const state = {
   graph: null,
   // Карточка, открытая на правку; null — форма работает на регистрацию.
   editingEmployee: null,
+  // Учётная запись, открытая на правку.
+  editingUser: null,
 };
+
+/*
+ * Что видно на экране по ролям:
+ *   начальник смены — учётные записи (только сеансы) и сотрудники
+ *                     (статус, смена, место);
+ *   администратор аэропорта — плюс заведение учётных записей, полная
+ *                     правка сотрудников, машины и борта своего аэропорта;
+ *   технический администратор — плюс аэропорты системы и любой аэропорт.
+ */
+const TAB_MIN_ROLE = {
+  airports: "admin",
+  users: "shift_supervisor",
+  employees: "shift_supervisor",
+  shifts: "shift_supervisor",
+  vehicles: "local_admin",
+  aircraft: "local_admin",
+};
+
+/** Начальник смены правит у сотрудника только статус, смену и место. */
+function isSupervisorOnly() {
+  return !roleAtLeast(state.user.role, "local_admin");
+}
 
 let editorMap = null;
 let editor = null;
@@ -40,16 +64,29 @@ async function start() {
     return;
   }
 
-  if (state.user.role !== "admin") {
-    // Экран доступен только администратору: сервер и так откажет,
+  if (!roleAtLeast(state.user.role, "shift_supervisor")) {
+    // Экран доступен начальнику смены и старше: сервер и так откажет,
     // но показывать заведомо неработающие формы незачем.
     window.location.href = "select-airport.html";
     return;
   }
 
-  el("ctx-user").textContent = state.user.full_name;
+  el("ctx-user").textContent = `${state.user.full_name} · ${roleTitle(state.user.role)}`;
   fillAirportSwitch();
   bindEvents();
+
+  for (const button of document.querySelectorAll("#tabs button")) {
+    const minimum = TAB_MIN_ROLE[button.dataset.tab];
+    button.hidden = minimum === "admin" ? state.user.role !== "admin" : !roleAtLeast(state.user.role, minimum);
+  }
+
+  // Аэропорты системы заводит только технический администратор.
+  // Остальные работают в своём аэропорту.
+  if (state.user.role !== "admin") {
+    el("ctx-airport").disabled = true;
+    showTab(isSupervisorOnly() ? "employees" : "users");
+    return;
+  }
   await loadAirports();
 }
 
@@ -122,6 +159,10 @@ function bindEvents() {
   el("create-form").addEventListener("submit", onCreateSubmit);
   el("employee-form").addEventListener("submit", onEmployeeSubmit);
   el("employee-cancel").addEventListener("click", cancelEmployeeEdit);
+  el("user-form").addEventListener("submit", onUserSubmit);
+  el("user-cancel").addEventListener("click", cancelUserEdit);
+  el("user-role").addEventListener("change", syncUserAirport);
+  el("shifts-form").addEventListener("submit", onShiftsSubmit);
   el("vehicle-form").addEventListener("submit", onVehicleSubmit);
   el("aircraft-form").addEventListener("submit", onAircraftSubmit);
 
@@ -162,12 +203,18 @@ function showTab(name) {
     button.classList.toggle("active", button.dataset.tab === name);
   }
   el("page-airports").hidden = name !== "airports";
+  el("page-users").hidden = name !== "users";
+  el("page-shifts").hidden = name !== "shifts";
   el("page-employees").hidden = name !== "employees";
   el("page-vehicles").hidden = name !== "vehicles";
   el("page-aircraft").hidden = name !== "aircraft";
   el("page-editor").hidden = true;
 
-  if (name === "employees") {
+  if (name === "users") {
+    loadUsers();
+  } else if (name === "shifts") {
+    loadShifts();
+  } else if (name === "employees") {
     loadEmployees();
   } else if (name === "vehicles") {
     loadVehicles();
@@ -489,6 +536,273 @@ function clearGraph() {
   }
 }
 
+/* --- Учётные записи --- */
+
+// Роли в порядке старшинства — для выбора в форме.
+const ACCOUNT_ROLES = ["admin", "local_admin", "shift_supervisor", "dispatcher"];
+
+/** Роли, которые текущий пользователь вправе назначать: ниже своей. */
+function assignableRoles() {
+  const own = state.user.role;
+  if (own === "admin") return ACCOUNT_ROLES;
+  return ACCOUNT_ROLES.filter((role) => (ROLE_RANK[role] || 0) < (ROLE_RANK[own] || 0));
+}
+
+function canManageAccounts() {
+  return roleAtLeast(state.user.role, "local_admin");
+}
+
+async function loadUsers() {
+  el("users-scope").textContent =
+    state.user.role === "admin" ? "· вся система" : `· ${state.user.airport_icao || "—"}`;
+  el("user-form-card").hidden = !canManageAccounts();
+  if (canManageAccounts() && state.editingUser === null) {
+    fillUserForm();
+  }
+  try {
+    renderUsers(await Api.users());
+  } catch (error) {
+    el("users-list").innerHTML = `<div class="error">${escapeHtml(error.detail)}</div>`;
+  }
+}
+
+function fillUserForm() {
+  const roles = el("user-role");
+  const current = roles.value;
+  roles.replaceChildren();
+  for (const role of assignableRoles()) {
+    const option = document.createElement("option");
+    option.value = role;
+    option.textContent = roleTitle(role);
+    roles.append(option);
+  }
+  roles.value = assignableRoles().includes(current) ? current : "dispatcher";
+
+  // Аэропорт выбирает только технический администратор; остальные
+  // заводят людей в своём.
+  const airports = el("user-airport");
+  airports.replaceChildren();
+  for (const airport of state.user.airports || []) {
+    const option = document.createElement("option");
+    option.value = airport.icao;
+    option.textContent = `${airport.icao} · ${airport.name}`;
+    airports.append(option);
+  }
+  airports.value = state.user.airport_icao || airports.value;
+  airports.disabled = state.user.role !== "admin";
+  syncUserAirport();
+}
+
+/** Технический администратор не привязан к аэропорту — поле не нужно. */
+function syncUserAirport() {
+  el("user-airport-box").hidden = el("user-role").value === "admin" || state.editingUser !== null;
+}
+
+function renderUsers(users) {
+  const container = el("users-list");
+  container.replaceChildren();
+  if (!users.length) {
+    container.innerHTML = '<div class="empty">Учётных записей нет</div>';
+    return;
+  }
+
+  for (const user of users) {
+    const row = document.createElement("div");
+    row.className = "admin-row-item";
+    const where = user.airport_icao || "все аэропорты";
+    row.innerHTML = `
+      <div class="item-main">
+        <span class="item-title">
+          <span class="online-dot ${user.online ? "is-online" : ""}"
+                title="${user.online ? "в системе" : "не в системе"}"></span>
+          ${escapeHtml(user.full_name)}
+        </span>
+        <span class="item-sub">${escapeHtml(user.login)} · ${escapeHtml(where)}</span>
+      </div>
+      <div class="item-meta">
+        <span class="badge role-badge is-${escapeHtml(user.role)}">${escapeHtml(roleTitle(user.role))}</span>
+      </div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    if (user.can_logout) {
+      actions.append(actionButton("Завершить сеанс", "", () => logoutAccount(user)));
+    }
+    if (user.can_edit && canManageAccounts()) {
+      actions.append(actionButton("Изменить", "", () => startUserEdit(user)));
+      actions.append(actionButton("Удалить", "danger", () => removeAccount(user)));
+    }
+    row.append(actions);
+    container.append(row);
+  }
+}
+
+function actionButton(text, className, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  if (className) button.className = className;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+async function logoutAccount(user) {
+  if (!window.confirm(`Завершить сеанс: ${user.full_name}? Ему придётся войти заново.`)) return;
+  try {
+    await Api.logoutUser(user.id);
+    await loadUsers();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+async function removeAccount(user) {
+  const engineerNote =
+    user.role === "engineer" ? "\nКарточка сотрудника останется — удаляется только вход." : "";
+  if (!window.confirm(`Удалить учётную запись ${user.login} (${user.full_name})?${engineerNote}`)) return;
+  try {
+    await Api.deleteUser(user.id);
+    if (state.editingUser?.id === user.id) cancelUserEdit();
+    await loadUsers();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+/**
+ * Правка учётной записи в той же форме. Логин не меняется — по нему
+ * человека знают коллеги; пароль необязателен: пустой — прежний.
+ */
+function startUserEdit(user) {
+  state.editingUser = user;
+  fillUserForm();
+  el("user-name").value = user.full_name;
+  el("user-login").value = user.login;
+  el("user-login-row").hidden = true;
+  el("user-login").required = false;
+  el("user-password").value = "";
+  el("user-password").required = false;
+  el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+
+  // Роль инженера меняется только вместе с карточкой — здесь её не трогаем.
+  const roleSelect = el("user-role");
+  if (user.role === "engineer") {
+    roleSelect.replaceChildren(new Option(roleTitle("engineer"), "engineer"));
+    roleSelect.disabled = true;
+  } else {
+    roleSelect.value = user.role;
+  }
+  syncUserAirport();
+
+  el("user-form-title").textContent = `Изменить: ${user.login}`;
+  el("user-submit").textContent = "Сохранить";
+  el("user-cancel").hidden = false;
+  el("user-note").hidden = true;
+}
+
+function cancelUserEdit() {
+  state.editingUser = null;
+  el("user-form").reset();
+  el("user-login-row").hidden = false;
+  el("user-login").required = true;
+  el("user-password").required = true;
+  el("user-password-label").textContent = "Пароль";
+  el("user-role").disabled = false;
+  el("user-form-title").textContent = "Завести учётную запись";
+  el("user-submit").textContent = "Завести";
+  el("user-cancel").hidden = true;
+  fillUserForm();
+}
+
+async function onUserSubmit(event) {
+  event.preventDefault();
+  const editing = state.editingUser;
+  el("user-submit").disabled = true;
+  try {
+    if (editing) {
+      const changes = { full_name: el("user-name").value.trim() };
+      if (el("user-password").value) changes.password = el("user-password").value;
+      if (!el("user-role").disabled && el("user-role").value !== editing.role) {
+        changes.role = el("user-role").value;
+      }
+      const updated = await Api.updateUser(editing.id, changes);
+      cancelUserEdit();
+      setNote("user-note", `${updated.login}: изменения сохранены`, "is-ok");
+    } else {
+      const role = el("user-role").value;
+      const payload = {
+        login: el("user-login").value.trim(),
+        password: el("user-password").value,
+        full_name: el("user-name").value.trim(),
+        role,
+      };
+      if (role !== "admin") payload.airport_icao = el("user-airport").value;
+      const created = await Api.createUser(payload);
+      el("user-form").reset();
+      fillUserForm();
+      const where = created.airport_icao ? `, аэропорт ${created.airport_icao}` : "";
+      setNote(
+        "user-note",
+        `${created.full_name} — ${roleTitle(created.role)}${where}. Логин: ${created.login}`,
+        "is-ok"
+      );
+    }
+    await loadUsers();
+  } catch (error) {
+    setNote("user-note", error.detail, "is-error");
+  } finally {
+    el("user-submit").disabled = false;
+  }
+}
+
+/* --- Расписание смен --- */
+
+const SHIFT_NAMES = { day: "дневная", night: "ночная" };
+
+function sessionAirport() {
+  return (state.user.airports || []).find((item) => item.icao === state.user.airport_icao) || null;
+}
+
+function loadShifts() {
+  const airport = sessionAirport();
+  el("shifts-airport").textContent = airport ? airport.icao : "—";
+  el("shifts-form").hidden = !airport;
+  if (!airport) {
+    setNote("shifts-note", "Выберите аэропорт в шапке", "");
+    return;
+  }
+  el("shift-tz").value = airport.timezone;
+  el("shift-start").value = airport.day_start;
+  el("shift-end").value = airport.day_end;
+  setNote("shifts-note", shiftNow(airport), "");
+}
+
+function shiftNow(airport) {
+  return `Сейчас в ${airport.icao} ${airport.local_time} — идёт ${SHIFT_NAMES[airport.current_shift]} смена.`;
+}
+
+async function onShiftsSubmit(event) {
+  event.preventDefault();
+  const airport = sessionAirport();
+  if (!airport) return;
+  el("shifts-submit").disabled = true;
+  try {
+    const updated = await Api.setShiftSchedule(airport.icao, {
+      timezone: el("shift-tz").value.trim(),
+      day_start: el("shift-start").value,
+      day_end: el("shift-end").value,
+    });
+    state.user = await Api.me();
+    loadShifts();
+    setNote("shifts-note", `Сохранено. ${shiftNow(updated)}`, "is-ok");
+  } catch (error) {
+    setNote("shifts-note", error.detail, "is-error");
+  } finally {
+    el("shifts-submit").disabled = false;
+  }
+}
+
 /* --- Сотрудники --- */
 
 async function loadEmployees() {
@@ -498,6 +812,10 @@ async function loadEmployees() {
     el("employees-list").innerHTML = noAirportMessage();
     return;
   }
+
+  // Начальник смены сотрудников не регистрирует — форма появляется
+  // только при правке карточки.
+  el("employee-form-card").hidden = isSupervisorOnly() && state.editingEmployee === null;
 
   try {
     await loadGraphOnce();
@@ -547,7 +865,10 @@ function renderEmployees(employees) {
     remove.className = "danger";
     remove.textContent = "Удалить";
     remove.addEventListener("click", () => removeEmployee(employee));
-    actions.append(edit, remove);
+    actions.append(edit);
+    if (!isSupervisorOnly()) {
+      actions.append(remove);
+    }
     row.append(actions);
 
     container.append(row);
@@ -593,12 +914,21 @@ function startEmployeeEdit(employee) {
   // Занятого сотрудника нельзя «снять со смены» правкой карточки: у него
   // открытый вызов, и освобождать его должен диспетчер снятием вызова.
   el("emp-on-shift").disabled = isBusyStatus(employee.status);
+
+  // Квалификацию и ФИО меняет администратор аэропорта.
+  for (const id of ["emp-name", "emp-mark", "emp-types", "emp-valid"]) {
+    el(id).disabled = isSupervisorOnly();
+  }
+  el("employee-form-card").hidden = false;
   setNote("employee-note", editHint(employee), "");
 }
 
 function editHint(employee) {
   if (isBusyStatus(employee.status)) {
     return "Сотрудник занят на вызове: снять его со смены здесь нельзя";
+  }
+  if (isSupervisorOnly()) {
+    return "Начальник смены меняет смену, место и присутствие на смене; квалификацию — администратор аэропорта";
   }
   return "Меняются квалификация, смена, место и присутствие на смене";
 }
@@ -636,6 +966,10 @@ function cancelEmployeeEdit() {
   el("employee-cancel").hidden = true;
   el("employee-login-row").hidden = false;
   el("emp-on-shift").disabled = false;
+  for (const id of ["emp-name", "emp-mark", "emp-types", "emp-valid"]) {
+    el(id).disabled = false;
+  }
+  el("employee-form-card").hidden = isSupervisorOnly();
   el("employee-note").hidden = true;
 }
 
@@ -660,11 +994,14 @@ function statusTitle(status) {
  */
 async function saveEmployeeEdit(payload) {
   const employee = state.editingEmployee;
-  const changes = {
-    full_name: payload.full_name,
-    shift: payload.shift,
-    qualifications: payload.qualifications,
-  };
+  // Начальнику смены сервер разрешает только смену и статус.
+  const changes = isSupervisorOnly()
+    ? { shift: payload.shift }
+    : {
+        full_name: payload.full_name,
+        shift: payload.shift,
+        qualifications: payload.qualifications,
+      };
   if (!isBusyStatus(employee.status)) {
     changes.status = payload.on_shift ? "free" : "offline";
   }

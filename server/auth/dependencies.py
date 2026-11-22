@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from clock import utc_now
 from database import get_db
-from models.user import ROLE_ADMIN, AuthSession
+from models.user import ROLE_ADMIN, ROLE_RANK, AuthSession
 
 ERROR_NO_TOKEN = "Требуется вход в систему"
 ERROR_BAD_TOKEN = "Сессия недействительна или истекла"
@@ -62,21 +62,30 @@ class RoleGuard:
     запрещает вложенные функции. Экземпляр хранит список ролей, а
     __call__ получает контекст запроса через Depends, как обычная ручка.
 
-    Администратор проходит всегда: иначе управление справочниками
-    пришлось бы перечислять в каждом ограничении отдельно.
+    Права наследуются по старшинству: если допущена роль, то допущены
+    и все старшие (require_roles(ROLE_DISPATCHER) пропускает и начальника
+    смены, и администраторов). Технический администратор проходит всегда.
+    Инженер проходит только там, где назван явно.
     """
 
     def __init__(self, roles):
         self.roles = tuple(roles)
+        ranks = [ROLE_RANK[role] for role in self.roles if role in ROLE_RANK]
+        self.min_rank = min(ranks) if ranks else None
+
+    def allows(self, role):
+        if role == ROLE_ADMIN or role in self.roles:
+            return True
+        return self.min_rank is not None and ROLE_RANK.get(role, 0) >= self.min_rank
 
     def __call__(self, context: Context = Depends(get_context)):
-        if context.user.role == ROLE_ADMIN or context.user.role in self.roles:
+        if self.allows(context.user.role):
             return context
         raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_FORBIDDEN)
 
 
 def require_roles(*roles):
-    """Зависимость, пропускающая только перечисленные роли (и администратора)."""
+    """Зависимость: перечисленные роли и все старшие (и тех. администратор)."""
     return RoleGuard(roles)
 
 

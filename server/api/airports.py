@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from algorithm.geo import haversine_m
-from api.auth import airport_briefs
+from api.auth import airport_briefs, brief_of
 from auth.dependencies import (
     Context,
     get_context,
     require_airport,
+    require_roles,
     require_roles_in_airport,
 )
 from constants import AIRCRAFT_GROUP_BY_TYPE
@@ -17,14 +18,17 @@ from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, STATUS_QUEUED, Call
-from models.user import DISPATCH_ROLES, ROLE_ADMIN
+from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_LOCAL_ADMIN, ROLE_SHIFT_SUPERVISOR
 from schemas.airport import AircraftCreateRequest, AircraftResponse, AirportGraphResponse
 from schemas.employee import LocationRequest
 from services.assignment import assigned_route, replan_queue, update_assigned_route
-from schemas.auth import AirportBrief
+from schemas.auth import AirportBrief, ShiftScheduleRequest
+from services import shift_clock
 
 router = APIRouter(prefix="/api", tags=["Аэропорты"])
 
+ERROR_AIRPORT_NOT_FOUND = "Аэропорт {icao} не заведён в системе"
+ERROR_FOREIGN_AIRPORT = "Расписание смен меняют только в своём аэропорту"
 ERROR_NOT_A_STAND = "Узел {node} не является стоянкой этого аэропорта"
 ERROR_UNKNOWN_TYPE = (
     "Тип ВС {type} не описан в справочнике: по нему определяется допуск. "
@@ -38,9 +42,44 @@ ERROR_AIRCRAFT_HAS_CALL = (
 
 
 @router.get("/airports", response_model=list[AirportBrief], summary="Доступные аэропорты")
-def list_airports(context: Context = Depends(get_context)):
-    """Только те аэропорты, к которым привязана учётная запись."""
-    return airport_briefs(context.user)
+def list_airports(context: Context = Depends(get_context), db: Session = Depends(get_db)):
+    """Аэропорты учётной записи; техническому администратору — все."""
+    return airport_briefs(db, context.user)
+
+
+@router.put(
+    "/airports/{icao}/shift-schedule",
+    response_model=AirportBrief,
+    summary="Расписание смен",
+)
+def update_shift_schedule(
+    icao: str,
+    payload: ShiftScheduleRequest,
+    context: Context = Depends(require_roles(ROLE_SHIFT_SUPERVISOR)),
+    db: Session = Depends(get_db),
+):
+    """
+    Часовой пояс и граница дневной смены. По ним при входе сама
+    выбирается идущая смена. Начальник смены и администратор аэропорта
+    меняют расписание своего аэропорта, технический администратор — любого.
+    """
+    icao = icao.upper()
+    if context.user.role != ROLE_ADMIN and icao not in context.user.airport_icaos:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_FOREIGN_AIRPORT)
+    airport = db.get(Airport, icao)
+    if airport is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_AIRPORT_NOT_FOUND.format(icao=icao))
+
+    try:
+        shift_clock.validate(payload.timezone, payload.day_start, payload.day_end)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+
+    airport.timezone = payload.timezone
+    airport.day_shift_start = payload.day_start
+    airport.day_shift_end = payload.day_end
+    db.commit()
+    return brief_of(airport)
 
 
 @router.get(
@@ -110,7 +149,7 @@ def aircraft_response(graph, item):
 def create_aircraft(
     payload: AircraftCreateRequest,
     db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     """
     Ставит борт на стоянку аэропорта сессии.
@@ -227,7 +266,7 @@ def move_aircraft(
 def delete_aircraft(
     aircraft_id: int,
     db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     """
     Убирает борт. Пока по нему открыт вызов, это запрещено: вызов остался бы

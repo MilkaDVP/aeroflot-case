@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from auth.dependencies import Context, check_same_airport, require_airport, require_roles
 from database import get_db, get_dispatch_db
 from models.employee import Employee
-from models.user import DISPATCH_ROLES, ROLE_ADMIN
+from models.user import DISPATCH_ROLES, ROLE_LOCAL_ADMIN
 from services import drill
 
 router = APIRouter(prefix="/api/drill", tags=["Учения"])
@@ -48,11 +48,11 @@ def drill_state(context: Context = Depends(require_airport), db: Session = Depen
 @router.post("", response_model=DrillState, summary="Включить или выключить учения")
 def set_drill(
     payload: DrillState,
-    context: Context = Depends(require_roles(ROLE_ADMIN)),
+    context: Context = Depends(require_roles(ROLE_LOCAL_ADMIN)),
     airport: Context = Depends(require_airport),
     db: Session = Depends(get_db),
 ):
-    """Только администратор. При выключении все задержки снимаются."""
+    """Администратор аэропорта и старше. При выключении все задержки снимаются."""
     drill.set_enabled(db, context.airport_icao, payload.enabled)
     db.commit()
     return DrillState(enabled=payload.enabled)

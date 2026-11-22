@@ -23,6 +23,9 @@
         <button type="button" class="choice" data-shift="day">Дневная</button>
         <button type="button" class="choice" data-shift="night">Ночная</button>
       </div>
+      <!-- Смена выбирается сама по местному времени аэропорта; её можно
+           сменить вручную, например, если вы пришли раньше. -->
+      <p class="auth-hint" id="shift-hint" hidden></p>
 
       <div id="error" class="error" hidden style="margin-top: var(--gap)"></div>
 

@@ -14,8 +14,10 @@ from auth.security import new_token, session_expiry, verify_password
 from constants import SHIFT_DAY, SHIFT_NIGHT
 from database import get_db
 from graph_registry import get_graph
-from models.airport import SOURCE_MANUAL
-from models.user import AuthSession, User
+from models.airport import SOURCE_MANUAL, Airport
+from models.user import ROLE_ADMIN, AuthSession, User
+from services import claim as claims
+from services import shift_clock
 from schemas.auth import (
     AirportBrief,
     CurrentUserResponse,
@@ -32,9 +34,22 @@ ERROR_NO_ACCESS_TO_AIRPORT = "Учётная запись не привязан�
 ERROR_BAD_SHIFT = "Смена должна быть day или night"
 
 
-def airport_briefs(user):
+def available_airports(db, user):
+    """
+    Аэропорты, в которых пользователь может работать.
+
+    Технический администратор привязки не имеет: ему доступны все
+    аэропорты системы, включая только что созданные. Остальные роли
+    работают в своём аэропорту.
+    """
+    if user.role == ROLE_ADMIN:
+        return db.query(Airport).order_by(Airport.icao).all()
+    return list(user.airports)
+
+
+def airport_briefs(db, user):
     """Список доступных пользователю аэропортов с опорными точками."""
-    return [brief_of(airport) for airport in user.airports]
+    return [brief_of(airport) for airport in available_airports(db, user)]
 
 
 def brief_of(airport):
@@ -60,6 +75,7 @@ def brief_of(airport):
         city=airport.city,
         ref_point=ref_point,
         centre=centre,
+        **shift_clock.info(airport),
     )
 
 
@@ -73,12 +89,15 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if user is None or (user.employee and user.employee.archived) or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_CREDENTIALS)
 
-    airports = airport_briefs(user)
+    airports = airport_briefs(db, user)
+    single = airports[0] if len(airports) == 1 else None
     session = AuthSession(
         token=new_token(),
         user_id=user.id,
-        # Один аэропорт — шаг выбора пропускается.
-        airport_icao=airports[0].icao if len(airports) == 1 else None,
+        # Один аэропорт — шаг выбора пропускается, а смена берётся
+        # по местному времени (её можно сменить на экране выбора).
+        airport_icao=single.icao if single else None,
+        shift=single.current_shift if single else None,
         expires_at=session_expiry(),
     )
     db.add(session)
@@ -96,21 +115,25 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/auth/logout", response_model=MessageResponse, summary="Выход")
 def logout(context: Context = Depends(get_context), db: Session = Depends(get_db)):
-    """Закрывает сессию: запись токена удаляется, повторно он не сработает."""
+    """
+    Закрывает сессию: запись токена удаляется, повторно он не сработает.
+    Вызовы, которые человек разбирал, освобождаются для других.
+    """
+    claims.release_all(db, context.user.id)
     db.delete(context.session)
     db.commit()
     return MessageResponse(message="Сессия закрыта")
 
 
 @router.get("/auth/me", response_model=CurrentUserResponse, summary="Текущий пользователь")
-def current_user(context: Context = Depends(get_context)):
+def current_user(context: Context = Depends(get_context), db: Session = Depends(get_db)):
     """Пользователь, его роль, аэропорты и выбранный контекст работы."""
     user = context.user
     return CurrentUserResponse(
         login=user.login,
         role=user.role,
         full_name=user.full_name,
-        airports=airport_briefs(user),
+        airports=airport_briefs(db, user),
         airport_icao=context.airport_icao,
         shift=context.shift,
         employee_id=user.employee_id,
@@ -134,7 +157,8 @@ def select_airport(
     if payload.shift not in (SHIFT_DAY, SHIFT_NIGHT):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_SHIFT)
 
-    if payload.airport_icao not in context.user.airport_icaos:
+    allowed = [airport.icao for airport in available_airports(db, context.user)]
+    if payload.airport_icao not in allowed:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             ERROR_NO_ACCESS_TO_AIRPORT.format(icao=payload.airport_icao),

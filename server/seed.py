@@ -63,6 +63,7 @@ from models.user import (
     ROLE_ADMIN,
     ROLE_DISPATCHER,
     ROLE_ENGINEER,
+    ROLE_LOCAL_ADMIN,
     ROLE_SHIFT_SUPERVISOR,
     User,
 )
@@ -179,14 +180,19 @@ DEMO_AIRPORTS = [SHEREMETYEVO, DOMODEDOVO]
 # Пароли простые намеренно: это конкурсный стенд, логины и пароли
 # публикуются в README для проверки жюри.
 USERS = [
-    # Диспетчер привязан к обоим аэропортам — только так виден шаг выбора
-    # аэропорта из §5.
-    ("dispatcher", "dispatcher", ROLE_DISPATCHER, "Смирнова О. В.", None,
-     ["UUEE", "UUDD"]),
-    ("supervisor", "supervisor", ROLE_SHIFT_SUPERVISOR, "Белов А. Г.", None,
-     ["UUEE"]),
-    ("admin", "admin", ROLE_ADMIN, "Администратор системы", None,
-     ["UUEE", "UUDD"]),
+    # Технический администратор привязки к аэропорту не имеет: ему доступны
+    # все аэропорты системы, и только у него виден шаг выбора аэропорта (§5).
+    ("admin", "admin", ROLE_ADMIN, "Администратор системы", None, []),
+    # Остальные учётные записи привязаны ровно к одному аэропорту.
+    ("local_uuee", "local_uuee", ROLE_LOCAL_ADMIN, "Ковалёва Е. П.", None, ["UUEE"]),
+    ("local_uudd", "local_uudd", ROLE_LOCAL_ADMIN, "Рябов К. С.", None, ["UUDD"]),
+    ("supervisor", "supervisor", ROLE_SHIFT_SUPERVISOR, "Белов А. Г.", None, ["UUEE"]),
+    ("supervisor_uudd", "supervisor", ROLE_SHIFT_SUPERVISOR, "Гусев Р. И.", None, ["UUDD"]),
+    # Два диспетчера в одном аэропорту — чтобы было видно, как они
+    # делят между собой вызовы.
+    ("dispatcher", "dispatcher", ROLE_DISPATCHER, "Смирнова О. В.", None, ["UUEE"]),
+    ("dispatcher2", "dispatcher", ROLE_DISPATCHER, "Ершова М. А.", None, ["UUEE"]),
+    ("dispatcher_uudd", "dispatcher", ROLE_DISPATCHER, "Лебедева Т. Ю.", None, ["UUDD"]),
     ("sokolov", "engineer", ROLE_ENGINEER, "Соколов А. В.", "Соколов А. В.",
      ["UUEE"]),
     ("morozov", "engineer", ROLE_ENGINEER, "Морозов Д. С.", "Морозов Д. С.",

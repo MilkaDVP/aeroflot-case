@@ -28,7 +28,9 @@
 
     <nav class="admin-tabs" id="tabs">
       <button type="button" data-tab="airports" class="active">Аэропорты</button>
+      <button type="button" data-tab="users">Учётные записи</button>
       <button type="button" data-tab="employees">Сотрудники</button>
+      <button type="button" data-tab="shifts">Смены</button>
       <button type="button" data-tab="vehicles">Спецтранспорт</button>
       <button type="button" data-tab="aircraft">Борта</button>
     </nav>
@@ -157,6 +159,105 @@
     </section>
 
     <!-- ======================= Сотрудники ======================= -->
+    <section class="admin-page" id="page-users" hidden>
+      <div class="admin-columns">
+
+        <div class="admin-card">
+          <h2>Учётные записи <span id="users-scope">—</span></h2>
+          <p class="muted small">
+            Зелёная точка — человек сейчас в системе. Начальник смены может
+            завершить сеанс младшего; заводить и править учётные записи —
+            администратор аэропорта и старше.
+          </p>
+          <div class="admin-list" id="users-list">
+            <div class="empty">Загрузка…</div>
+          </div>
+        </div>
+
+        <div class="admin-card" id="user-form-card">
+          <h2 id="user-form-title">Завести учётную запись</h2>
+          <p class="muted small">
+            Учётная запись привязывается ровно к одному аэропорту. Инженер
+            заводится вместе с карточкой — на вкладке «Сотрудники».
+          </p>
+          <form class="admin-form" id="user-form">
+            <label for="user-name">ФИО</label>
+            <input id="user-name" placeholder="Смирнова О. В." required>
+
+            <div class="admin-row">
+              <div>
+                <label for="user-role">Роль</label>
+                <select id="user-role"></select>
+              </div>
+              <div id="user-airport-box">
+                <label for="user-airport">Аэропорт</label>
+                <select id="user-airport"></select>
+              </div>
+            </div>
+
+            <div id="user-login-row">
+              <label for="user-login">Логин</label>
+              <input id="user-login" autocomplete="off" required>
+            </div>
+
+            <label for="user-password" id="user-password-label">Пароль</label>
+            <input id="user-password" type="password" autocomplete="new-password" required>
+
+            <button type="submit" class="primary" id="user-submit">Завести</button>
+            <button type="button" id="user-cancel" hidden>Отмена</button>
+          </form>
+          <div class="admin-note" id="user-note" hidden></div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="admin-page" id="page-shifts" hidden>
+      <div class="admin-columns">
+        <div class="admin-card">
+          <h2>Расписание смен <span id="shifts-airport">—</span></h2>
+          <p class="muted small">
+            При входе смена выбирается сама — по местному времени аэропорта:
+            с начала до конца дневной смены идёт дневная, остальное время —
+            ночная. Если дневная заканчивается после полуночи, укажите конец
+            раньше начала.
+          </p>
+          <form class="admin-form" id="shifts-form">
+            <label for="shift-tz">Часовой пояс (код IANA)</label>
+            <input id="shift-tz" list="shift-tz-list" placeholder="Europe/Moscow" required>
+            <datalist id="shift-tz-list">
+              <option value="Europe/Kaliningrad">Калининград, UTC+2</option>
+              <option value="Europe/Moscow">Москва, UTC+3</option>
+              <option value="Europe/Samara">Самара, UTC+4</option>
+              <option value="Asia/Yekaterinburg">Екатеринбург, UTC+5</option>
+              <option value="Asia/Omsk">Омск, UTC+6</option>
+              <option value="Asia/Novosibirsk">Новосибирск, UTC+7</option>
+              <option value="Asia/Krasnoyarsk">Красноярск, UTC+7</option>
+              <option value="Asia/Irkutsk">Иркутск, UTC+8</option>
+              <option value="Asia/Yakutsk">Якутск, UTC+9</option>
+              <option value="Asia/Vladivostok">Владивосток, UTC+10</option>
+              <option value="Asia/Magadan">Магадан, UTC+11</option>
+              <option value="Asia/Kamchatka">Петропавловск-Камчатский, UTC+12</option>
+            </datalist>
+
+            <div class="admin-row">
+              <div>
+                <label for="shift-start">Дневная смена с</label>
+                <input id="shift-start" type="time" required>
+              </div>
+              <div>
+                <label for="shift-end">до</label>
+                <input id="shift-end" type="time" required>
+              </div>
+            </div>
+
+            <button type="submit" class="primary" id="shifts-submit">Сохранить</button>
+          </form>
+          <div class="admin-note" id="shifts-note" hidden></div>
+        </div>
+      </div>
+    </section>
+
     <section class="admin-page" id="page-employees" hidden>
       <div class="admin-columns">
 
@@ -167,7 +268,7 @@
           </div>
         </div>
 
-        <div class="admin-card">
+        <div class="admin-card" id="employee-form-card">
           <h2 id="employee-form-title">Зарегистрировать сотрудника</h2>
           <p class="muted small">
             Квалификация определяет, на какие работы и типы ВС его можно

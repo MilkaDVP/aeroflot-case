@@ -23,6 +23,21 @@ class AirportBrief(BaseModel):
     # на телефон было бы расточительно, а ref_point для этого не годится —
     # он смещён к краю аэродрома.
     centre: dict | None = None
+    # Расписание смен и что сейчас по местному времени: экран входа
+    # сам предлагает идущую смену, но её можно сменить вручную.
+    timezone: str | None = None
+    day_start: str | None = None
+    day_end: str | None = None
+    local_time: str | None = None
+    current_shift: str | None = None
+
+
+class ShiftScheduleRequest(BaseModel):
+    """Расписание смен аэропорта."""
+
+    timezone: str = Field(description="Код IANA, например Europe/Moscow")
+    day_start: str = Field(description="Начало дневной смены, ЧЧ:ММ")
+    day_end: str = Field(description="Конец дневной смены, ЧЧ:ММ")
 
 
 class LoginResponse(BaseModel):

@@ -96,6 +96,10 @@ class CallResponse(BaseModel):
     support: list[dict] = []
     # Переписка инженеров с диспетчером по вызову, старые первыми.
     messages: list[dict] = []
+    # Кто из диспетчеров разбирает вызов, пока он ждёт назначения.
+    claimed_by_login: str | None = None
+    claimed_by_name: str | None = None
+    claim_expires_at: str | None = None
 
 
 class LegSchema(BaseModel):
@@ -210,6 +214,12 @@ class MessageRequest(BaseModel):
     """Сообщение по вызову — от инженера диспетчеру или обратно."""
 
     text: str = Field(min_length=1, max_length=500)
+
+
+class ClaimRequest(BaseModel):
+    """Взять вызов в работу. takeover — забрать у другого (начальник смены)."""
+
+    takeover: bool = False
 
 
 class UrgencyRequest(BaseModel):
