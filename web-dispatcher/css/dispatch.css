@@ -543,14 +543,15 @@
   stroke: var(--warn);
 }
 
-/* Перетаскивание машины: свободную можно выбрать щелчком и тянуть. */
-.vehicle-hit { fill: transparent; }
-.vehicle-marker.is-movable { cursor: pointer; }
-.vehicle-marker.is-selected { cursor: grab; }
-.map.dragging-vehicle,
-.map.dragging-vehicle * { cursor: grabbing !important; }
+/* Перенос машин, людей и бортов мышью: щелчок выделяет объект,
+   удержание «поднимает» его — метка увеличивается и тянется сразу. */
+.hit-area { fill: transparent; }
+.movable-marker.is-movable { cursor: pointer; }
+.movable-marker.is-selected { cursor: grab; }
+.map.dragging-object,
+.map.dragging-object * { cursor: grabbing !important; }
 
-.vehicle-select-ring {
+.select-ring {
   fill: var(--route-soft);
   stroke: #fff;
   stroke-width: 2;
@@ -558,10 +559,19 @@
   display: none;
 }
 
-.vehicle-marker.is-selected .vehicle-select-ring { display: inline; }
+.movable-marker.is-selected .select-ring { display: inline; }
 .vehicle-marker.is-selected .vehicle { fill: var(--route); stroke: #fff; }
-.vehicle-marker.is-dragging { opacity: 0.85; }
-.vehicle-marker.is-dragging .vehicle-select-ring { stroke-dasharray: none; }
+
+/* Поднятый удержанием или перетаскиваемый объект: крупнее (масштаб
+   задаёт карта) и с тенью, как предмет, оторванный от поверхности. */
+.movable-marker.is-lifted,
+.movable-marker.is-dragging {
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.6));
+}
+
+.movable-marker.is-dragging .select-ring { stroke-dasharray: none; }
+
+
 
 .label-vehicle {
   fill: var(--route);
@@ -617,6 +627,127 @@
   border-color: var(--warn);
   background: var(--warn-soft);
   color: var(--warn);
+}
+
+/* --- Поиск по карте --- */
+
+.map-tools { align-items: flex-start; }
+
+.map-search { position: relative; }
+
+.map-search-input {
+  width: 300px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+}
+
+.map-search-input::placeholder { color: var(--text-dim); }
+.map-search-input:focus { outline: none; border-color: var(--route); }
+
+.map-search-list {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 340px;
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.map-search-list[hidden] { display: none; }
+
+.map-search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.map-search-item.is-active { background: var(--route-soft); }
+.map-search-item.is-disabled { opacity: 0.45; cursor: default; }
+
+.map-search-icon {
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.map-search-icon.is-aircraft { color: #93a7bb; }
+.map-search-icon.is-stand { color: var(--stand); }
+.map-search-icon.is-tech_center { color: var(--warn); }
+.map-search-icon.is-employee { color: var(--ok); }
+.map-search-icon.is-vehicle { color: var(--route); }
+
+.map-search-text { display: flex; flex-direction: column; min-width: 0; }
+.map-search-text b { font-weight: 600; font-size: var(--fs); color: var(--text); }
+.map-search-text small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-search-empty { padding: 8px; color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* Подсветка найденного объекта на карте. */
+.search-flash { pointer-events: none; }
+
+.search-flash-ring {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 3;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: search-ping 1s ease-out 4 both;
+}
+
+.search-flash-core {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2.5;
+}
+
+.search-flash-label {
+  fill: var(--warn);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-deep);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+@keyframes search-ping {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-flash-ring { animation: none; opacity: 0.6; }
+}
+
+@media (max-width: 900px) {
+  .map-search-input { width: 200px; }
+  .map-search-list { width: min(340px, calc(100vw - 32px)); }
 }
 
 .map-tools-hint {

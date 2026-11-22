@@ -91,18 +91,21 @@ class AirportMap {
     this.onGroundClick = null;
     this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
 
-    // Перетаскивание машины: щелчок выделяет её, затем её можно тянуть
-    // мышью. Колбэк получает машину и новое место в градусах.
-    this.onVehicleDrop = null;
-    this.onVehicleRefused = null;
-    this.selectedVehicleId = null;
-    this.vehicleDrag = null;
-    this.pendingVehicles = null;
-    // Перенесённая, но ещё не подтверждённая сервером машина: до ответа
-    // она рисуется на новом месте, а не прыгает назад по старым данным.
-    this.vehicleOverride = null;
-    this.lastVehicles = [];
-    this.setupVehicleDrag();
+    // Перенос подвижных объектов (машин, людей, бортов) мышью.
+    // Колбэк получает вид объекта, сам объект и новое место в градусах.
+    this.onObjectDrop = null;
+    this.onObjectRefused = null;
+    this.selected = null;
+    this.drag = null;
+    this.swallowClick = false;
+    // Последние и отложенные на время переноса данные каждого слоя.
+    this.lastDraw = {};
+    this.pendingDraw = {};
+    // Перенесённые, но ещё не подтверждённые сервером объекты: до ответа
+    // они рисуются на новом месте, а не прыгают назад по старым данным.
+    this.overrides = new Map();
+    this.cancelPan = null;
+    this.setupObjectDrag();
 
     this.tiles = null;
     // Следы перемещения: идентификатор сотрудника -> последние точки.
@@ -354,11 +357,13 @@ class AirportMap {
 
   /** Метки воздушных судов на стоянках. */
   drawAircraft(aircraftList) {
+    if (this.deferWhileDragging("aircraft", [aircraftList])) return;
     const layer = this.layers.aircraft;
     layer.replaceChildren();
 
     for (const aircraft of aircraftList) {
-      const node = this.nodesById.get(aircraft.stand_node_id);
+      const override = this.overrides.get(`aircraft:${aircraft.id}`);
+      const node = this.nodesById.get(override ? override.standNodeId : aircraft.stand_node_id);
       if (!node) {
         continue;
       }
@@ -370,16 +375,18 @@ class AirportMap {
       shape.setAttribute("d", "M 0 -7 L 6 5 L -6 5 Z");
       shape.setAttribute("class", "aircraft");
       marker.append(
+        selectRing(0, 0, 12),
         shape,
+        hitArea(0, 0),
         title(
           `${aircraft.board_number} · ${aircraft.aircraft_type} · стоянка ${aircraft.stand_ref}`
         )
       );
       marker.dataset.aircraftId = aircraft.id;
-      marker.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (this.onObjectClick) this.onObjectClick("aircraft", aircraft, node, event);
-        else if (this.onStandClick) this.onStandClick(node);
+      // Щелчок по борту, как и раньше, открывает регистрацию вызова;
+      // переносится борт удержанием.
+      this.makeDraggable(marker, "aircraft", aircraft, () => {
+        if (this.onStandClick) this.onStandClick(node);
       });
       layer.append(marker);
     }
@@ -396,15 +403,7 @@ class AirportMap {
    * Две метки в одной точке только мешали бы.
    */
   drawVehicles(vehicles) {
-    // Пока машину тянут, опрос сервера не должен выдернуть её из-под
-    // курсора: свежий список дорисуется сразу после отпускания.
-    if (this.vehicleDrag) {
-      this.pendingVehicles = vehicles;
-      return;
-    }
-    this.pendingVehicles = null;
-    this.lastVehicles = vehicles;
-
+    if (this.deferWhileDragging("vehicle", [vehicles])) return;
     const layer = this.layers.vehicles;
     layer.replaceChildren();
 
@@ -412,8 +411,7 @@ class AirportMap {
       if (vehicle.status === "in_use") {
         continue;
       }
-      const override =
-        this.vehicleOverride && this.vehicleOverride.id === vehicle.id ? this.vehicleOverride : vehicle;
+      const override = this.overrides.get(`vehicle:${vehicle.id}`) || vehicle;
       const position = this.projectLatLon(override.lat, override.lon);
       const marker = this.createMarker(position.x, position.y);
 
@@ -437,189 +435,12 @@ class AirportMap {
 
       marker.dataset.vehicleId = vehicle.id;
       marker.classList.add("vehicle-marker");
-      if (vehicle.status === "free") {
-        marker.classList.add("is-movable");
-      }
-
-      // Кольцо выделения и увеличенная невидимая зона захвата: квадрат
-      // в десять пикселей мышью ловится плохо.
-      const ring = document.createElementNS(SVG_NS, "rect");
-      ring.setAttribute("x", -10);
-      ring.setAttribute("y", -10);
-      ring.setAttribute("width", 20);
-      ring.setAttribute("height", 20);
-      ring.setAttribute("rx", 5);
-      ring.setAttribute("class", "vehicle-select-ring");
-
-      const hit = document.createElementNS(SVG_NS, "circle");
-      hit.setAttribute("r", 13);
-      hit.setAttribute("class", "vehicle-hit");
-
-      if (vehicle.id === this.selectedVehicleId) {
-        marker.classList.add("is-selected");
-      }
-
-      marker.addEventListener("mousedown", (event) => this.startVehicleDrag(event, vehicle, marker));
-      marker.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (this.onObjectClick) {
-          this.onObjectClick("vehicle", vehicle, vehicle, event);
-          return;
-        }
-        // Щелчок, завершивший перетаскивание, выделение не переключает.
-        if (this.vehicleJustDropped) {
-          this.vehicleJustDropped = false;
-          return;
-        }
-        if (vehicle.status !== "free") {
-          if (this.onVehicleRefused) this.onVehicleRefused(vehicle);
-          return;
-        }
-        this.selectVehicle(this.selectedVehicleId === vehicle.id ? null : vehicle.id);
-      });
-      marker.append(hit, ring, shape, label, title(vehicleTooltip(vehicle)));
+      marker.append(selectRing(0, 0, 12), shape, hitArea(0, 0), label, title(vehicleTooltip(vehicle)));
+      this.makeDraggable(marker, "vehicle", vehicle);
       layer.append(marker);
     }
 
-    // Выделенная машина пропала из списка (уехала на вызов, списана) —
-    // выделение снимается, чтобы не тянуть то, чего нет.
-    if (
-      this.selectedVehicleId !== null &&
-      !vehicles.some((item) => item.id === this.selectedVehicleId && item.status === "free")
-    ) {
-      this.selectedVehicleId = null;
-    }
-
     this.updateMarkerScale();
-  }
-
-  /* --- Перетаскивание машины --- */
-
-  selectVehicle(vehicleId) {
-    this.selectedVehicleId = vehicleId;
-    for (const marker of this.layers.vehicles.children) {
-      marker.classList.toggle("is-selected", Number(marker.dataset.vehicleId) === vehicleId);
-    }
-    this.svg.classList.toggle("has-selected-vehicle", vehicleId !== null);
-  }
-
-  /**
-   * Нажатие на выделенную машину начинает перетаскивание.
-   *
-   * Карта при этом не панорамируется: событие дальше не идёт. Нажатие
-   * на невыделенную машину ничего не начинает — сначала её надо выбрать,
-   * иначе любое неловкое движение мышью при панорамировании сдвигало бы
-   * машины по перрону.
-   */
-  startVehicleDrag(event, vehicle, marker) {
-    if (event.button !== 0 || this.onObjectClick) {
-      return;
-    }
-    if (vehicle.id !== this.selectedVehicleId || vehicle.status !== "free") {
-      return;
-    }
-    event.stopPropagation();
-    event.preventDefault();
-    this.vehicleDrag = {
-      vehicle,
-      marker,
-      startX: event.clientX,
-      startY: event.clientY,
-      origin: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) },
-      moved: false,
-    };
-  }
-
-  setupVehicleDrag() {
-    window.addEventListener("mousemove", (event) => {
-      const drag = this.vehicleDrag;
-      if (!drag) {
-        return;
-      }
-      // Порог в несколько пикселей: дрожание руки при щелчке
-      // не должно превращаться в перенос машины.
-      if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) {
-        return;
-      }
-      drag.moved = true;
-      this.svg.classList.add("dragging-vehicle");
-      drag.marker.classList.add("is-dragging");
-      const point = this.toGraphCoords(event.clientX, event.clientY);
-      this.placeMarker(drag.marker, point.x, point.y);
-    });
-
-    window.addEventListener("mouseup", (event) => {
-      const drag = this.vehicleDrag;
-      if (!drag) {
-        return;
-      }
-      this.vehicleDrag = null;
-      this.svg.classList.remove("dragging-vehicle");
-      drag.marker.classList.remove("is-dragging");
-
-      if (drag.moved) {
-        this.vehicleJustDropped = true;
-        // Щелчок после отпускания может и не прийти (курсор ушёл с карты) —
-        // флаг не должен пережить этот жест.
-        setTimeout(() => { this.vehicleJustDropped = false; }, 0);
-        const point = this.toGraphCoords(event.clientX, event.clientY);
-        const position = this.unprojectXY(point.x, point.y);
-        this.vehicleOverride = { id: drag.vehicle.id, lat: position.lat, lon: position.lon };
-        if (this.onVehicleDrop) {
-          // done(true) — место сохранено и данные уже свежие;
-          // done(false) — сервер отказал, машина возвращается на прежнее место.
-          this.onVehicleDrop(drag.vehicle, position, () => {
-            this.vehicleOverride = null;
-            this.drawVehicles(this.pendingVehicles || this.lastVehicles);
-          });
-        }
-      }
-      if (this.pendingVehicles) {
-        this.drawVehicles(this.pendingVehicles);
-      }
-    });
-
-    window.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      const drag = this.vehicleDrag;
-      if (drag) {
-        // Esc во время переноса отменяет его.
-        this.vehicleDrag = null;
-        this.svg.classList.remove("dragging-vehicle");
-        drag.marker.classList.remove("is-dragging");
-        this.placeMarker(drag.marker, drag.origin.x, drag.origin.y);
-        if (this.pendingVehicles) this.drawVehicles(this.pendingVehicles);
-        return;
-      }
-      if (this.selectedVehicleId !== null) {
-        this.selectVehicle(null);
-      }
-    });
-
-    // Щелчок по пустому месту карты снимает выделение. Панорамирование
-    // считается не щелчком: иначе сдвиг карты сбрасывал бы выбор.
-    let down = null;
-    this.svg.addEventListener("mousedown", (event) => {
-      down = { x: event.clientX, y: event.clientY };
-    });
-    this.svg.addEventListener("click", (event) => {
-      if (this.selectedVehicleId === null || event.target.closest(".vehicle-marker")) {
-        return;
-      }
-      if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 4) {
-        return;
-      }
-      this.selectVehicle(null);
-    });
-  }
-
-  /** Переставляет значок в точку графа, сохраняя экранный размер. */
-  placeMarker(marker, x, y) {
-    marker.dataset.x = x;
-    marker.dataset.y = y;
-    marker.setAttribute("transform", `translate(${x} ${y}) scale(${this.markerScale})`);
   }
 
   /**
@@ -629,12 +450,16 @@ class AirportMap {
    * Класс приходит снаружи: карта не знает про допуски, она их рисует.
    */
   drawEmployees(employees, classifier) {
+    if (this.deferWhileDragging("employee", [employees, classifier])) return;
     const layer = this.layers.employees;
     layer.replaceChildren();
 
-    const placed = employees.filter(
-      (employee) => employee.lat !== null && employee.lon !== null
-    );
+    const placed = employees
+      .filter((employee) => employee.lat !== null && employee.lon !== null)
+      .map((employee) => {
+        const override = this.overrides.get(`employee:${employee.id}`);
+        return override ? { ...employee, lat: override.lat, lon: override.lon } : employee;
+      });
     this.drawTrails(placed);
     const offsets = spreadOverlapping(placed);
 
@@ -642,6 +467,8 @@ class AirportMap {
       const position = this.projectLatLon(employee.lat, employee.lon);
       const marker = this.createMarker(position.x, position.y);
       const offset = offsets.get(employee.id);
+
+      marker.append(selectRing(offset.dx, offset.dy, 11));
 
       // Спецтранспорт отмечается кольцом: наличие машины меняет время
       // в пути вчетверо, это должно считываться без наведения мыши.
@@ -659,22 +486,309 @@ class AirportMap {
       shape.setAttribute("cy", offset.dy);
       shape.setAttribute("r", 5);
       shape.setAttribute("class", `employee ${classifier(employee)}`);
-      marker.append(shape, title(employeeTooltip(employee)));
+      marker.append(shape, hitArea(offset.dx, offset.dy), title(employeeTooltip(employee)));
       marker.classList.add("employee-marker");
       // По этому признаку метку находят обработчики и автопроверки:
       // искать человека по подписи ненадёжно.
       marker.dataset.employeeId = employee.id;
-      marker.addEventListener("click", (event) => {
-        if (this.onObjectClick) {
-          event.stopPropagation();
-          this.onObjectClick("employee", employee, employee, event);
-        }
-      });
+      this.makeDraggable(marker, "employee", employee);
 
       layer.append(marker);
     }
 
     this.updateMarkerScale();
+  }
+
+  /* --- Перетаскивание подвижных объектов: машин, людей, бортов --- */
+
+  /**
+   * Пока объект тянут, опрос сервера не перерисовывает его слой — иначе
+   * метка выскочила бы из-под курсора. Свежие данные дорисуются сразу
+   * после отпускания.
+   */
+  deferWhileDragging(kind, args) {
+    this.lastDraw[kind] = args;
+    if (this.drag && this.drag.kind === kind) {
+      this.pendingDraw[kind] = args;
+      return true;
+    }
+    this.pendingDraw[kind] = null;
+    return false;
+  }
+
+  redraw(kind) {
+    const args = this.pendingDraw[kind] || this.lastDraw[kind];
+    if (!args) return;
+    if (kind === "aircraft") this.drawAircraft(...args);
+    if (kind === "vehicle") this.drawVehicles(...args);
+    if (kind === "employee") this.drawEmployees(...args);
+  }
+
+  /** Можно ли переносить объект. Машину — только свободную. */
+  canMove(kind, item) {
+    return kind !== "vehicle" || item.status === "free";
+  }
+
+  isSelected(kind, item) {
+    return Boolean(this.selected && this.selected.kind === kind && this.selected.id === item.id);
+  }
+
+  /**
+   * Подключает к метке оба способа переноса.
+   *
+   * 1. Щелчок выделяет объект, после этого его можно тянуть.
+   * 2. Нажать и подержать — метка увеличивается, и её сразу можно
+   *    тянуть, не отпуская кнопку.
+   *
+   * Нажатие с движением без задержки — это панорамирование карты, как
+   * и раньше: иначе, двигая карту, легко было бы случайно утащить
+   * человека или машину.
+   */
+  makeDraggable(marker, kind, item, onPlainClick) {
+    marker.classList.add("movable-marker");
+    if (this.canMove(kind, item)) marker.classList.add("is-movable");
+    if (this.isSelected(kind, item)) marker.classList.add("is-selected");
+
+    marker.addEventListener("mousedown", (event) => this.pressObject(event, kind, item, marker));
+    marker.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (this.onObjectClick) {
+        // Режим «Переместить» работает как раньше.
+        const position = kind === "aircraft" ? this.nodesById.get(item.stand_node_id) : item;
+        this.onObjectClick(kind, item, position, event);
+        return;
+      }
+      // Щелчок, завершивший перенос или удержание, ничего не переключает.
+      if (this.swallowClick) {
+        this.swallowClick = false;
+        return;
+      }
+      if (onPlainClick) {
+        onPlainClick();
+        return;
+      }
+      if (!this.canMove(kind, item)) {
+        if (this.onObjectRefused) this.onObjectRefused(kind, item);
+        return;
+      }
+      this.select(this.isSelected(kind, item) ? null : { kind, id: item.id });
+    });
+  }
+
+  select(selection) {
+    this.selected = selection;
+    for (const marker of this.viewport.querySelectorAll(".movable-marker")) {
+      const { kind, id } = markerIdentity(marker);
+      marker.classList.toggle(
+        "is-selected",
+        Boolean(selection && selection.kind === kind && selection.id === id)
+      );
+    }
+  }
+
+  pressObject(event, kind, item, marker) {
+    if (event.button !== 0 || this.onObjectClick || !this.canMove(kind, item)) {
+      return;
+    }
+    const press = {
+      kind,
+      item,
+      marker,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) },
+      moved: false,
+      lifted: false,
+      ready: false,
+    };
+
+    if (this.isSelected(kind, item)) {
+      // Выделенный объект тянется сразу, карта не двигается.
+      event.stopPropagation();
+      event.preventDefault();
+      press.ready = true;
+      this.drag = press;
+      return;
+    }
+
+    // Невыделенный: ждём удержания. Если за это время мышь ушла —
+    // это панорамирование, и перенос не начинается.
+    this.drag = press;
+    press.timer = setTimeout(() => {
+      if (this.drag !== press) return;
+      if (this.cancelPan) this.cancelPan();
+      press.ready = true;
+      press.lifted = true;
+      marker.classList.add("is-lifted");
+      this.liftMarker(marker, true);
+      this.svg.classList.add("dragging-object");
+      this.select({ kind, id: item.id });
+    }, HOLD_TO_DRAG_MS);
+  }
+
+  setupObjectDrag() {
+    window.addEventListener("mousemove", (event) => {
+      const drag = this.drag;
+      if (!drag) {
+        return;
+      }
+      const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (!drag.ready) {
+        // Сдвинули до окончания удержания — это панорамирование.
+        if (distance >= DRAG_THRESHOLD_PX) {
+          clearTimeout(drag.timer);
+          this.drag = null;
+          this.flushPending(drag.kind);
+        }
+        return;
+      }
+      // Порог в несколько пикселей: дрожание руки при щелчке
+      // не должно превращаться в перенос.
+      if (!drag.moved && !drag.lifted && distance < DRAG_THRESHOLD_PX) {
+        return;
+      }
+      if (!drag.moved) this.liftMarker(drag.marker, true);
+      drag.moved = true;
+      this.svg.classList.add("dragging-object");
+      drag.marker.classList.add("is-dragging");
+      const point = this.toGraphCoords(event.clientX, event.clientY);
+      this.placeMarker(drag.marker, point.x, point.y);
+    });
+
+    window.addEventListener("mouseup", (event) => {
+      const drag = this.drag;
+      if (!drag) {
+        return;
+      }
+      clearTimeout(drag.timer);
+      this.drag = null;
+      this.endDragVisuals(drag);
+
+      if (drag.moved || drag.lifted) {
+        this.swallowClick = true;
+        // Щелчок после отпускания может и не прийти (курсор ушёл
+        // с метки) — флаг не должен пережить этот жест.
+        setTimeout(() => { this.swallowClick = false; }, 0);
+      }
+
+      if (drag.moved) {
+        const point = this.toGraphCoords(event.clientX, event.clientY);
+        this.drop(drag, point);
+      }
+      this.flushPending(drag.kind);
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      const drag = this.drag;
+      if (drag) {
+        // Esc во время переноса отменяет его.
+        clearTimeout(drag.timer);
+        this.drag = null;
+        this.endDragVisuals(drag);
+        this.placeMarker(drag.marker, drag.origin.x, drag.origin.y);
+        this.flushPending(drag.kind);
+        return;
+      }
+      if (this.selected) {
+        this.select(null);
+      }
+    });
+
+    // Щелчок по пустому месту карты снимает выделение. Панорамирование
+    // считается не щелчком: иначе сдвиг карты сбрасывал бы выбор.
+    let down = null;
+    this.svg.addEventListener("mousedown", (event) => {
+      down = { x: event.clientX, y: event.clientY };
+    });
+    this.svg.addEventListener("click", (event) => {
+      if (!this.selected || event.target.closest(".movable-marker")) {
+        return;
+      }
+      if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > DRAG_THRESHOLD_PX) {
+        return;
+      }
+      this.select(null);
+    });
+  }
+
+  endDragVisuals(drag) {
+    this.svg.classList.remove("dragging-object");
+    drag.marker.classList.remove("is-dragging", "is-lifted");
+    this.liftMarker(drag.marker, false);
+  }
+
+  flushPending(kind) {
+    if (this.pendingDraw[kind]) this.redraw(kind);
+  }
+
+  /**
+   * Объект отпущен в точке графа. До ответа сервера он рисуется на новом
+   * месте; при отказе возвращается туда, где стоял.
+   */
+  drop(drag, point) {
+    const { kind, item } = drag;
+    const key = `${kind}:${item.id}`;
+    let position = this.unprojectXY(point.x, point.y);
+
+    if (kind === "aircraft") {
+      // Борт стоит только на стоянке: сервер поставит его на ближайшую,
+      // карта сразу показывает туда же.
+      const stand = this.nearestStand(point);
+      if (!stand) {
+        this.placeMarker(drag.marker, drag.origin.x, drag.origin.y);
+        return;
+      }
+      this.placeMarker(drag.marker, stand.x, stand.y);
+      this.overrides.set(key, { standNodeId: stand.id });
+      position = { lat: stand.lat, lon: stand.lon };
+    } else {
+      this.overrides.set(key, position);
+    }
+    if (kind === "employee") {
+      this.trails.delete(item.id);
+    }
+
+    const done = () => {
+      this.overrides.delete(key);
+      this.redraw(kind);
+    };
+    if (this.onObjectDrop) {
+      this.onObjectDrop(kind, item, position, done);
+    } else {
+      done();
+    }
+  }
+
+  nearestStand(point) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const node of this.nodesById.values()) {
+      if (node.type !== "stand") continue;
+      const distance = Math.hypot(node.x - point.x, node.y - point.y);
+      if (distance < bestDistance) {
+        best = node;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  /** Переставляет значок в точку графа, сохраняя экранный размер. */
+  placeMarker(marker, x, y) {
+    marker.dataset.x = x;
+    marker.dataset.y = y;
+    const lift = Number(marker.dataset.lift) || 1;
+    marker.setAttribute("transform", `translate(${x} ${y}) scale(${this.markerScale * lift})`);
+  }
+
+  /** «Поднимает» метку при переносе: она крупнее, пока её держат. */
+  liftMarker(marker, lifted) {
+    if (lifted) marker.dataset.lift = LIFT_SCALE;
+    else delete marker.dataset.lift;
+    this.placeMarker(marker, Number(marker.dataset.x), Number(marker.dataset.y));
   }
 
   /**
@@ -707,6 +821,13 @@ class AirportMap {
 
     for (const employee of employees) {
       seen.add(employee.id);
+      // Точка, поставленная вручную (перенос на карте), — не движение:
+      // след от старого места к новому выглядел бы как пройденный путь.
+      // Такой след сбрасывается и начинается заново с настоящих координат.
+      if (employee.location_source === "manual") {
+        this.trails.delete(employee.id);
+        continue;
+      }
       const position = this.projectLatLon(employee.lat, employee.lon);
       const trail = this.trails.get(employee.id) || [];
       const last = trail[trail.length - 1];
@@ -932,7 +1053,7 @@ class AirportMap {
     for (const marker of this.viewport.querySelectorAll("g.marker")) {
       marker.setAttribute(
         "transform",
-        `translate(${marker.dataset.x} ${marker.dataset.y}) scale(${scale})`
+        `translate(${marker.dataset.x} ${marker.dataset.y}) scale(${scale * (Number(marker.dataset.lift) || 1)})`
       );
     }
     this.updateLabelVisibility();
@@ -1002,6 +1123,18 @@ class AirportMap {
   setupPanZoom() {
     let dragging = false;
     let origin = null;
+
+    // Удержание объекта превращает начатое панорамирование в его перенос:
+    // карта возвращается туда, где была в момент нажатия.
+    this.cancelPan = () => {
+      if (dragging && origin) {
+        this.transform.x = origin.x;
+        this.transform.y = origin.y;
+        this.applyTransform();
+      }
+      dragging = false;
+      this.svg.classList.remove("dragging");
+    };
 
     this.svg.addEventListener("mousedown", (event) => {
       dragging = true;
@@ -1102,6 +1235,58 @@ class AirportMap {
     this.transform.y = centre.y - this.transform.scale * node.y;
     this.applyTransform();
   }
+
+  /** Наводит карту на произвольную точку графа — для поиска по карте. */
+  focusOnPoint(x, y, scale = 5) {
+    if (!this.baseView) {
+      return;
+    }
+    const centre = this.screenCentre();
+    this.transform.scale = clamp(Math.max(this.transform.scale, scale), MIN_ZOOM, MAX_ZOOM);
+    this.transform.x = centre.x - this.transform.scale * x;
+    this.transform.y = centre.y - this.transform.scale * y;
+    this.applyTransform();
+  }
+
+  /**
+   * Короткая подсветка найденного объекта: расходящиеся кольца
+   * и подпись. Через несколько секунд исчезает сама — это указатель
+   * «вот он», а не постоянная отметка.
+   */
+  flashAt(x, y, text) {
+    if (!this.layers.search) {
+      this.layers.search = createGroup("layer-search");
+      this.viewport.append(this.layers.search);
+    }
+    const layer = this.layers.search;
+    layer.replaceChildren();
+    clearTimeout(this.flashTimer);
+
+    const marker = this.createMarker(x, y);
+    marker.classList.add("search-flash");
+    for (const delay of [0, 0.5]) {
+      const ring = document.createElementNS(SVG_NS, "circle");
+      ring.setAttribute("r", 22);
+      ring.setAttribute("class", "search-flash-ring");
+      ring.style.animationDelay = `${delay}s`;
+      marker.append(ring);
+    }
+    const core = document.createElementNS(SVG_NS, "circle");
+    core.setAttribute("r", 16);
+    core.setAttribute("class", "search-flash-core");
+    marker.append(core);
+
+    if (text) {
+      const label = document.createElementNS(SVG_NS, "text");
+      label.setAttribute("y", -24);
+      label.setAttribute("class", "search-flash-label");
+      label.textContent = text;
+      marker.append(label);
+    }
+    layer.append(marker);
+    this.updateMarkerScale();
+    this.flashTimer = setTimeout(() => layer.replaceChildren(), 4500);
+  }
 }
 
 /* --- Вспомогательные функции --- */
@@ -1110,6 +1295,40 @@ function createGroup(className) {
   const group = document.createElementNS(SVG_NS, "g");
   group.setAttribute("class", className);
   return group;
+}
+
+// Сколько держать кнопку на объекте, чтобы он «поднялся» для переноса.
+const HOLD_TO_DRAG_MS = 300;
+// Смещение мыши, после которого нажатие считается движением.
+const DRAG_THRESHOLD_PX = 4;
+// Во сколько раз крупнее метка, пока её держат и переносят.
+const LIFT_SCALE = 1.5;
+
+/** Кольцо выделения подвижного объекта; видно только у выбранного. */
+function selectRing(cx, cy, r) {
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", cx);
+  ring.setAttribute("cy", cy);
+  ring.setAttribute("r", r);
+  ring.setAttribute("class", "select-ring");
+  return ring;
+}
+
+/** Невидимая увеличенная зона захвата: мелкую метку мышью ловить трудно. */
+function hitArea(cx, cy) {
+  const hit = document.createElementNS(SVG_NS, "circle");
+  hit.setAttribute("cx", cx);
+  hit.setAttribute("cy", cy);
+  hit.setAttribute("r", 12);
+  hit.setAttribute("class", "hit-area");
+  return hit;
+}
+
+function markerIdentity(marker) {
+  const { aircraftId, vehicleId, employeeId } = marker.dataset;
+  if (aircraftId) return { kind: "aircraft", id: Number(aircraftId) };
+  if (vehicleId) return { kind: "vehicle", id: Number(vehicleId) };
+  return { kind: "employee", id: Number(employeeId) };
 }
 
 function title(text) {

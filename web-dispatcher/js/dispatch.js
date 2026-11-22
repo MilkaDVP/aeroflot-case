@@ -83,14 +83,20 @@ async function start() {
 
     airportMap = new AirportMap(elements.map);
     airportMap.onStandClick = openCallFormForStand;
-    airportMap.onVehicleDrop = dropVehicle;
-    airportMap.onVehicleRefused = (vehicle) =>
-      showToast(`${vehicle.call_sign} занята — переносить можно только свободную машину`, true);
+    airportMap.onObjectDrop = dropObject;
+    airportMap.onObjectRefused = (kind, item) =>
+      showToast(`${item.call_sign} занята — переносить можно только свободную машину`, true);
     airportMap.attachTiles(showMapNotice);
 
     state.graph = await Api.airportGraph(user.airport_icao);
     airportMap.render(state.graph);
     applyBasemap(savedBasemap());
+    new MapSearch(document.querySelector(".map-tools"), airportMap, () => ({
+      graph: state.graph,
+      aircraft: state.aircraft,
+      employees: state.employees,
+      vehicles: state.vehicles,
+    }));
 
     initAlerts();
     await refresh();
@@ -853,22 +859,26 @@ async function moveTo(position) {
 }
 
 /**
- * Машину перетащили мышью на новое место.
+ * Машину, сотрудника или борт перетащили мышью на новое место.
  *
- * Место сохраняется на сервере сразу; если по открытому вызову ещё идёт
- * подбор, он пересчитывается — от того, где стоит машина, зависит,
- * успеет ли инженер её забрать.
+ * Место сохраняется на сервере сразу. Если по открытому вызову ещё идёт
+ * подбор, он пересчитывается: от того, где стоят люди и машины, зависит,
+ * кто успеет к борту.
  */
-async function dropVehicle(vehicle, position, done) {
+async function dropObject(kind, item, position, done) {
+  const point = { lat: position.lat, lon: position.lon };
+  const name = item.board_number || item.call_sign || item.full_name;
   try {
-    await Api.moveVehicle(vehicle.id, { lat: position.lat, lon: position.lon });
+    if (kind === "aircraft") await Api.moveAircraft(item.id, point);
+    if (kind === "vehicle") await Api.moveVehicle(item.id, point);
+    if (kind === "employee") await Api.sendLocation(item.id, point.lat, point.lon);
   } catch (error) {
-    // Отказ сервера: машина возвращается туда, где стояла.
+    // Отказ сервера: объект возвращается туда, где стоял.
     done();
-    showToast(error.detail || "Не удалось переместить машину", true);
+    showToast(error.detail || `Не удалось переместить: ${name}`, true);
     return;
   }
-  showToast(`${vehicle.call_sign} перемещена`);
+  showToast(`${name}: новое место сохранено`);
   await refresh();
   done();
   if (isAssignable(state.selectedCall)) {
