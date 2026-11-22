@@ -8,6 +8,7 @@ SQLite выбран сознательно: у проекта не должно 
 
 import os
 
+from fastapi import Depends
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -33,6 +34,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def begin_dispatch_write(db):
+    """Резервируем запись до чтения назначений, очередей и свободных стоянок."""
+    if db.get_bind().dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+
+
+def get_dispatch_db(db=Depends(get_db)):
+    begin_dispatch_write(db)
+    return db
 
 
 def create_all():

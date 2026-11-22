@@ -19,11 +19,12 @@ from auth.dependencies import (
 )
 from clock import to_iso_utc, utc_now, utc_today
 from constants import DEFECT_TYPES, TRAVEL_MODES, TRAVEL_WALK, TRAVEL_WITH_LEAD, WORK_STAGES
-from database import get_db
+from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.call import ACTIVE_CALL_STATUSES, CALL_STATUSES, WORKING_CALL_STATUSES, Call
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
+from models.call import STATUS_CANCELLED as CALL_CANCELLED
 from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
@@ -103,7 +104,7 @@ ERROR_BAD_TRAVEL = "Способ передвижения должен быть 
 ERROR_NO_LEAD_VEHICLE = "У ответственного инженера нет машины — ехать с ним не на чем"
 ERROR_LEAD_ONLY_FOR_SUPPORT = "Ехать с ответственным может только второй инженер"
 ERROR_NOT_ASSIGNED = "У вызова нет исполнителя: снимать нечего"
-ERROR_CLOSED_CALL = "Вызов закрыт. Снять исполнителя с закрытого вызова нельзя"
+ERROR_CLOSED_CALL = "Вызов уже в истории. Изменить назначение или статус нельзя"
 ERROR_UNASSIGN_NEEDS_REASON = (
     "Снятие исполнителя меняет ход обслуживания борта. Укажите причину (reason)"
 )
@@ -214,7 +215,7 @@ def defect_summary(call):
 def shift_employees(db, context):
     """Сотрудники аэропорта сессии в виде словарей для алгоритма."""
     employees = (
-        db.query(Employee).filter(Employee.airport_icao == context.airport_icao).all()
+        db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao).all()
     )
     return [employee.as_algorithm_dict() for employee in employees]
 
@@ -349,8 +350,8 @@ def list_calls(
 )
 def create_call(
     payload: CallCreateRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Регистрация вызова: борт, тип неисправности и описание экипажа.
@@ -410,8 +411,8 @@ def new_call(db, aircraft, defect, description, reported_at=None, source=None):
 )
 def suggest_employee(
     call_id: int,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Подбор кандидата с маршрутом, временем прибытия и обоснованием.
@@ -440,8 +441,8 @@ def suggest_employee(
 def assign_employee(
     call_id: int,
     payload: AssignRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Назначение исполнителя на вызов.
@@ -484,7 +485,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         if ride_vehicle is None:
             raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_LEAD_VEHICLE)
     employee = db.get(Employee, payload.employee_id)
-    if employee is None:
+    if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
     check_permit(call, employee)
@@ -557,8 +558,8 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
 def add_support(
     call_id: int,
     payload: AssignRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Ещё один инженер на тот же вызов.
@@ -571,7 +572,7 @@ def add_support(
     """
     call = load_call(db, context, call_id)
     root = support.root_of(call)
-    if root.status == CALL_CLOSED or root.assigned_employee_id is None:
+    if root.status not in ACTIVE_CALL_STATUSES or root.assigned_employee_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_SUPPORT_NEEDS_MAIN)
 
     team = [root.assigned_employee_id] + [
@@ -612,8 +613,8 @@ def add_support(
 def send_message(
     call_id: int,
     payload: MessageRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """Сообщение диспетчера инженерам вызова: его увидят в телефоне."""
     call = load_call(db, context, call_id)
@@ -647,8 +648,8 @@ def switch_employee(db, call, employee, result, actor):
 def set_urgency(
     call_id: int,
     payload: UrgencyRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """Диспетчер отмечает вызов срочным или снимает отметку."""
     call = load_call(db, context, call_id)
@@ -663,8 +664,8 @@ def set_urgency(
 def unassign_employee(
     call_id: int,
     payload: UnassignRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Снятие исполнителя: вызов возвращается к подбору, можно назначить другого.
@@ -679,7 +680,7 @@ def unassign_employee(
     """
     call = load_call(db, context, call_id)
 
-    if call.status == CALL_CLOSED:
+    if call.status not in ACTIVE_CALL_STATUSES:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_CLOSED_CALL)
     if call.assigned_employee_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NOT_ASSIGNED)
@@ -713,8 +714,8 @@ def unassign_employee(
 def update_call_status(
     call_id: int,
     payload: CallStatusRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
-    db: Session = Depends(get_db),
 ):
     """
     Смена статуса вызова.
@@ -733,6 +734,24 @@ def update_call_status(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_QUEUED_BY_ASSIGN_ONLY)
 
     call = load_call(db, context, call_id)
+    if call.status not in ACTIVE_CALL_STATUSES:
+        if call.status == payload.status:
+            return to_response(call, db)
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_CLOSED_CALL)
+
+    if payload.status == CALL_CANCELLED:
+        root = support.root_of(call)
+        now = utc_now()
+        for item in [root, *support.support_calls(root)]:
+            was_working = item.status in WORKING_CALL_STATUSES
+            arrived = item.status == CALL_ARRIVED
+            item.status = CALL_CANCELLED
+            item.closed_at = now
+            if item.assigned_employee is not None:
+                advance_after_close(db, item.assigned_employee, item, was_working, arrived)
+        db.commit()
+        return to_response(root, db)
+
     if call.status == CALL_QUEUED and payload.status in WORKING_CALL_STATUSES:
         # Ручной перевод вызова из очереди в текущие дал бы инженеру
         # два текущих вызова одновременно — ровно тот дефект, от которого

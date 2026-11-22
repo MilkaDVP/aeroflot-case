@@ -46,9 +46,6 @@ const ACTIONS = {
 // Этапы работ, которые отмечает инженер. Остальное он пишет словами.
 const STAGE_WAITING_PARTS = "waiting_parts";
 const STAGE_WORKING = "repair";
-// Сколько последних сообщений переписки видно на экране вызова.
-const CHAT_SHOWN = 20;
-
 const CLOSE_CONFIRM = "Работы завершены? Закрытый вызов вернуть нельзя.";
 
 const el = (id) => document.getElementById(id);
@@ -80,6 +77,7 @@ async function start() {
     // с сохранёнными данными инженер продолжает работу.
     if (error.status === 0 && Session.user) {
       state.user = Session.user;
+      state.airportPoint = airportPointOf(state.user);
       state.onShift = true;
       enterWork();
       return;
@@ -159,15 +157,13 @@ function afterLogin(user) {
   el("shift-name").textContent = user.full_name;
   el("menu-name").textContent = user.full_name;
 
-  // Опорная точка аэропорта нужна карте до появления координат.
-  const airport = (user.airports || []).find(
-    (item) => item.icao === user.airport_icao
-  ) || (user.airports || [])[0];
-  // Центр рабочей зоны, а не опорная точка проекции: та смещена к краю
-  // аэродрома, и без координат человек увидел бы забор вместо перрона.
-  state.airportPoint = airport ? airport.centre || airport.ref_point : null;
-
+  state.airportPoint = airportPointOf(user);
   showScreen("shift");
+}
+
+function airportPointOf(user) {
+  const airport = (user.airports || []).find((item) => item.icao === user.airport_icao);
+  return airport ? airport.centre || airport.ref_point : null;
 }
 
 /* --- Вход --- */
@@ -232,7 +228,7 @@ function enterWork() {
   showScreen("work");
   // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
   window.addEventListener("online", refresh);
-  locator.startGps();
+  setGeoMode("gps");
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
   countdownTimer = setInterval(updateCountdown, 1000);
@@ -464,22 +460,24 @@ function toggleWaitingParts() {
 function renderChat(call) {
   renderChatBadge(call);
   const list = el("chat-list");
-  const messages = (call.messages || []).slice(-CHAT_SHOWN);
-  // Перерисовка только при изменении: список обновляется на каждом опросе,
-  // и лишняя перерисовка сбрасывала бы прокрутку.
-  const key = messages.map((item) => item.id).join(",");
-  if (list.dataset.key === key) {
-    return;
+  if (list.dataset.callId !== String(call.id)) {
+    list.replaceChildren();
+    list.dataset.callId = call.id;
+    list.dataset.lastId = 0;
+    el("chat-input").value = "";
   }
-  list.dataset.key = key;
-  list.replaceChildren();
-  for (const message of messages) {
+  const follow = list.scrollHeight - list.clientHeight - list.scrollTop <= 3;
+  const last = Number(list.dataset.lastId);
+  for (const message of call.messages || []) {
+    if (message.id <= last) continue;
     const item = document.createElement("div");
     item.className = `chat-item is-${message.author_role}`;
     item.textContent =
       message.author_role === "dispatcher" ? `Диспетчер: ${message.text}` : message.text;
     list.append(item);
+    list.dataset.lastId = message.id;
   }
+  if (follow) list.scrollTop = list.scrollHeight;
 }
 
 /**
@@ -502,6 +500,7 @@ function openChat() {
     renderChatBadge(call);
   }
   openSheet("chat-sheet");
+  el("chat-list").scrollTop = el("chat-list").scrollHeight;
 }
 
 /** Готовая фраза — одним касанием, без набора текста в перчатках. */
@@ -522,9 +521,11 @@ async function sendChatMessage(event) {
   el("chat-send").disabled = true;
   try {
     const call = await Api.sendMessage(text);
-    input.value = "";
+    if (state.call?.call.id !== call.id) return;
+    if (input.value.trim() === text) input.value = "";
     state.call.call = call;
     renderChat(call);
+    el("chat-list").scrollTop = el("chat-list").scrollHeight;
     // Своё сообщение прочитано сразу; новые ответы считаются от него.
     state.chatSeenId = Math.max(...(call.messages || []).map((item) => item.id), 0);
     renderChatBadge(call);
@@ -722,13 +723,15 @@ function targetPoint() {
  */
 function drawRoute() {
   const points = state.call ? state.call.route_points : [];
+  const choosing = locator.mode === "simulation" && !locator.last && state.airportPoint;
   routeMap.render(
     points,
     targetPoint(),
     state.position,
     state.airportPoint,
     state.call ? state.call.vehicle : null,
-    state.call ? state.call.call.pickup_node_id : null
+    state.call ? state.call.call.pickup_node_id : null,
+    choosing ? state.airportPoint : null
   );
   el("map-hint").hidden = locator.mode !== "simulation";
 }
@@ -877,8 +880,6 @@ function applySimulated(lat, lon) {
   // установки точки: locator сразу передаёт её в onPosition.
   state.sentAt = 0;
   locator.simulate(lat, lon);
-  el("geo-lat").value = lat.toFixed(6);
-  el("geo-lon").value = lon.toFixed(6);
 }
 
 function bindEvents() {
@@ -913,19 +914,6 @@ function bindEvents() {
     button.addEventListener("click", () => setGeoMode(button.dataset.mode));
   }
 
-  el("geo-apply").addEventListener("click", () => {
-    const lat = Number(el("geo-lat").value.replace(",", "."));
-    const lon = Number(el("geo-lon").value.replace(",", "."));
-    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-      el("geo-error").hidden = false;
-      el("geo-error").textContent = "Координаты вне допустимых пределов";
-      return;
-    }
-    el("geo-error").hidden = true;
-    applySimulated(lat, lon);
-    closeSheet("geo-sheet");
-  });
-
   for (const backdrop of document.querySelectorAll(".sheet-backdrop")) {
     backdrop.addEventListener("click", (event) => {
       if (event.target === backdrop) {
@@ -940,7 +928,6 @@ function setGeoMode(mode) {
     button.classList.toggle("active", button.dataset.mode === mode);
   }
 
-  el("geo-manual").hidden = mode !== "simulation";
   el("geo-error").hidden = true;
 
   if (mode === "gps") {
@@ -951,22 +938,10 @@ function setGeoMode(mode) {
     el("geo-mode").textContent = "Место: вручную";
     el("geo-mode").classList.remove("is-warn");
     el("geo-notice").hidden = true;
-    el("geo-explain").textContent =
-      "Вы сами показываете, где находитесь. Нужно, когда GPS не ловит, " +
-      "и для показа без выхода на перрон.";
-    // Отталкиваемся от последней известной точки, чтобы не вводить
-    // координаты Шереметьево с нуля.
-    const base = state.position || (state.call ? targetPoint() : null);
-    if (base) {
-      el("geo-lat").value = base.lat.toFixed(6);
-      el("geo-lon").value = base.lon.toFixed(6);
-      locator.simulate(base.lat, base.lon);
-    }
+    el("geo-explain").textContent = "Нажмите «Готово» и коснитесь карты там, где вы стоите.";
+    locator.startManual();
   }
-
-  if (state.call) {
-    drawRoute();
-  }
+  drawRoute();
 }
 
 /**
@@ -1032,6 +1007,8 @@ async function logout() {
   }
   Session.clear();
   state.user = null;
+  state.position = null;
+  state.sentAt = 0;
   state.call = null;
   closeSheet("menu-sheet");
   showScreen("login");

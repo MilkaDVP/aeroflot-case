@@ -27,7 +27,7 @@ from api import (
     shift,
     vehicles,
 )
-from database import SessionLocal, create_all
+from database import SessionLocal, begin_dispatch_write, create_all
 from graph_registry import load_from_database, preload_all
 from constants import DRILL_MAX_STEP_S, DRILL_TICK_S
 from services import drill as drill_service
@@ -56,6 +56,7 @@ def drill_tick(dt_s):
     """Один такт учений по всем аэропортам, где они включены."""
     db = SessionLocal()
     try:
+        begin_dispatch_write(db)
         for icao in drill_service.enabled_airports(db):
             drill_service.step(db, icao, dt_s)
         db.commit()

@@ -24,7 +24,8 @@ const EARTH_RADIUS_M_MAP = 6371008.8;
 const EARTH_CIRCUMFERENCE_M = 40075016.686;
 const TILE_SIZE = 256;
 
-const MIN_TILE_ZOOM = 12;
+// Дальняя GPS-фиксация может попасть в один кадр с аэропортом.
+const MIN_TILE_ZOOM = 0;
 const MAX_TILE_ZOOM = 19;
 
 // Охват карты, когда вызова нет: примерно квартал перрона вокруг человека.
@@ -68,7 +69,7 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId) {
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre) {
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -95,8 +96,9 @@ class RouteMap {
       return;
     }
 
-    this.reference = all[0];
-    this.fit(all.map((point) => this.project(point)), points.length > 0, usingFallback);
+    this.reference = centre || all[0];
+    const extent = centre ? [centre] : all;
+    this.fit(extent.map((point) => this.project(point)), !centre && points.length > 0, centre || usingFallback);
     this.drawTiles();
 
     if (points.length >= 2) {
@@ -223,11 +225,8 @@ class RouteMap {
     ];
     const limit = 2 ** zoom;
 
-    for (let cx = columns[0]; cx <= columns[1]; cx += 1) {
-      for (let cy = rows[0]; cy <= rows[1]; cy += 1) {
-        if (cx < 0 || cy < 0 || cx >= limit || cy >= limit) {
-          continue;
-        }
+    for (let cx = Math.max(0, columns[0]); cx <= Math.min(columns[1], limit - 1); cx += 1) {
+      for (let cy = Math.max(0, rows[0]); cy <= Math.min(rows[1], limit - 1); cy += 1) {
         const image = document.createElementNS(SVG_NS, "image");
         image.setAttribute(
           "href",
@@ -275,7 +274,7 @@ class RouteMap {
     const projected = points.map((point) => this.project(point));
     const split = pickupNodeId ? points.findIndex((point) => point.id === pickupNodeId) : -1;
 
-    if (split > 0 && split < points.length - 1) {
+    if (split > 0 && split < points.length) {
       this.drawRoute(projected.slice(0, split + 1), "route-line is-walk");
       this.drawRoute(projected.slice(split), "route-line");
       return;
@@ -284,6 +283,7 @@ class RouteMap {
   }
 
   drawRoute(points, className) {
+    if (points.length < 2) return;
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
     line.setAttribute("class", className);

@@ -129,6 +129,10 @@ const Api = {
   updateEmployee: (employeeId, payload) =>
     request("PATCH", `/api/employees/${employeeId}`, payload),
 
+  moveVehicle: (id, point) => request("POST", `/api/vehicles/${id}/location`, point),
+  moveAircraft: (id, point) => request("POST", `/api/aircraft/${id}/location`, point),
+  deleteEmployee: (id) => request("DELETE", `/api/employees/${id}`),
+
   aircraft: () => request("GET", "/api/aircraft"),
   // Открытый справочник неисправностей: поиск словами экипажа или номером
   // главы ATA и пополнение из формы вызова.
@@ -141,7 +145,7 @@ const Api = {
   ataChapters: () => request("GET", "/api/ata-chapters"),
   vehicles: () => request("GET", "/api/vehicles"),
 
-  calls: () => request("GET", "/api/calls"),
+  calls: (includeClosed = false) => request("GET", includeClosed ? "/api/calls?include_closed=true" : "/api/calls"),
   createCall: (aircraft_id, defect_code, description, urgent) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),

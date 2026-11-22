@@ -7,7 +7,7 @@
  * реальный GPS не требуется, координаты допускается задавать вручную,
  * а записать демонстрационное видео с настоящим перемещением по перрону
  * Шереметьево невозможно. Поэтому имитация — полноценный рабочий режим:
- * координаты задаются касанием карты или вводом с клавиатуры.
+ * координаты задаются касанием карты.
  */
 
 const GEO_OPTIONS = {
@@ -27,17 +27,20 @@ class Locator {
     this.onPosition = onPosition;
     this.onError = onError || (() => {});
     this.watchId = null;
-    this.simulated = null;
+    this.mode = "gps";
     this.last = null;
   }
 
-  get mode() {
-    return this.simulated ? "simulation" : "gps";
+  startManual() {
+    this.stopGps();
+    this.mode = "simulation";
+    this.last = null;
   }
 
   /** Включает слежение за настоящими координатами. */
   startGps() {
-    this.simulated = null;
+    this.mode = "gps";
+    this.last = null;
 
     if (!("geolocation" in navigator)) {
       this.onError("Устройство не умеет определять местоположение");
@@ -46,9 +49,9 @@ class Locator {
 
     this.stopGps();
     this.watchId = navigator.geolocation.watchPosition(
-      (position) => this.publish(position.coords.latitude, position.coords.longitude,
+      (position) => this.mode === "gps" && this.publish(position.coords.latitude, position.coords.longitude,
                                  position.coords.accuracy, position.timestamp),
-      (error) => this.onError(describeGeoError(error)),
+      (error) => this.mode === "gps" && this.onError(describeGeoError(error)),
       GEO_OPTIONS
     );
     return true;
@@ -69,8 +72,7 @@ class Locator {
    * во время демонстрации.
    */
   simulate(lat, lon) {
-    this.stopGps();
-    this.simulated = { lat, lon };
+    this.mode = "simulation";
     this.publish(lat, lon, null, Date.now());
   }
 
@@ -87,7 +89,7 @@ class Locator {
       lon,
       accuracy,
       measuredAt: measuredAt || Date.now(),
-      source: this.simulated ? "simulation" : "gps",
+      source: this.mode,
     };
     this.onPosition(this.last);
   }

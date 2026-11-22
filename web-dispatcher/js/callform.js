@@ -53,29 +53,19 @@ function showCallForm(options) {
   };
 
   document.body.append(form.root);
+  bindAircraftSearch(form, options);
   bindCallForm(form, options);
   if (form.report) {
     // Слова экипажа уже есть — типы предлагаются по ним сразу.
     runDefectSearch(form);
   }
-  field(form, "#form-defect-query").focus();
+  field(form, form.aircraftId ? "#form-defect-query" : "#form-aircraft").focus();
   return form;
 }
 
 function buildCallFormMarkup(options) {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-
-  const aircraftOptions = options.aircraft
-    .map(
-      (item) =>
-        `<option value="${item.id}" ${
-          item.id === options.preselectedAircraftId ? "selected" : ""
-        }>${escapeHtml(item.board_number)} · ${escapeHtml(item.aircraft_type)} · стоянка ${escapeHtml(
-          item.stand_ref || "—"
-        )}</option>`
-    )
-    .join("");
 
   backdrop.innerHTML = `
     <div class="modal call-form">
@@ -84,7 +74,9 @@ function buildCallFormMarkup(options) {
 
       <div class="modal-field">
         <label for="form-aircraft">Воздушное судно</label>
-        <select id="form-aircraft">${aircraftOptions}</select>
+        <input id="form-aircraft" role="combobox" aria-autocomplete="list" aria-expanded="false"
+               aria-controls="aircraft-results" autocomplete="off" placeholder="Бортовой номер">
+        <div id="aircraft-results" class="aircraft-results" role="listbox" hidden></div>
       </div>
 
       ${options.report ? defectTypeField(options) + wordsField(options) : wordsField(options) + defectTypeField(options)}
@@ -185,6 +177,76 @@ function reportBanner(report) {
       <div class="report-banner-text">«${escapeHtml(report.description)}»</div>
     </div>
   `;
+}
+
+function closeAircraftResults(form) {
+  field(form, "#aircraft-results").hidden = true;
+  const input = field(form, "#form-aircraft");
+  input.setAttribute("aria-expanded", "false");
+  input.removeAttribute("aria-activedescendant");
+}
+
+function chooseAircraft(form, item) {
+  field(form, "#form-aircraft").value = item.board_number;
+  form.aircraftId = item.id;
+  closeAircraftResults(form);
+  updateSubmitState(form);
+}
+
+function searchAircraft(form, aircraft) {
+  const input = field(form, "#form-aircraft");
+  const list = field(form, "#aircraft-results");
+  const query = input.value.trim().toUpperCase();
+  form.aircraftMatches = query ? aircraft.filter((item) => item.board_number.toUpperCase().includes(query)) : [];
+  form.aircraftIndex = -1;
+  form.aircraftId = form.aircraftMatches.find((item) => item.board_number.toUpperCase() === query)?.id || null;
+  updateSubmitState(form);
+  list.replaceChildren();
+  closeAircraftResults(form);
+  if (!query) return;
+
+  for (const item of form.aircraftMatches) {
+    const option = document.createElement("div");
+    option.id = `aircraft-option-${item.id}`;
+    option.setAttribute("role", "option");
+    option.textContent = `${item.board_number} · ${item.aircraft_type} · стоянка ${item.stand_ref || "—"}`;
+    option.addEventListener("mousedown", (event) => event.preventDefault());
+    option.addEventListener("click", () => chooseAircraft(form, item));
+    list.append(option);
+  }
+  if (!form.aircraftMatches.length) list.textContent = "Борт не найден";
+  list.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function onAircraftKey(form, event) {
+  const list = field(form, "#aircraft-results");
+  if (event.key === "Escape") closeAircraftResults(form);
+  if (list.hidden || !form.aircraftMatches.length) return;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    chooseAircraft(form, form.aircraftMatches[Math.max(0, form.aircraftIndex)]);
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const count = form.aircraftMatches.length;
+  const step = event.key === "ArrowDown" ? 1 : -1;
+  const index = form.aircraftIndex < 0 && step < 0 ? count - 1 : (form.aircraftIndex + step + count) % count;
+  form.aircraftIndex = index;
+  const active = list.children[index];
+  for (const option of list.children) option.setAttribute("aria-selected", String(option === active));
+  event.target.setAttribute("aria-activedescendant", active.id);
+  active.scrollIntoView({ block: "nearest" });
+}
+
+function bindAircraftSearch(form, options) {
+  const input = field(form, "#form-aircraft");
+  input.addEventListener("input", () => searchAircraft(form, options.aircraft));
+  input.addEventListener("blur", () => closeAircraftResults(form));
+  input.addEventListener("keydown", (event) => onAircraftKey(form, event));
+  const initial = options.aircraft.find((item) => item.id === options.preselectedAircraftId);
+  if (initial) chooseAircraft(form, initial);
 }
 
 function bindCallForm(form, options) {
@@ -502,7 +564,7 @@ function updateSubmitState(form) {
       ? field(form, "#form-new-name").value.trim().length >= 3 &&
         Boolean(field(form, "#form-new-ata").value)
       : Boolean(form.selected);
-  field(form, "#form-submit").disabled = !ready || form.busy;
+  field(form, "#form-submit").disabled = !ready || !form.aircraftId || form.busy;
 }
 
 /**
@@ -531,7 +593,7 @@ async function submitCallForm(form, options) {
 
     // Разбор входящего сообщения: вызов создаётся из него и наследует
     // время сообщения экипажа — от него идёт отсчёт регламента.
-    const aircraftId = Number(field(form, "#form-aircraft").value);
+    const aircraftId = form.aircraftId;
     const urgent = field(form, "#form-urgent").checked;
     const call = options.report
       ? await Api.acceptReport(options.report.id, code, aircraftId, urgent)

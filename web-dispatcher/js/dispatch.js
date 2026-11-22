@@ -26,11 +26,12 @@ const state = {
   // Все вызовы с сервера, включая вызовы поддержки (второй инженер).
   // В списке слева — только основные: state.calls.
   allCalls: [],
-  // Режим имитации координат: включён ли и кого переставляем.
   // Идут ли учения: сервер сам двигает сотрудников без телефона.
   drill: false,
+  // Выбранный объект сохраняется при конфликте стоянок.
   moveMode: false,
-  movingEmployeeId: null,
+  moving: null,
+  movePending: false,
 };
 
 const elements = {
@@ -38,13 +39,25 @@ const elements = {
   callsList: document.getElementById("calls-list"),
   callsCount: document.getElementById("calls-count"),
   suggestBody: document.getElementById("suggest-body"),
-  assignButton: document.getElementById("assign"),
+  assignButton: document.createElement("button"),
+  executorMenu: document.getElementById("executor-menu"),
   clock: document.getElementById("clock"),
   connStatus: document.getElementById("conn-status"),
 };
 
 let airportMap = null;
 let pollTimer = null;
+
+elements.assignButton.id = "assign";
+elements.assignButton.className = "primary";
+elements.assignButton.type = "button";
+let refreshVersion = 0;
+let appliedRefresh = 0;
+
+function selectionKey() {
+  const user = Session.user;
+  return `oto.call.${user.login}.${user.airport_icao}.${user.shift}`;
+}
 
 if (Session.token) {
   start();
@@ -66,6 +79,8 @@ async function start() {
       user.shift === "day" ? "дневная" : "ночная";
     document.getElementById("ctx-user").textContent = user.full_name;
 
+    document.getElementById("admin-link").hidden = user.role !== "admin";
+
     airportMap = new AirportMap(elements.map);
     airportMap.onStandClick = openCallFormForStand;
     airportMap.attachTiles(showMapNotice);
@@ -76,6 +91,9 @@ async function start() {
 
     initAlerts();
     await refresh();
+    const saved = Number(sessionStorage.getItem(selectionKey()));
+    const call = state.calls.find((item) => item.id === saved);
+    if (call) await selectCall(call);
     startClock();
     pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
   } catch (error) {
@@ -85,6 +103,7 @@ async function start() {
 
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
 async function refresh() {
+  const version = ++refreshVersion;
   try {
     const [employees, aircraft, calls, vehicles, drill, reports] = await Promise.all([
       Api.employees(),
@@ -94,6 +113,9 @@ async function refresh() {
       Api.drillState(),
       Api.reports(),
     ]);
+    if (version < appliedRefresh) return;
+    appliedRefresh = version;
+    const previous = state.selectedCall;
     state.drill = drill.enabled;
     state.reports = reports;
 
@@ -110,6 +132,7 @@ async function refresh() {
       const fresh = calls.find((call) => call.id === state.selectedCall.id);
       state.selectedCall = fresh || null;
       if (!fresh) {
+        sessionStorage.removeItem(selectionKey());
         clearSuggestion();
       }
     }
@@ -122,7 +145,25 @@ async function refresh() {
     // исполнителя, поэтому его карточка обновляется на каждом опросе.
     // Панель подбора для неназначенного вызова не трогаем: в ней диспетчер
     // мог выбрать другого кандидата, и опрос не должен сбрасывать его выбор.
-    if (state.selectedCall && !isAssignable(state.selectedCall)) {
+    const selected = state.selectedCall;
+    if (selected && (isAssignable(previous) !== isAssignable(selected)
+        || (isAssignable(selected) && previous.stand_node_id !== selected.stand_node_id))) {
+      await selectCall(selected);
+    } else if (selected && !isAssignable(selected)) {
+      const changedTeam = previous.assigned_employee_id !== selected.assigned_employee_id ||
+        String(previous.support.map((item) => item.call_id)) !== String(selected.support.map((item) => item.call_id));
+      if (changedTeam || previous.stand_node_id !== selected.stand_node_id) {
+        state.suggestion = null;
+        state.picked = [];
+        state.travel = {};
+        refreshExecutorMenu();
+        loadExtraCandidates(selected);
+      }
+      if (previous.stand_node_id !== selected.stand_node_id ||
+          previous.pickup_node_id !== selected.pickup_node_id ||
+          String(previous.route_node_ids) !== String(selected.route_node_ids)) {
+        airportMap.drawRoute(selected.route_node_ids, selected.pickup_node_id);
+      }
       renderAssignedCard(state.selectedCall);
       updateAssignButton();
     }
@@ -198,6 +239,25 @@ function openCallById(callId) {
   }
 }
 
+document.getElementById("call-history").addEventListener("click", async (event) => {
+  const anchor = event.currentTarget;
+  try {
+    const calls = await Api.calls(true);
+    const finished = calls.filter((call) => !call.parent_call_id && call.closed_at)
+      .sort((a, b) => b.closed_at.localeCompare(a.closed_at));
+    const rows = finished.map((call) => {
+      const row = document.createElement("div");
+      row.className = "history-call";
+      const date = new Date(call.closed_at).toLocaleString("ru-RU");
+      row.textContent = `${date} · №${call.id} · ${call.board_number} · ст. ${call.stand_ref || "—"} · ${statusTitle(call.status)}`;
+      return row;
+    });
+    openPopover(anchor, "История вызовов", rows.length ? rows : ["Завершённых вызовов нет"]);
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+});
+
 /* --- Работа с вызовом --- */
 
 /**
@@ -241,6 +301,7 @@ async function loadExtraCandidates(call) {
       return;
     }
     state.suggestion = suggestion;
+    refreshExecutorMenu();
     renderAssignedCard(state.selectedCall);
     updateAssignButton();
   } catch (error) {
@@ -251,6 +312,9 @@ async function loadExtraCandidates(call) {
 async function selectCall(call) {
   closePopover();
   state.selectedCall = call;
+  sessionStorage.setItem(selectionKey(), call.id);
+  document.getElementById("call-actions").hidden = false;
+  state.suggestion = null;
   state.picked = [];
   state.travel = {};
   renderCalls(elements.callsList, state.calls, call.id, selectCall);
@@ -266,9 +330,11 @@ async function selectCall(call) {
 
   try {
     const suggestion = await Api.suggest(call.id);
+    if (state.selectedCall?.id !== call.id || !isAssignable(state.selectedCall)) return;
     state.suggestion = suggestion;
     state.picked = suggestion.best ? [suggestion.best.employee_id] : [];
-    renderSuggestion(elements.suggestBody, suggestion, panelContext());
+    renderSuggestion(elements.suggestBody, suggestion);
+    refreshExecutorMenu();
     updateAssignButton();
     airportMap.drawEmployees(state.employees, employeeClass);
 
@@ -305,7 +371,7 @@ function pickCandidate(candidate) {
   }
   // Ответственный сменился — «ехать с первым» могло потерять смысл.
   dropImpossibleTravel();
-  redrawPanel();
+  refreshExecutorMenu();
   airportMap.drawRoute(candidate.route.node_ids, candidate.route.pickup_node_id);
   updateAssignButton();
 }
@@ -314,7 +380,7 @@ function pickCandidate(candidate) {
 function chooseTravel(candidate, mode) {
   state.travel[candidate.employee_id] = mode;
   dropImpossibleTravel();
-  redrawPanel();
+  refreshExecutorMenu();
 }
 
 /** «С первым» без машины у первого невозможно — такой выбор сбрасывается. */
@@ -358,31 +424,72 @@ function panelContext() {
     picked: state.picked,
     travel: state.travel,
     leadVehicle: leadVehicle(),
+    adding: !isAssignable(state.selectedCall),
     onPick: pickCandidate,
     onTravel: chooseTravel,
     queue: queueOptions(),
   };
 }
 
-function redrawPanel() {
-  if (!state.selectedCall) {
-    return;
+function executorNodes() {
+  const call = state.selectedCall;
+  const ctx = panelContext();
+  const nodes = [];
+  if (ctx.adding) {
+    nodes.push(linkButton("Снять исполнителя", unassignSelected, "is-danger"), ...holdButton(call));
+    for (const member of call.support || []) {
+      nodes.push(linkButton(`Снять помощника · ${member.employee_name}`, () => removeSupport(member), "is-danger"));
+    }
   }
-  if (isAssignable(state.selectedCall)) {
-    renderSuggestion(elements.suggestBody, state.suggestion, panelContext());
+  const result = state.suggestion;
+  if (result) {
+    const team = [call.assigned_employee_id, ...(call.support || []).map((item) => item.employee_id)];
+    const busy = ctx.adding ? result.busy.filter((item) => !team.includes(item.employee_id))
+      .map((item) => ({ ...item, switchable: false })) : result.busy;
+    nodes.push(buildCandidateList(result.candidates, ctx), buildMoreChips(result, busy, ctx));
+    updateAssignButton();
+    nodes.push(elements.assignButton);
   } else {
-    renderAssignedCard(state.selectedCall);
+    nodes.push("Загрузка списка инженеров…");
+  }
+  return nodes.filter(Boolean);
+}
+
+function refreshExecutorMenu() {
+  if (popoverState.anchor === elements.executorMenu) {
+    popoverState.root.querySelector(".popover-body").replaceChildren(...executorNodes());
+    placePopover(popoverState.root, elements.executorMenu);
   }
 }
 
-/** Кнопка внизу говорит, сколько человек она отправит. */
+elements.executorMenu.addEventListener("click", () => {
+  openPopover(elements.executorMenu, "Управление исполнителями", executorNodes());
+});
+
+document.getElementById("cancel-call").addEventListener("click", async () => {
+  const call = state.selectedCall;
+  if (!call || !await askDialog({
+    title: `Отменить вызов №${call.id} к борту ${call.board_number}?`,
+    text: "Назначения будут освобождены. Вызов останется в истории.",
+    confirm: "Отменить вызов",
+    danger: true,
+  })) return;
+  try {
+    await Api.setCallStatus(call.id, "cancelled");
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+});
+
+/** Кнопка в меню учитывает всех выбранных инженеров. */
 function updateAssignButton() {
   const count = state.picked.length;
   const adding = !isAssignable(state.selectedCall);
   elements.assignButton.disabled = count === 0 || !state.selectedCall;
   // У назначенного вызова кнопка нужна, только когда кого-то выбрали
   // в «Отправить ещё»: неактивная кнопка внизу была бы лишним шумом.
-  elements.assignButton.parentElement.hidden = adding && count === 0;
+  elements.assignButton.hidden = adding && count === 0;
   if (adding) {
     elements.assignButton.textContent = count > 1 ? `Отправить ещё ${count}` : "Отправить ещё одного";
   } else {
@@ -540,9 +647,9 @@ function clearSuggestion() {
   state.travel = {};
   elements.assignButton.disabled = true;
   elements.assignButton.textContent = "Назначить";
-  elements.assignButton.parentElement.hidden = false;
+  document.getElementById("call-actions").hidden = true;
   airportMap.clearRoute();
-  renderSuggestion(elements.suggestBody, null, null);
+  renderSuggestion(elements.suggestBody, null);
 }
 
 elements.assignButton.addEventListener("click", assignPicked);
@@ -598,6 +705,8 @@ async function assignPicked() {
 
 /** Снятие второго инженера: основной исполнитель остаётся на вызове. */
 async function removeSupport(member) {
+  const callId = state.selectedCall.id;
+  closePopover();
   const reason = await askDialog({
     title: `Снять ${member.employee_name}?`,
     text: "Ответственный исполнитель останется на вызове.",
@@ -610,7 +719,7 @@ async function removeSupport(member) {
   }
   try {
     await Api.unassign(member.call_id, reason);
-    await refresh();
+    await afterAction(callId);
   } catch (error) {
     showToast(error.detail, true);
   }
@@ -619,14 +728,13 @@ async function removeSupport(member) {
 /** Ответ диспетчера инженерам вызова. */
 async function sendCallMessage(call, text) {
   try {
-    await Api.sendMessage(call.id, text);
-    // Поле очищается сразу: перерисовка карточки берёт черновик из него.
-    state.messageDraft = "";
+    const updated = await Api.sendMessage(call.id, text);
+    if (state.selectedCall?.id !== call.id) return;
+    appliedRefresh = ++refreshVersion;
+    state.selectedCall = updated;
     const input = document.getElementById("message-input");
-    if (input) {
-      input.value = "";
-    }
-    await refresh();
+    if (input && input.value.trim() === text) input.value = "";
+    renderAssignedCard(updated, true);
   } catch (error) {
     showToast(error.detail, true);
   }
@@ -636,55 +744,71 @@ async function sendCallMessage(call, text) {
 
 document.getElementById("new-call").addEventListener("click", () => openCallForm(null));
 
-/** Клик по стоянке на карте открывает форму с уже выбранным бортом. */
-/* --- Имитация координат: перемещение сотрудника по карте --- */
-
-/**
- * Зачем это на рабочем экране.
- *
- * Настоящие координаты приходят с телефонов инженеров. Но проверить
- * работу подбора, бегая по перрону с телефоном, невозможно, и задание
- * прямо разрешает имитировать местоположение нажатием на карту.
- * Режим выключен по умолчанию: случайный клик по карте не должен
- * двигать людей.
- */
 function toggleMoveMode() {
   state.moveMode = !state.moveMode;
-  state.movingEmployeeId = null;
-
-  document.getElementById("move-mode").classList.toggle("active", state.moveMode);
-  airportMap.onEmployeeClick = state.moveMode ? pickEmployeeToMove : null;
-  airportMap.onGroundClick = state.moveMode ? moveEmployeeTo : null;
-  showMoveHint(
-    state.moveMode ? "Выберите сотрудника на карте" : null
-  );
+  state.moving = null;
+  const button = document.getElementById("move-mode");
+  button.classList.toggle("active", state.moveMode);
+  button.setAttribute("aria-pressed", String(state.moveMode));
+  airportMap.onObjectClick = state.moveMode ? pickObjectToMove : null;
+  airportMap.onGroundClick = state.moveMode ? moveTo : null;
+  showMoveHint(state.moveMode ? "Выберите борт, свободную машину или сотрудника" : null);
 }
 
-function pickEmployeeToMove(employee) {
-  state.movingEmployeeId = employee.id;
-  showMoveHint(`${employee.full_name}: укажите новое место на карте`);
-}
-
-async function moveEmployeeTo(position) {
-  if (state.movingEmployeeId === null) {
-    showMoveHint("Сначала выберите сотрудника на карте");
+function pickObjectToMove(kind, item, position, event) {
+  if (state.moving) {
+    moveTo(position);
     return;
   }
-
-  const employee = state.employees.find((item) => item.id === state.movingEmployeeId);
-  try {
-    await Api.sendLocation(state.movingEmployeeId, position.lat, position.lon);
-    state.movingEmployeeId = null;
-    await refresh();
-
-    // Подбор пересчитывается сразу: смысл имитации в том, чтобы видеть,
-    // как перестановка людей меняет решение системы.
-    if (state.selectedCall && isAssignable(state.selectedCall)) {
-      await selectCall(state.selectedCall);
+  const markers = new Set(document.elementsFromPoint(event.clientX, event.clientY)
+    .map((node) => node.closest("[data-aircraft-id], [data-vehicle-id], [data-employee-id]"))
+    .filter(Boolean));
+  if (markers.size > 1) {
+    const choices = [];
+    for (const marker of markers) {
+      const { aircraftId, vehicleId, employeeId } = marker.dataset;
+      const type = aircraftId ? "aircraft" : vehicleId ? "vehicle" : "employee";
+      const list = aircraftId ? state.aircraft : vehicleId ? state.vehicles : state.employees;
+      const object = list.find((entry) => entry.id === Number(aircraftId || vehicleId || employeeId));
+      if (object) {
+        choices.push(linkButton(object.board_number || object.call_sign || object.full_name, () => {
+          closePopover();
+          selectMovingObject(type, object);
+        }));
+      }
     }
-    showMoveHint(`${employee ? employee.full_name : "Сотрудник"} перемещён`);
+    openPopover(event.currentTarget, "Что переместить", choices);
+    return;
+  }
+  selectMovingObject(kind, item);
+}
+
+function selectMovingObject(kind, item) {
+  if (kind === "vehicle" && item.status !== "free") {
+    showMoveHint("Эта машина занята. Выберите свободную машину.");
+    return;
+  }
+  state.moving = { kind, id: item.id };
+  showMoveHint(`${item.board_number || item.call_sign || item.full_name} · укажите новое место`);
+}
+
+async function moveTo(position) {
+  if (state.movePending || !state.moving) return;
+  state.movePending = true;
+  const { kind, id } = state.moving;
+  const point = { lat: position.lat, lon: position.lon };
+  try {
+    if (kind === "aircraft") await Api.moveAircraft(id, point);
+    if (kind === "vehicle") await Api.moveVehicle(id, point);
+    if (kind === "employee") await Api.sendLocation(id, point.lat, point.lon);
+    state.moving = null;
+    await refresh();
+    if (kind !== "aircraft" && isAssignable(state.selectedCall)) await selectCall(state.selectedCall);
+    showMoveHint("Место сохранено. Выберите следующий объект.");
   } catch (error) {
     showMoveHint(error.detail);
+  } finally {
+    state.movePending = false;
   }
 }
 
@@ -785,31 +909,8 @@ async function toggleDrill() {
  * «Задержать» останавливает исполнителя на маршруте: так на тренировке
  * разыгрывается вводная «исполнитель встал», и видно, как меняется прогноз.
  */
-function renderAssignedCard(call) {
-  const body = elements.suggestBody;
-  // Карточки перерисовываются на каждом опросе: недописанный ответ
-  // инженеру и курсор в поле должны это пережить.
-  const input = body.querySelector("#message-input");
-  if (input) {
-    state.messageDraft = input.value;
-    state.messageFocused = document.activeElement === input;
-  }
-
-  renderAssignedPanel(body, call, {
-    ...panelContext(),
-    result: state.suggestion,
-    onUnassign: unassignSelected,
-    onRemoveSupport: removeSupport,
-    onSend: sendCallMessage,
-    draft: state.messageDraft || "",
-    extra: holdButton(call),
-  });
-
-  const restored = body.querySelector("#message-input");
-  if (restored && state.messageFocused) {
-    restored.focus();
-    restored.setSelectionRange(restored.value.length, restored.value.length);
-  }
+function renderAssignedCard(call, scrollToEnd = false) {
+  renderAssignedPanel(elements.suggestBody, call, sendCallMessage, scrollToEnd);
 }
 
 /** В учениях — ссылка «задержать»: разыгрывается вводная «исполнитель встал». */
@@ -834,6 +935,7 @@ async function toggleHold(employee) {
   try {
     await Api.holdEmployee(employee.id, !employee.held);
     await refresh();
+    refreshExecutorMenu();
   } catch (error) {
     showToast(error.detail, true);
   }

@@ -27,7 +27,7 @@ from constants import (
     INTAKE_MAX_AGE_H,
     REGULATION_ARRIVAL_LIMIT_MIN,
 )
-from database import get_db
+from database import get_db, get_dispatch_db
 from models.aircraft import Aircraft
 from models.airport import Airport
 from models.report import REPORT_ACCEPTED, REPORT_NEW, REPORT_REJECTED, Report
@@ -276,9 +276,9 @@ def list_reports(
 def accept_report(
     report_id: int,
     payload: ReportAcceptRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
     airport: Context = Depends(require_airport),
-    db: Session = Depends(get_db),
 ):
     """
     Диспетчер разобрал сообщение: определил борт и тип неисправности.

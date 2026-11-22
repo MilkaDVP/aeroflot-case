@@ -14,6 +14,7 @@ from auth.security import new_token, session_expiry, verify_password
 from constants import SHIFT_DAY, SHIFT_NIGHT
 from database import get_db
 from graph_registry import get_graph
+from models.airport import SOURCE_MANUAL
 from models.user import AuthSession, User
 from schemas.auth import (
     AirportBrief,
@@ -49,7 +50,7 @@ def brief_of(airport):
     try:
         graph = get_graph(airport.icao)
         ref_point = graph.ref_point
-        centre = graph.centre
+        centre = graph.ref_point if airport.source == SOURCE_MANUAL else graph.centre
     except HTTPException:
         pass
 
@@ -69,7 +70,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
     # Ответ одинаков и при неверном логине, и при неверном пароле:
     # иначе по ответу можно перебором узнать существующие учётные записи.
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or (user.employee and user.employee.archived) or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_CREDENTIALS)
 
     airports = airport_briefs(user)

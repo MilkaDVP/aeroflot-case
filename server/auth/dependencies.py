@@ -45,7 +45,7 @@ def get_context(token=Depends(get_token), db: Session = Depends(get_db)):
     if session is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_TOKEN)
 
-    if session.is_expired(utc_now()):
+    if session.is_expired(utc_now()) or (session.user.employee and session.user.employee.archived):
         db.delete(session)
         db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_TOKEN)

@@ -232,7 +232,7 @@ class UnassignRequest(BaseModel):
 class CallStatusRequest(BaseModel):
     """Смена статуса вызова."""
 
-    status: str = Field(description="new, suggested, assigned, accepted, arrived, closed")
+    status: str = Field(description="new, suggested, assigned, accepted, arrived, closed, cancelled")
 
 
 class DefectTypeResponse(BaseModel):

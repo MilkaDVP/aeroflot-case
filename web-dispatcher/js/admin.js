@@ -542,10 +542,26 @@ function renderEmployees(employees) {
     edit.type = "button";
     edit.textContent = "Изменить";
     edit.addEventListener("click", () => startEmployeeEdit(employee));
-    actions.append(edit);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "Удалить";
+    remove.addEventListener("click", () => removeEmployee(employee));
+    actions.append(edit, remove);
     row.append(actions);
 
     container.append(row);
+  }
+}
+
+async function removeEmployee(employee) {
+  if (!window.confirm(`Удалить сотрудника ${employee.full_name} из аэропорта ${state.user.airport_icao}?`)) return;
+  try {
+    await Api.deleteEmployee(employee.id);
+    if (state.editingEmployee?.id === employee.id) cancelEmployeeEdit();
+    await loadEmployees();
+  } catch (error) {
+    window.alert(error.detail);
   }
 }
 
@@ -771,8 +787,7 @@ function renderVehicles(vehicles) {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "danger";
-    remove.textContent = "Вывести из парка";
-    remove.disabled = vehicle.status !== "free";
+    remove.textContent = "Удалить";
     remove.addEventListener("click", () => removeVehicle(vehicle));
     actions.append(remove);
     row.append(actions);
@@ -787,7 +802,7 @@ function vehicleStatus(status) {
 }
 
 async function removeVehicle(vehicle) {
-  if (!window.confirm(`Вывести ${vehicle.call_sign} из парка?`)) {
+  if (!window.confirm(`Удалить машину ${vehicle.call_sign} из парка ${state.user.airport_icao}?`)) {
     return;
   }
   try {

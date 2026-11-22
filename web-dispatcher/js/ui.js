@@ -147,6 +147,7 @@ function openPopover(anchor, title, nodes) {
     closePopover();
     return;
   }
+  const placement = popoverState.root?.contains(anchor) ? popoverState.anchor : anchor;
   closePopover();
 
   const root = document.createElement("div");
@@ -162,15 +163,10 @@ function openPopover(anchor, title, nodes) {
   root.querySelector(".popover-close").addEventListener("click", closePopover);
   document.body.append(root);
 
-  placePopover(root, anchor);
+  placePopover(root, placement);
   popoverState.root = root;
   popoverState.anchor = anchor;
   anchor.classList.add("is-open");
-  // Слушатель ставится после текущего щелчка, иначе он сразу же закрыл бы окно.
-  setTimeout(listenOutside, 0);
-}
-
-function listenOutside() {
   document.addEventListener("mousedown", onOutsidePopover);
   document.addEventListener("keydown", onPopoverKey);
 }
@@ -183,7 +179,10 @@ function placePopover(root, anchor) {
   const rect = anchor.getBoundingClientRect();
   const column = anchor.closest(".panel") || anchor;
   const columnRect = column.getBoundingClientRect();
-  root.style.right = `${window.innerWidth - columnRect.left + POPOVER_GAP_PX}px`;
+  const left = columnRect.left >= root.offsetWidth + POPOVER_GAP_PX
+    ? columnRect.left - root.offsetWidth - POPOVER_GAP_PX
+    : Math.min(columnRect.right + POPOVER_GAP_PX, window.innerWidth - root.offsetWidth);
+  root.style.left = `${Math.max(0, left)}px`;
   const top = Math.min(rect.top, window.innerHeight - root.offsetHeight - POPOVER_GAP_PX);
   root.style.top = `${Math.max(POPOVER_GAP_PX, top)}px`;
 }

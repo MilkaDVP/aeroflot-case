@@ -14,6 +14,7 @@ from auth.dependencies import (
     get_context,
     require_airport,
     require_roles,
+    require_roles_in_airport,
 )
 from auth.security import hash_password
 from clock import to_iso_utc, utc_now
@@ -25,10 +26,11 @@ from constants import (
     STATUS_FREE,
     STATUS_OFFLINE,
 )
-from database import get_db
+from database import get_db, get_dispatch_db
 from models.airport import Airport
+from models.call import ACTIVE_CALL_STATUSES, Call
 from models.employee import Employee
-from models.user import ROLE_ADMIN, ROLE_ENGINEER, User
+from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
 from services.assignment import record_position, release_vehicle, working_call_of
 from schemas.employee import (
     EmployeeCreateRequest,
@@ -85,7 +87,7 @@ def load_employee(db, context, employee_id):
     просто подставив чужой идентификатор.
     """
     employee = db.get(Employee, employee_id)
-    if employee is None:
+    if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
     if context.airport_icao:
         check_same_airport(context, employee.airport_icao)
@@ -117,7 +119,7 @@ def list_employees(
     По умолчанию — смена из контекста сессии: диспетчер работает со своей
     сменой. Параметр shift позволяет посмотреть состав другой смены.
     """
-    query = db.query(Employee).filter(Employee.airport_icao == context.airport_icao)
+    query = db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao)
     selected_shift = shift or context.shift
     if selected_shift:
         query = query.filter(Employee.shift == selected_shift)
@@ -194,12 +196,32 @@ def create_employee(
     return to_response(employee)
 
 
+@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить сотрудника")
+def delete_employee(
+    employee_id: int,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+):
+    employee = load_employee(db, context, employee_id)
+    active = db.query(Call.id).filter(
+        Call.assigned_employee_id == employee.id, Call.status.in_(ACTIVE_CALL_STATUSES)
+    ).first()
+    if active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Сотрудник назначен на вызов №{active.id}")
+    release_vehicle(employee)
+    employee.archived = True
+    employee.status = STATUS_OFFLINE
+    accounts = db.query(User.id).filter(User.employee_id == employee.id)
+    db.query(AuthSession).filter(AuthSession.user_id.in_(accounts)).delete(synchronize_session=False)
+    db.commit()
+
+
 @router.patch("/{employee_id}", response_model=EmployeeResponse, summary="Обновить")
 def update_employee(
     employee_id: int,
     payload: EmployeeUpdateRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """Частичное обновление карточки: статус, смена, квалификации."""
     employee = load_employee(db, context, employee_id)
@@ -225,8 +247,8 @@ def update_employee(
 def update_location(
     employee_id: int,
     payload: LocationRequest,
-    context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_airport),
 ):
     """
     Приём координат: от PWA инженера или ручная перестановка на карте.
@@ -256,8 +278,8 @@ def update_location(
 def toggle_shift(
     employee_id: int,
     payload: ShiftRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """
     Выход на смену и уход с неё.

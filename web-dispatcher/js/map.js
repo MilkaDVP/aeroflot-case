@@ -83,10 +83,8 @@ class AirportMap {
     // Сколько экранных пикселей приходится на метр местности при зуме 1.
     this.basePxPerMetre = 1;
     this.onStandClick = null;
-    // Клик по значку сотрудника и клик по свободному месту карты.
-    // Нужны для имитации координат: жюри переставляет сотрудника мышью
-    // и сразу видит, как меняется подбор.
-    this.onEmployeeClick = null;
+    // В режиме перемещения первый клик выбирает объект, второй задаёт место.
+    this.onObjectClick = null;
     this.onGroundClick = null;
     this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
 
@@ -361,6 +359,12 @@ class AirportMap {
           `${aircraft.board_number} · ${aircraft.aircraft_type} · стоянка ${aircraft.stand_ref}`
         )
       );
+      marker.dataset.aircraftId = aircraft.id;
+      marker.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (this.onObjectClick) this.onObjectClick("aircraft", aircraft, node, event);
+        else if (this.onStandClick) this.onStandClick(node);
+      });
       layer.append(marker);
     }
 
@@ -404,6 +408,12 @@ class AirportMap {
       label.setAttribute("class", "label label-vehicle");
       label.textContent = vehicle.call_sign;
 
+      marker.dataset.vehicleId = vehicle.id;
+      marker.addEventListener("click", (event) => {
+        if (!this.onObjectClick) return;
+        event.stopPropagation();
+        this.onObjectClick("vehicle", vehicle, vehicle, event);
+      });
       marker.append(shape, label, title(vehicleTooltip(vehicle)));
       layer.append(marker);
     }
@@ -454,11 +464,9 @@ class AirportMap {
       // искать человека по подписи ненадёжно.
       marker.dataset.employeeId = employee.id;
       marker.addEventListener("click", (event) => {
-        if (this.onEmployeeClick) {
-          // Иначе тот же клик дойдёт до карты и будет понят как
-          // «поставить сюда точку».
+        if (this.onObjectClick) {
           event.stopPropagation();
-          this.onEmployeeClick(employee);
+          this.onObjectClick("employee", employee, employee, event);
         }
       });
 
@@ -478,13 +486,6 @@ class AirportMap {
     if (!this.onGroundClick || !this.graph) {
       return;
     }
-    // Значок сотрудника — это выбор человека, у него свой обработчик.
-    // Остальные значки (борта, машины, подписи) перекрывают карту, и клик
-    // по ним должен работать как клик по месту под ними.
-    if (event.target.closest(".employee-marker")) {
-      return;
-    }
-
     const point = this.toGraphCoords(event.clientX, event.clientY);
     this.onGroundClick(this.unprojectXY(point.x, point.y));
   }
@@ -550,16 +551,16 @@ class AirportMap {
     }
 
     const split = pickupNodeId ? nodeIds.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < nodeIds.length - 1) {
-      this.appendRouteLine(nodeIds.slice(0, split + 1), "route route-walk", false);
-      this.appendRouteLine(nodeIds.slice(split), "route", true);
+    if (split > 0 && split < nodeIds.length) {
+      this.appendRouteLine(nodeIds.slice(0, split + 1), "route route-walk");
+      this.appendRouteLine(nodeIds.slice(split), "route");
       return;
     }
-    this.appendRouteLine(nodeIds, "route", true);
+    this.appendRouteLine(nodeIds, "route");
   }
 
   /** Одна ломаная маршрута по вершинам графа. */
-  appendRouteLine(nodeIds, className, animated) {
+  appendRouteLine(nodeIds, className) {
     const points = nodeIds
       .map((id) => this.nodesById.get(id))
       .filter(Boolean)
@@ -572,12 +573,6 @@ class AirportMap {
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.join(" "));
     line.setAttribute("class", className);
-    if (animated) {
-      // Нормируем длину: анимация прорисовки одинаково работает
-      // и на коротком маршруте, и на трёхкилометровом. Пешему участку
-      // нормировка не нужна: у него пунктир в экранных пикселях.
-      line.setAttribute("pathLength", "1");
-    }
     this.layers.route.append(line);
   }
 

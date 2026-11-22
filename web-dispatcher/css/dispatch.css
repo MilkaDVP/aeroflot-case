@@ -437,9 +437,6 @@
   opacity: 0.65;
 }
 
-/* Длина маршрута нормирована через pathLength="1" в разметке, поэтому
-   штрих задаётся долей единицы и анимация работает одинаково
-   и на маршруте в 200 метров, и на маршруте в три километра. */
 .route {
   fill: none;
   stroke: var(--route);
@@ -447,27 +444,22 @@
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 6px rgba(61, 139, 253, 0.6));
-  /* Функциональная анимация: маршрут прорисовывается, взгляд диспетчера
-     сам идёт от сотрудника к борту. */
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: draw-route 0.7s ease-out forwards;
+  pointer-events: none;
 }
 
-@keyframes draw-route {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-/* Пеший участок до машины — пунктир в экранных пикселях. Анимация
-   прорисовки у него отключена: она построена на том же штрихе. */
 .route.route-walk {
   stroke-dasharray: 7 6;
-  stroke-dashoffset: 0;
-  animation: none;
 }
+
+.history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); }
+
+#call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+#call-actions[hidden] { display: none; }
 
 /* Машина парка: квадрат, чтобы не спутать с круглыми метками людей
    и стоянок. Свободная — синяя, как маршрут; ждущая инженера — жёлтая. */
@@ -1040,6 +1032,18 @@
 
 /* Подсказки лежат в потоке, а не всплывают поверх: форма короткая,
    и перекрытые поля описания путали бы больше, чем лишняя высота. */
+.aircraft-results {
+  max-height: 10rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  padding: 4px;
+}
+
+.aircraft-results [role="option"] { padding: 6px; cursor: pointer; }
+.aircraft-results [aria-selected="true"], .aircraft-results [role="option"]:hover {
+  background: var(--route-soft);
+}
+
 .defect-results {
   margin-top: var(--gap-xs);
   border: 1px solid var(--border-strong);

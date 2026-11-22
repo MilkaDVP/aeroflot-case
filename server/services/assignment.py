@@ -111,7 +111,7 @@ def free_vehicles(db, airport_icao):
     """Свободные машины парка аэропорта — только их можно предложить."""
     return (
         db.query(Vehicle)
-        .filter(Vehicle.airport_icao == airport_icao, Vehicle.status == VEHICLE_FREE)
+        .filter(Vehicle.airport_icao == airport_icao, Vehicle.status == VEHICLE_FREE, Vehicle.archived.is_(False))
         .order_by(Vehicle.call_sign)
         .all()
     )
@@ -149,6 +149,29 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
 
     chosen = next((vehicle for vehicle in pool if vehicle.id == plan.vehicle["id"]), None)
     return plan, chosen
+
+
+def assigned_route(call, graph):
+    """Перестроить путь, сохранив назначенную машину и способ поездки."""
+    employee = call.assigned_employee
+    if employee.lat is None or employee.lon is None:
+        return None
+    person = employee.as_algorithm_dict()
+    vehicle = call.vehicle
+    if vehicle is None:
+        return plan_walk(graph, person, call.stand_node_id)
+    if vehicle.status == VEHICLE_RESERVED or vehicle.employee_id != employee.id:
+        return plan_via(graph, person, call.stand_node_id, vehicle.as_algorithm_dict())
+    return plan_for(graph, person, call.stand_node_id, [])
+
+
+def update_assigned_route(call, plan):
+    call.route_node_ids = plan.node_ids
+    call.pickup_node_id = plan.pickup_node_id
+    call.sim_progress_m = None
+    if call.status != CALL_ARRIVED:
+        call.eta_minutes = round(plan.minutes, 1)
+        call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
 
 
 def travel_between(graph, employee, from_stand, to_stand):
@@ -248,9 +271,11 @@ def replan_queue(db, employee):
         cursor_stand = None
         cursor_time = max(employee.busy_until or now, now)
 
+    reachable = True
     for queued in queue:
         route = travel_between(graph, employee, cursor_stand, queued.stand_node_id)
         if route is None:
+            reachable = False
             # Маршрута нет — прежняя оценка честнее выдуманной.
             continue
         queued.eta_at = cursor_time + timedelta(minutes=route.minutes)
@@ -261,6 +286,7 @@ def replan_queue(db, employee):
 
     if working is not None or queue:
         employee.busy_until = cursor_time
+    return reachable
 
 
 def advance_after_close(db, employee, closed_call, was_working, park_at_stand=True):
@@ -294,17 +320,19 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
     next_call = queue[0]
     # Сначала от фактических координат, без них — от стоянки только что
     # закрытого вызова: инженер там и заканчивал работу.
-    route = travel_between(graph, employee, None, next_call.stand_node_id)
-    if route is None:
+    next_call.vehicle = employee.vehicle
+    plan = assigned_route(next_call, graph)
+    if plan is not None:
+        update_assigned_route(next_call, plan)
+    else:
         route = travel_between(graph, employee, closed_call.stand_node_id, next_call.stand_node_id)
+        if route is not None:
+            next_call.eta_minutes = round(route.minutes, 1)
+            next_call.eta_at = utc_now() + timedelta(minutes=route.minutes)
+            next_call.route_node_ids = route.node_ids
 
     next_call.status = CALL_ASSIGNED
     employee.status = STATUS_ASSIGNED
-    if route is not None:
-        next_call.eta_minutes = round(route.minutes, 1)
-        next_call.eta_at = utc_now() + timedelta(minutes=route.minutes)
-        next_call.route_node_ids = route.node_ids
-
     replan_queue(db, employee)
 
 

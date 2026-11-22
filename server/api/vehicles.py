@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, require_airport, require_roles_in_airport
 from constants import VEHICLE_FREE
-from database import get_db
-from models.user import ROLE_ADMIN
+from database import get_db, get_dispatch_db
+from models.call import ACTIVE_CALL_STATUSES, Call
+from schemas.employee import LocationRequest
+from models.user import DISPATCH_ROLES, ROLE_ADMIN
 from models.vehicle import Vehicle
 from schemas.vehicle import VehicleCreateRequest, VehicleResponse
 
@@ -51,7 +53,7 @@ def list_vehicles(
     """Машины аэропорта сессии: где стоят и у кого сейчас."""
     vehicles = (
         db.query(Vehicle)
-        .filter(Vehicle.airport_icao == context.airport_icao)
+        .filter(Vehicle.archived.is_(False), Vehicle.airport_icao == context.airport_icao)
         .order_by(Vehicle.call_sign)
         .all()
     )
@@ -66,8 +68,8 @@ def list_vehicles(
 )
 def create_vehicle(
     payload: VehicleCreateRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
-    db: Session = Depends(get_db),
 ):
     """
     Заводит машину в парке текущего аэропорта.
@@ -81,6 +83,7 @@ def create_vehicle(
         db.query(Vehicle)
         .filter(
             Vehicle.airport_icao == context.airport_icao,
+            Vehicle.archived.is_(False),
             Vehicle.call_sign == call_sign,
         )
         .first()
@@ -108,8 +111,8 @@ def create_vehicle(
 )
 def delete_vehicle(
     vehicle_id: int,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
-    db: Session = Depends(get_db),
 ):
     """
     Убирает машину из парка.
@@ -117,14 +120,38 @@ def delete_vehicle(
     Занятую машину удалять нельзя: за ней едет или на ней едет инженер,
     и вызов остался бы с ссылкой на несуществующую машину.
     """
+    vehicle = available_vehicle(db, context, vehicle_id)
+    if db.query(Call.id).filter(Call.vehicle_id == vehicle.id).first():
+        vehicle.archived = True
+    else:
+        db.delete(vehicle)
+    db.commit()
+
+
+def available_vehicle(db, context, vehicle_id):
     vehicle = db.get(Vehicle, vehicle_id)
-    if vehicle is None or vehicle.airport_icao != context.airport_icao:
+    if vehicle is None or vehicle.archived or vehicle.airport_icao != context.airport_icao:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
 
-    if vehicle.status != VEHICLE_FREE:
+    active = db.query(Call.id).filter(
+        Call.vehicle_id == vehicle.id, Call.status.in_(ACTIVE_CALL_STATUSES)
+    ).first()
+    if vehicle.status != VEHICLE_FREE or active:
         raise HTTPException(
             status.HTTP_409_CONFLICT, ERROR_IN_WORK.format(call_sign=vehicle.call_sign)
         )
 
-    db.delete(vehicle)
+    return vehicle
+
+
+@router.post("/{vehicle_id}/location", response_model=VehicleResponse, summary="Переместить машину")
+def move_vehicle(
+    vehicle_id: int,
+    payload: LocationRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles_in_airport(*DISPATCH_ROLES)),
+):
+    vehicle = available_vehicle(db, context, vehicle_id)
+    vehicle.lat, vehicle.lon = payload.lat, payload.lon
     db.commit()
+    return to_response(vehicle)

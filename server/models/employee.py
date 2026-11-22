@@ -28,6 +28,7 @@ class Employee(Base):
 
     __tablename__ = "employees"
 
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String)
     airport_icao: Mapped[str] = mapped_column(ForeignKey("airports.icao"), index=True)

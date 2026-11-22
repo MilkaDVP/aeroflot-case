@@ -204,6 +204,7 @@ function statusTitle(status) {
     assigned: "ещё не принял вызов",
     accepted: "принял, едет",
     arrived: "у борта",
+    cancelled: "отменён",
     closed: "закрыт",
   };
   return titles[status] || status;
@@ -216,28 +217,14 @@ function statusTitle(status) {
  * «Исполнитель», «Связь с инженером». Раньше всё шло одним длинным
  * списком, и поле ответа инженеру терялось между кандидатами.
  *
- * Длинные справочные списки — занятые с допуском и отсеянные — не
- * растягивают карточку: они открываются по щелчку всплывающим окном.
- *
- * ctx — всё, что нужно карточкам от экрана:
- *   picked, travel     — кого выбрал диспетчер и как каждый поедет;
- *   leadVehicle        — машина ответственного, если второй едет с ним;
- *   onPick, onTravel   — щелчок по кандидату и по способу передвижения;
- *   queue              — права и действия для занятых (очередь, переключение).
  */
-function renderSuggestion(container, result, ctx) {
+function renderSuggestion(container, result) {
   container.replaceChildren();
   if (!result) {
     container.innerHTML = '<div class="empty">Выберите вызов слева</div>';
     return;
   }
-  container.append(
-    widget("Кого отправить", [
-      buildEtaBlock(result),
-      buildCandidateList(result.candidates, ctx),
-      buildMoreChips(result, result.busy, ctx),
-    ])
-  );
+  container.append(widget("Кого отправить", [buildEtaBlock(result)]));
 }
 
 /** Карточка: заголовок и содержимое. Пустые части пропускаются. */
@@ -419,7 +406,7 @@ function travelChoice(candidate, order, ctx) {
     options.push(["auto", candidate.pickup ? `через ${candidate.vehicle_call_sign}` : candidate.vehicle_call_sign]);
     options.push(["walk", "пешком"]);
   }
-  if (order > 0 && ctx.leadVehicle) {
+  if ((order > 0 || ctx.adding) && ctx.leadVehicle) {
     if (!options.length) {
       options.push(["auto", "пешком"]);
     }
@@ -659,49 +646,19 @@ function whoLine(call) {
 /**
  * Правая колонка уже назначенного вызова.
  *
- * ctx дополнительно к подбору: result — свежий подбор (кого ещё
- * отправить), onUnassign, onRemoveSupport, onSend, draft, extra —
- * узлы, которые экран добавляет в карточку исполнителя (учения).
+ * Поле ввода и список сообщений живут до смены вызова.
  */
-function renderAssignedPanel(container, call, ctx) {
-  container.replaceChildren();
-
-  const actions = document.createElement("div");
-  actions.className = "widget-actions";
-  if (call.status !== "closed") {
-    actions.append(linkButton("Снять исполнителя", ctx.onUnassign, "is-danger"));
+function renderAssignedPanel(container, call, onSend, scrollToEnd) {
+  const summary = widget("Исполнитель", [buildAssignmentBlock(call), buildTeam(call)]);
+  const list = container.querySelector(".messages");
+  if (list?.dataset.callId === String(call.id)) {
+    container.firstElementChild.replaceWith(summary);
+    updateMessages(list, call.messages, scrollToEnd);
+    return;
   }
-  for (const node of ctx.extra || []) {
-    actions.append(node);
-  }
-
-  container.append(
-    widget("Исполнитель", [buildAssignmentBlock(call), buildTeam(call, ctx.onRemoveSupport), actions])
-  );
-  if (call.status !== "closed") {
-    container.append(widget("Связь с инженером", [buildMessages(call, ctx.draft, ctx.onSend)]));
-  }
-
-  const result = ctx.result;
-  if (result && call.status !== "closed") {
-    // Те, кто уже едет на этот вызов, в подборе значатся занятыми —
-    // предлагать поставить их в очередь к самим себе незачем. Переключение —
-    // только для нового вызова: к назначенному второго ставят в очередь.
-    const team = [call.assigned_employee_id].concat(
-      (call.support || []).map((member) => member.employee_id)
-    );
-    const busy = result.busy
-      .filter((item) => !team.includes(item.employee_id))
-      .map((item) => ({ ...item, switchable: false }));
-    if (result.candidates.length || busy.length) {
-      container.append(
-        widget("Отправить ещё", [
-          buildCandidateList(result.candidates, ctx),
-          buildMoreChips({ rejected: [] }, busy, ctx),
-        ])
-      );
-    }
-  }
+  const chat = buildMessages(call, onSend);
+  container.replaceChildren(summary, widget("Связь с инженером", [chat]));
+  updateMessages(chat.querySelector(".messages"), call.messages, true);
 }
 
 function linkButton(text, onClick, extraClass) {
@@ -714,7 +671,7 @@ function linkButton(text, onClick, extraClass) {
 }
 
 /** Вторые инженеры вызова: кто, на каком шаге, когда будет. */
-function buildTeam(call, onRemove) {
+function buildTeam(call) {
   if (!call.support || !call.support.length) {
     return null;
   }
@@ -727,7 +684,6 @@ function buildTeam(call, onRemove) {
       <span class="team-name">+ ${escapeHtml(member.employee_name || "—")}</span>
       <span class="team-status">${escapeHtml(supportStatus(member))}</span>
     `;
-    row.append(linkButton("снять", () => onRemove(member), "is-danger"));
     box.append(row);
   }
   return box;
@@ -751,16 +707,11 @@ function supportStatus(member) {
  * Инженер пишет свободным текстом — «нужен подъёмник», «запчасть будет
  * к 15:00», — потому что реальных ситуаций больше, чем готовых статусов.
  */
-function buildMessages(call, draft, onSend) {
+function buildMessages(call, onSend) {
   const box = document.createElement("div");
   const list = document.createElement("div");
   list.className = "messages";
-  if (!(call.messages || []).length) {
-    list.innerHTML = '<div class="messages-empty">Сообщений нет</div>';
-  }
-  for (const message of call.messages || []) {
-    list.append(buildMessage(message));
-  }
+  list.dataset.callId = call.id;
   box.append(list);
 
   const form = document.createElement("form");
@@ -770,7 +721,6 @@ function buildMessages(call, draft, onSend) {
     <button type="submit" class="primary">Отправить</button>
   `;
   const input = form.querySelector("input");
-  input.value = draft || "";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = input.value.trim();
@@ -780,6 +730,21 @@ function buildMessages(call, draft, onSend) {
   });
   box.append(form);
   return box;
+}
+
+function updateMessages(list, messages, scrollToEnd) {
+  const follow = scrollToEnd || list.scrollHeight - list.clientHeight - list.scrollTop <= 3;
+  const last = Number(list.dataset.lastId || 0);
+  if (!messages.length && !list.firstChild) {
+    list.innerHTML = '<div class="messages-empty">Сообщений нет</div>';
+  }
+  for (const message of messages) {
+    if (message.id <= last) continue;
+    list.querySelector(".messages-empty")?.remove();
+    list.append(buildMessage(message));
+    list.dataset.lastId = message.id;
+  }
+  if (follow) list.scrollTop = list.scrollHeight;
 }
 
 function buildMessage(message) {

@@ -14,7 +14,7 @@
 from sqlalchemy.orm import object_session
 
 from clock import to_iso_utc, utc_now
-from models.call import STATUS_CLOSED, WORKING_CALL_STATUSES, Call
+from models.call import ACTIVE_CALL_STATUSES, STATUS_CLOSED, WORKING_CALL_STATUSES, Call
 from models.call_message import CallMessage
 from services.assignment import advance_after_close
 
@@ -35,7 +35,7 @@ def support_calls(call):
         return []
     return (
         session.query(Call)
-        .filter(Call.parent_call_id == call.id, Call.status != STATUS_CLOSED)
+        .filter(Call.parent_call_id == call.id, Call.status.in_(ACTIVE_CALL_STATUSES))
         .order_by(Call.id)
         .all()
     )

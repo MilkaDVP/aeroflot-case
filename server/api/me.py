@@ -22,7 +22,7 @@ from constants import (
     VEHICLE_RESERVED,
     WORK_STAGES,
 )
-from database import get_db
+from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
@@ -176,8 +176,8 @@ def current_call(context: Context = Depends(get_context), db: Session = Depends(
 @router.post("/status", response_model=CallResponse, summary="Принял / прибыл / завершил")
 def update_status(
     payload: EngineerStatusRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """
     Инженер подтверждает приём вызова, прибытие или завершение работ.
@@ -272,8 +272,8 @@ def arrived_call(context, db):
 @router.post("/stage", response_model=CallResponse, summary="Этап работ")
 def set_stage(
     payload: StageRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """
     Инженер сообщает, на каком этапе работы: осмотр, ждёт запчасти, ремонт.
@@ -296,8 +296,8 @@ def set_stage(
 @router.post("/aog", response_model=CallResponse, summary="Статус AOG")
 def set_aog(
     payload: AogRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """
     Инженер ставит или снимает AOG — борт не может выполнять полёт.
@@ -317,8 +317,8 @@ def set_aog(
 @router.post("/message", response_model=CallResponse, summary="Написать диспетчеру")
 def send_message(
     payload: MessageRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
-    db: Session = Depends(get_db),
 ):
     """
     Сообщение инженера диспетчеру по текущему вызову.

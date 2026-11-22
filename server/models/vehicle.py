@@ -14,7 +14,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from clock import utc_now
@@ -27,6 +27,7 @@ class Vehicle(Base):
 
     __tablename__ = "vehicles"
 
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     airport_icao: Mapped[str] = mapped_column(ForeignKey("airports.icao"), index=True)
     call_sign: Mapped[str] = mapped_column(String)

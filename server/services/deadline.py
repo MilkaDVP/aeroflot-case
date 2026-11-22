@@ -48,6 +48,7 @@ from models.call import (
     STATUS_ACCEPTED,
     STATUS_ARRIVED,
     STATUS_ASSIGNED,
+    STATUS_CANCELLED,
     STATUS_CLOSED,
     STATUS_QUEUED,
     STATUS_SUGGESTED,
@@ -161,6 +162,8 @@ def assess(call, now=None):
     now = now or utc_now()
     deadline = deadline_of(call)
 
+    if call.status == STATUS_CANCELLED:
+        return Control(LEVEL_CLOSED, "Вызов отменён", deadline, now)
     if call.status == STATUS_CLOSED:
         return Control(LEVEL_CLOSED, "Вызов закрыт", deadline, now)
     if call.status == STATUS_ARRIVED:

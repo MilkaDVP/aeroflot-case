@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, check_same_airport, require_airport, require_roles
-from database import get_db
+from database import get_db, get_dispatch_db
 from models.employee import Employee
 from models.user import DISPATCH_ROLES, ROLE_ADMIN
 from services import drill
@@ -62,9 +62,9 @@ def set_drill(
 def hold_employee(
     employee_id: int,
     payload: HoldRequest,
+    db: Session = Depends(get_dispatch_db),
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
     airport: Context = Depends(require_airport),
-    db: Session = Depends(get_db),
 ):
     """
     Останавливает сотрудника на маршруте — учебная вводная «исполнитель встал».
@@ -73,7 +73,7 @@ def hold_employee(
     жизнь, а не кнопка диспетчера.
     """
     employee = db.get(Employee, employee_id)
-    if employee is None:
+    if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
     if not drill.is_enabled(db, context.airport_icao):
