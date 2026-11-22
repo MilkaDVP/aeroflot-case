@@ -21,6 +21,7 @@ from api import (
     calls,
     drill,
     employees,
+    flightradar,
     me,
     reference,
     reports,
@@ -133,6 +134,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(airports.router)
+app.include_router(flightradar.router)
 app.include_router(employees.router)
 app.include_router(calls.router)
 app.include_router(me.router)
