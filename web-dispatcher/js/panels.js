@@ -151,6 +151,9 @@ function buildCallCard(call, selectedId, onSelect) {
   if (call.id === selectedId) {
     item.classList.add("selected");
   }
+  if (call.claimed_by_login && Session.user && call.claimed_by_login !== Session.user.login) {
+    item.classList.add("is-claimed-other");
+  }
 
   item.innerHTML = `
     <div class="call-top">
@@ -159,7 +162,7 @@ function buildCallCard(call, selectedId, onSelect) {
       ${deadlineLabel(call)}
     </div>
     <div class="call-where">
-      ${escapeHtml(call.aircraft_type)} · ст. ${escapeHtml(call.stand_ref || "—")} ·
+      ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
       <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span> ·
       <span class="num" title="${
         call.reported_at ? "Экипаж сообщил в это время" : "Вызов зарегистрирован в это время"
@@ -609,6 +612,14 @@ function controlNote(call) {
  * вопрос диспетчера здесь — насколько будет нарушен регламент.
  */
 function whoLine(call) {
+  if (!call.assigned_employee_name && call.claimed_by_login) {
+    // Вызов разбирает диспетчер: другим видно, кто именно, чтобы двое
+    // не взялись за один борт.
+    const mine = Session.user && call.claimed_by_login === Session.user.login;
+    return mine
+      ? `<div class="call-who is-claimed-mine">в работе у вас</div>`
+      : `<div class="call-who is-claimed">разбирает <b>${escapeHtml(call.claimed_by_name)}</b></div>`;
+  }
   if (!call.assigned_employee_name) {
     // Подбор уже был и никого не нашёл — это не «ждёт», а «некого».
     const nobody = call.status === "suggested" && !call.suggested_employee_id;

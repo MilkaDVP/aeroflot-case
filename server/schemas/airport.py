@@ -143,3 +143,22 @@ class AircraftResponse(BaseModel):
     airport_icao: str
     stand_node_id: str
     stand_ref: str | None
+    # Стоит ли борт на стоянке. Если нет — stand_ref пуст, а lat/lon
+    # показывают, где он; на стоянке lat/lon — координаты стоянки.
+    on_stand: bool = True
+    lat: float | None = None
+    lon: float | None = None
+
+
+class AircraftMoveRequest(BaseModel):
+    """
+    Куда переставить борт.
+
+    stand_node_id — на эту стоянку; free — ровно в точку lat/lon, не на
+    стоянку (ВПП, рулёжка). Без обоих — на ближайшую к точке стоянку.
+    """
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    stand_node_id: str | None = None
+    free: bool = False

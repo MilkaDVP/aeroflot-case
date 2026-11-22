@@ -16,8 +16,27 @@ const state = {
   editing: null,
   // Граф аэропорта сессии — нужен формам как список мест.
   graph: null,
-  // Карточка, открытая на правку; null — форма работает на регистрацию.
-  editingEmployee: null,
+  // Кого правят в форме «Учётные записи»: { kind: "account", user } или
+  // { kind: "engineer", employee, account }; null — форма заводит нового.
+  editingUser: null,
+  // Последний загруженный список людей.
+  people: { users: [], employees: [] },
+};
+
+/*
+ * Что видно на экране по ролям:
+ *   начальник смены — учётные записи: сеансы младших, у инженеров —
+ *                     смена, место, присутствие на смене; расписание смен;
+ *   администратор аэропорта — плюс заведение и правка учётных записей
+ *                     и инженеров с квалификацией, машины и борта;
+ *   технический администратор — плюс аэропорты системы и любой аэропорт.
+ */
+const TAB_MIN_ROLE = {
+  airports: "admin",
+  users: "shift_supervisor",
+  shifts: "shift_supervisor",
+  vehicles: "local_admin",
+  aircraft: "local_admin",
 };
 
 let editorMap = null;
@@ -40,16 +59,29 @@ async function start() {
     return;
   }
 
-  if (state.user.role !== "admin") {
-    // Экран доступен только администратору: сервер и так откажет,
+  if (!roleAtLeast(state.user.role, "shift_supervisor")) {
+    // Экран доступен начальнику смены и старше: сервер и так откажет,
     // но показывать заведомо неработающие формы незачем.
     window.location.href = "select-airport.html";
     return;
   }
 
-  el("ctx-user").textContent = state.user.full_name;
+  el("ctx-user").textContent = `${state.user.full_name} · ${roleTitle(state.user.role)}`;
   fillAirportSwitch();
   bindEvents();
+
+  for (const button of document.querySelectorAll("#tabs button")) {
+    const minimum = TAB_MIN_ROLE[button.dataset.tab];
+    button.hidden = minimum === "admin" ? state.user.role !== "admin" : !roleAtLeast(state.user.role, minimum);
+  }
+
+  // Аэропорты системы заводит только технический администратор.
+  // Остальные работают в своём аэропорту.
+  if (state.user.role !== "admin") {
+    el("ctx-airport").disabled = true;
+    showTab("users");
+    return;
+  }
   await loadAirports();
 }
 
@@ -120,19 +152,16 @@ function bindEvents() {
   el("ctx-airport").addEventListener("change", switchAirport);
   el("import-form").addEventListener("submit", onImportSubmit);
   el("create-form").addEventListener("submit", onCreateSubmit);
-  el("employee-form").addEventListener("submit", onEmployeeSubmit);
-  el("employee-cancel").addEventListener("click", cancelEmployeeEdit);
+  el("user-form").addEventListener("submit", onUserSubmit);
+  el("user-cancel").addEventListener("click", cancelUserEdit);
+  el("user-role").addEventListener("change", syncUserForm);
+  el("shifts-form").addEventListener("submit", onShiftsSubmit);
   el("vehicle-form").addEventListener("submit", onVehicleSubmit);
   el("aircraft-form").addEventListener("submit", onAircraftSubmit);
 
   el("editor-back").addEventListener("click", closeEditor);
   el("editor-save").addEventListener("click", saveGraph);
   el("editor-clear").addEventListener("click", clearGraph);
-  el("editor-autolink").addEventListener("change", () => {
-    if (editor !== null) {
-      editor.autolink = el("editor-autolink").checked;
-    }
-  });
 
   for (const button of document.querySelectorAll("#editor-tools button")) {
     button.addEventListener("click", () => setEditorMode(button.dataset.mode));
@@ -162,13 +191,16 @@ function showTab(name) {
     button.classList.toggle("active", button.dataset.tab === name);
   }
   el("page-airports").hidden = name !== "airports";
-  el("page-employees").hidden = name !== "employees";
+  el("page-users").hidden = name !== "users";
+  el("page-shifts").hidden = name !== "shifts";
   el("page-vehicles").hidden = name !== "vehicles";
   el("page-aircraft").hidden = name !== "aircraft";
   el("page-editor").hidden = true;
 
-  if (name === "employees") {
-    loadEmployees();
+  if (name === "users") {
+    loadUsers();
+  } else if (name === "shifts") {
+    loadShifts();
   } else if (name === "vehicles") {
     loadVehicles();
   } else if (name === "aircraft") {
@@ -417,7 +449,9 @@ function hintFor(mode) {
       "откуда выезжают инженеры.",
     junction: "Кликните по карте, чтобы поставить перекрёсток рулёжек.",
     link: "Кликайте по точкам подряд: каждая пара соединяется рулёжкой.",
-    erase: "Кликните по точке или связи, чтобы удалить её.",
+    erase:
+      "Наведите на точку или связь — она покраснеет — и щёлкните, чтобы удалить именно её. " +
+      "Точка удаляется вместе со своими связями, связь — одна, точки остаются.",
   };
   return hints[mode] || "";
 }
@@ -489,118 +523,444 @@ function clearGraph() {
   }
 }
 
-/* --- Сотрудники --- */
+/* --- Учётные записи и сотрудники --- */
 
-async function loadEmployees() {
-  el("employees-airport").textContent = state.user.airport_icao || "—";
+/*
+ * Одна вкладка на всех людей аэропорта. Диспетчеры, начальники смены
+ * и администраторы — это только учётные записи. Инженер — ещё и карточка
+ * сотрудника (квалификация, смена, место), по которой идёт подбор; вход
+ * в приложение у него необязателен. Поэтому в списке инженер — одна
+ * строка, а в форме при роли «инженер» появляются поля карточки.
+ */
 
-  if (!state.user.airport_icao) {
-    el("employees-list").innerHTML = noAirportMessage();
-    return;
-  }
+// Роли учётных записей в порядке старшинства — для выбора в форме.
+const ACCOUNT_ROLES = ["admin", "local_admin", "shift_supervisor", "dispatcher"];
+const ENGINEER = "engineer";
+const ENGINEER_CARD_FIELDS = ["user-name", "user-mark", "user-types", "user-valid"];
+
+/** Роли, которые текущий пользователь вправе назначать: ниже своей. */
+function assignableRoles() {
+  const own = state.user.role;
+  const roles =
+    own === "admin"
+      ? ACCOUNT_ROLES
+      : ACCOUNT_ROLES.filter((role) => (ROLE_RANK[role] || 0) < (ROLE_RANK[own] || 0));
+  // Инженера заводит администратор аэропорта и старше.
+  return canManageAccounts() ? [...roles, ENGINEER] : roles;
+}
+
+function canManageAccounts() {
+  return roleAtLeast(state.user.role, "local_admin");
+}
+
+async function loadUsers() {
+  el("users-scope").textContent =
+    state.user.role === "admin" ? "· вся система" : `· ${state.user.airport_icao || "—"}`;
 
   try {
-    await loadGraphOnce();
-    fillPlaces("emp-place");
-    const employees = await Api.employees();
-    renderEmployees(employees);
+    const users = await Api.users();
+    // Карточки сотрудников есть только в выбранном аэропорту.
+    let employees = [];
+    if (state.user.airport_icao) {
+      // Все смены сразу: в учётных записях нужны все люди аэропорта,
+      // а не только те, кто на смене текущей сессии.
+      employees = await Api.employees("all");
+      await loadGraphOnce();
+      fillPlaces("user-place");
+    }
+    state.people = { users, employees };
+    renderPeople(users, employees);
   } catch (error) {
-    el("employees-list").innerHTML = `<div class="error">${escapeHtml(error.detail)}</div>`;
+    el("users-list").innerHTML = `<div class="error">${escapeHtml(error.detail)}</div>`;
+  }
+  if (state.editingUser === null) {
+    resetUserForm();
   }
 }
 
-function renderEmployees(employees) {
-  const container = el("employees-list");
+/**
+ * Список: сначала учётные записи по старшинству, затем инженеры.
+ * Учётная запись инженера показывается в строке его карточки.
+ */
+function renderPeople(users, employees) {
+  const container = el("users-list");
   container.replaceChildren();
 
-  if (!employees.length) {
-    container.innerHTML = '<div class="empty">Сотрудников нет</div>';
+  const accountOf = new Map(
+    users.filter((user) => user.employee_id).map((user) => [user.employee_id, user])
+  );
+  const cardIds = new Set(employees.map((employee) => employee.id));
+  const accounts = users.filter(
+    (user) => !(user.role === ENGINEER && cardIds.has(user.employee_id))
+  );
+
+  if (!accounts.length && !employees.length) {
+    container.innerHTML = '<div class="empty">Никого нет</div>';
     return;
   }
-
+  for (const user of accounts) {
+    container.append(accountRow(user));
+  }
   for (const employee of employees) {
-    const marks = employee.qualifications
-      .map((item) => `${item.category} (${item.aircraft_types.join(", ")})`)
-      .join("; ");
-
-    const row = document.createElement("div");
-    row.className = "admin-row-item";
-    row.innerHTML = `
-      <div class="item-main">
-        <span class="item-title">${escapeHtml(employee.full_name)}</span>
-        <span class="item-sub">${escapeHtml(marks || "без отметок")}</span>
-      </div>
-      <div class="item-meta">
-        ${employee.shift === "day" ? "дневная" : "ночная"} ·
-        ${escapeHtml(statusTitle(employee.status))}
-      </div>
-    `;
-
-    const actions = document.createElement("div");
-    actions.className = "item-actions";
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.textContent = "Изменить";
-    edit.addEventListener("click", () => startEmployeeEdit(employee));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "danger";
-    remove.textContent = "Удалить";
-    remove.addEventListener("click", () => removeEmployee(employee));
-    actions.append(edit, remove);
-    row.append(actions);
-
-    container.append(row);
+    container.append(engineerRow(employee, accountOf.get(employee.id) || null));
   }
 }
 
-async function removeEmployee(employee) {
-  if (!window.confirm(`Удалить сотрудника ${employee.full_name} из аэропорта ${state.user.airport_icao}?`)) return;
+function personRow({ online, title, sub, role, meta }) {
+  const row = document.createElement("div");
+  row.className = "admin-row-item";
+  row.innerHTML = `
+    <div class="item-main">
+      <span class="item-title">
+        <span class="online-dot ${online ? "is-online" : ""}"
+              title="${online ? "в системе" : "не в системе"}"></span>
+        ${escapeHtml(title)}
+      </span>
+      <span class="item-sub">${escapeHtml(sub)}</span>
+    </div>
+    <div class="item-meta">
+      ${meta ? `<span class="muted small">${escapeHtml(meta)}</span>` : ""}
+      <span class="badge role-badge is-${escapeHtml(role)}">${escapeHtml(roleTitle(role))}</span>
+    </div>
+  `;
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  row.append(actions);
+  return { row, actions };
+}
+
+function accountRow(user) {
+  const { row, actions } = personRow({
+    online: user.online,
+    title: user.full_name,
+    sub: `${user.login} · ${user.airport_icao || "все аэропорты"}`,
+    role: user.role,
+  });
+  if (user.can_logout) {
+    actions.append(actionButton("Завершить сеанс", "", () => logoutAccount(user)));
+  }
+  if (user.can_edit && canManageAccounts()) {
+    actions.append(actionButton("Изменить", "", () => startAccountEdit(user)));
+    actions.append(actionButton("Удалить", "danger", () => removeAccount(user)));
+  }
+  return row;
+}
+
+function engineerRow(employee, account) {
+  const marks = employee.qualifications
+    .map((item) => `${item.category} (${item.aircraft_types.join(", ")})`)
+    .join("; ");
+  const { row, actions } = personRow({
+    online: Boolean(account && account.online),
+    title: employee.full_name,
+    sub: `${account ? account.login : "без входа в приложение"} · ${marks || "без отметок"}`,
+    role: ENGINEER,
+    meta: `${SHIFT_NAMES[employee.shift] || employee.shift} · ${statusTitle(employee.status)}`,
+  });
+  if (account && account.can_logout) {
+    actions.append(actionButton("Завершить сеанс", "", () => logoutAccount(account)));
+  }
+  actions.append(actionButton("Изменить", "", () => startEngineerEdit(employee, account)));
+  if (canManageAccounts()) {
+    actions.append(actionButton("Удалить", "danger", () => removeEmployee(employee)));
+  }
+  return row;
+}
+
+function actionButton(text, className, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  if (className) button.className = className;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+async function logoutAccount(user) {
+  if (!window.confirm(`Завершить сеанс: ${user.full_name}? Ему придётся войти заново.`)) return;
   try {
-    await Api.deleteEmployee(employee.id);
-    if (state.editingEmployee?.id === employee.id) cancelEmployeeEdit();
-    await loadEmployees();
+    await Api.logoutUser(user.id);
+    await loadUsers();
   } catch (error) {
     window.alert(error.detail);
   }
 }
 
-/**
- * Правка карточки сотрудника в той же форме, что и регистрация.
- *
- * Отдельная форма редактирования была бы вторым местом с теми же полями
- * и теми же ошибками. Логин и пароль при правке скрыты: учётная запись
- * заводится один раз вместе с карточкой.
- */
-function startEmployeeEdit(employee) {
-  state.editingEmployee = employee;
-  const mark = employee.qualifications[0] || null;
-
-  el("emp-name").value = employee.full_name;
-  el("emp-shift").value = employee.shift;
-  if (mark) {
-    el("emp-mark").value = mark.category;
-    el("emp-types").value = mark.aircraft_types.join(", ");
-    el("emp-valid").value = mark.valid_until;
+async function removeAccount(user) {
+  if (!window.confirm(`Удалить учётную запись ${user.login} (${user.full_name})?`)) return;
+  try {
+    await Api.deleteUser(user.id);
+    if (state.editingUser?.user?.id === user.id) cancelUserEdit();
+    await loadUsers();
+  } catch (error) {
+    window.alert(error.detail);
   }
-  el("emp-on-shift").checked = employee.status !== "offline";
-  el("emp-place").value = nearestPlaceId(employee) || el("emp-place").value;
-
-  el("employee-form-title").textContent = `Изменить: ${employee.full_name}`;
-  el("employee-submit").textContent = "Сохранить изменения";
-  el("employee-cancel").hidden = false;
-  el("employee-login-row").hidden = true;
-  // Занятого сотрудника нельзя «снять со смены» правкой карточки: у него
-  // открытый вызов, и освобождать его должен диспетчер снятием вызова.
-  el("emp-on-shift").disabled = isBusyStatus(employee.status);
-  setNote("employee-note", editHint(employee), "");
 }
 
-function editHint(employee) {
+async function removeEmployee(employee) {
+  if (!window.confirm(
+    `Удалить сотрудника ${employee.full_name} из аэропорта ${state.user.airport_icao}? ` +
+    "Его вход в приложение тоже перестанет работать."
+  )) return;
+  try {
+    await Api.deleteEmployee(employee.id);
+    if (state.editingUser?.employee?.id === employee.id) cancelUserEdit();
+    await loadUsers();
+  } catch (error) {
+    window.alert(error.detail);
+  }
+}
+
+/* --- Форма --- */
+
+function fillRoleSelect(selected) {
+  const roles = el("user-role");
+  roles.replaceChildren();
+  for (const role of assignableRoles()) {
+    roles.append(new Option(roleTitle(role), role));
+  }
+  roles.value = assignableRoles().includes(selected) ? selected : "dispatcher";
+}
+
+function fillAirportSelect() {
+  const airports = el("user-airport");
+  airports.replaceChildren();
+  for (const airport of state.user.airports || []) {
+    airports.append(new Option(`${airport.icao} · ${airport.name}`, airport.icao));
+  }
+  airports.value = state.user.airport_icao || airports.value;
+  // Аэропорт выбирает только технический администратор; остальные
+  // заводят людей в своём.
+  airports.disabled = state.user.role !== "admin";
+}
+
+/**
+ * Поля формы под выбранную роль: у инженера — карточка сотрудника
+ * и необязательный вход; у остальных — обязательные логин и пароль.
+ */
+function syncUserForm() {
+  const editing = state.editingUser;
+  const engineer = el("user-role").value === ENGINEER;
+  el("user-engineer-fields").hidden = !engineer;
+  // Инженер заводится в аэропорту сессии: места берутся из его схемы.
+  el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || editing !== null;
+
+  el("user-login-row").hidden = editing !== null;
+  el("user-login").required = !engineer && editing === null;
+  el("user-password").required = !engineer && editing === null;
+  el("user-login-label").textContent = engineer
+    ? "Логин для приложения инженера (необязательно)"
+    : "Логин";
+  if (editing === null) {
+    el("user-password-label").textContent = engineer ? "Пароль (вместе с логином)" : "Пароль";
+  }
+  el("user-types").required = engineer && editing === null;
+}
+
+function resetUserForm() {
+  state.editingUser = null;
+  el("user-form").reset();
+  el("user-form-card").hidden = !canManageAccounts();
+  fillRoleSelect("dispatcher");
+  fillAirportSelect();
+  el("user-role").disabled = false;
+  el("user-password-row").hidden = false;
+  el("user-on-shift").disabled = false;
+  for (const id of ENGINEER_CARD_FIELDS) el(id).disabled = false;
+  el("user-form-title").textContent = "Завести учётную запись";
+  el("user-submit").textContent = "Завести";
+  el("user-cancel").hidden = true;
+  syncUserForm();
+}
+
+function cancelUserEdit() {
+  resetUserForm();
+  el("user-note").hidden = true;
+}
+
+/** Правка учётной записи диспетчера, начальника смены, администратора. */
+function startAccountEdit(user) {
+  resetUserForm();
+  state.editingUser = { kind: "account", user };
+  el("user-name").value = user.full_name;
+  fillRoleSelect(user.role);
+  el("user-password").value = "";
+  el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  openUserEdit(`Изменить: ${user.login}`);
+}
+
+/**
+ * Правка инженера: карточка и, если есть, вход. Начальник смены меняет
+ * только смену, место и присутствие на смене; квалификацию и ФИО —
+ * администратор аэропорта.
+ */
+function startEngineerEdit(employee, account) {
+  resetUserForm();
+  state.editingUser = { kind: "engineer", employee, account };
+  el("user-form-card").hidden = false;
+
+  el("user-name").value = employee.full_name;
+  el("user-role").replaceChildren(new Option(roleTitle(ENGINEER), ENGINEER));
+  el("user-role").value = ENGINEER;
+  el("user-role").disabled = true;
+  el("user-shift").value = employee.shift;
+  const mark = employee.qualifications[0] || null;
+  if (mark) {
+    el("user-mark").value = mark.category;
+    el("user-types").value = mark.aircraft_types.join(", ");
+    el("user-valid").value = mark.valid_until;
+  }
+  el("user-place").value = nearestPlaceId(employee) || el("user-place").value;
+  el("user-on-shift").checked = employee.status !== "offline";
+  // Занятого нельзя снять со смены правкой карточки: у него открытый
+  // вызов, освобождать его должен диспетчер снятием вызова.
+  el("user-on-shift").disabled = isBusyStatus(employee.status);
+  for (const id of ENGINEER_CARD_FIELDS) el(id).disabled = !canManageAccounts();
+
+  // Новый пароль задаётся, только если вход у инженера есть.
+  el("user-password-row").hidden = !(account && canManageAccounts());
+  el("user-password").value = "";
+  el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  openUserEdit(`Изменить: ${employee.full_name}`);
+  setNote("user-note", engineerHint(employee), "");
+}
+
+function openUserEdit(title) {
+  el("user-form-title").textContent = title;
+  el("user-submit").textContent = "Сохранить";
+  el("user-cancel").hidden = false;
+  el("user-note").hidden = true;
+  syncUserForm();
+}
+
+function engineerHint(employee) {
   if (isBusyStatus(employee.status)) {
     return "Сотрудник занят на вызове: снять его со смены здесь нельзя";
   }
+  if (!canManageAccounts()) {
+    return "Начальник смены меняет смену, место и присутствие на смене; квалификацию — администратор аэропорта";
+  }
   return "Меняются квалификация, смена, место и присутствие на смене";
+}
+
+/** Карточка инженера из полей формы, или текст ошибки. */
+function engineerCard() {
+  const place = selectedPlace("user-place");
+  if (place === null) return { error: placeError() };
+  const types = el("user-types")
+    .value.split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (!types.length) return { error: "Укажите хотя бы один тип ВС" };
+  return {
+    full_name: el("user-name").value.trim(),
+    shift: el("user-shift").value,
+    qualifications: [
+      { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
+    ],
+    lat: place.lat,
+    lon: place.lon,
+    on_shift: el("user-on-shift").checked,
+  };
+}
+
+async function onUserSubmit(event) {
+  event.preventDefault();
+  const editing = state.editingUser;
+  const engineer = el("user-role").value === ENGINEER;
+  el("user-submit").disabled = true;
+  try {
+    let message;
+    if (editing && editing.kind === "engineer") {
+      message = await saveEngineer(editing);
+    } else if (editing) {
+      message = await saveAccount(editing.user);
+    } else if (engineer) {
+      message = await createEngineer();
+    } else {
+      message = await createAccount();
+    }
+    if (message === null) return;
+    resetUserForm();
+    setNote("user-note", message, "is-ok");
+    await loadUsers();
+  } catch (error) {
+    setNote("user-note", error.detail, "is-error");
+  } finally {
+    el("user-submit").disabled = false;
+  }
+}
+
+async function createAccount() {
+  const role = el("user-role").value;
+  const payload = {
+    login: el("user-login").value.trim(),
+    password: el("user-password").value,
+    full_name: el("user-name").value.trim(),
+    role,
+  };
+  if (role !== "admin") payload.airport_icao = el("user-airport").value;
+  const created = await Api.createUser(payload);
+  const where = created.airport_icao ? `, аэропорт ${created.airport_icao}` : "";
+  return `${created.full_name} — ${roleTitle(created.role)}${where}. Логин: ${created.login}`;
+}
+
+async function saveAccount(user) {
+  const changes = { full_name: el("user-name").value.trim() };
+  if (el("user-password").value) changes.password = el("user-password").value;
+  if (el("user-role").value !== user.role) changes.role = el("user-role").value;
+  const updated = await Api.updateUser(user.id, changes);
+  return `${updated.login}: изменения сохранены`;
+}
+
+async function createEngineer() {
+  if (!state.user.airport_icao) {
+    setNote("user-note", "Выберите аэропорт в шапке: инженер заводится в нём", "is-error");
+    return null;
+  }
+  const card = engineerCard();
+  if (card.error) {
+    setNote("user-note", card.error, "is-error");
+    return null;
+  }
+  const login = el("user-login").value.trim() || null;
+  const password = el("user-password").value || null;
+  const employee = await Api.createEmployee({
+    ...card,
+    airport_icao: state.user.airport_icao,
+    login,
+    password,
+  });
+  const access = login ? ` Вход в приложение инженера: ${login}.` : " Без входа в приложение.";
+  return `${employee.full_name} — инженер, ${state.user.airport_icao}.${access}`;
+}
+
+/**
+ * Сохранение карточки инженера. Координаты идут отдельной ручкой — той
+ * же, что шлёт телефон инженера. Статус занятого не трогаем: его
+ * освобождает снятие вызова, иначе вызов остался бы без исполнителя.
+ */
+async function saveEngineer({ employee, account }) {
+  const card = engineerCard();
+  if (card.error) {
+    setNote("user-note", card.error, "is-error");
+    return null;
+  }
+  // Начальнику смены сервер разрешает только смену и статус.
+  const changes = canManageAccounts()
+    ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications }
+    : { shift: card.shift };
+  if (!isBusyStatus(employee.status)) {
+    changes.status = card.on_shift ? "free" : "offline";
+  }
+  const updated = await Api.updateEmployee(employee.id, changes);
+  if (employee.lat !== card.lat || employee.lon !== card.lon) {
+    await Api.sendLocation(employee.id, card.lat, card.lon);
+  }
+  if (account && el("user-password").value) {
+    await Api.updateUser(account.id, { password: el("user-password").value });
+  }
+  return `${updated.full_name}: изменения сохранены`;
 }
 
 function isBusyStatus(status) {
@@ -628,17 +988,6 @@ function nearestPlaceId(employee) {
   return best;
 }
 
-function cancelEmployeeEdit() {
-  state.editingEmployee = null;
-  el("employee-form").reset();
-  el("employee-form-title").textContent = "Зарегистрировать сотрудника";
-  el("employee-submit").textContent = "Зарегистрировать";
-  el("employee-cancel").hidden = true;
-  el("employee-login-row").hidden = false;
-  el("emp-on-shift").disabled = false;
-  el("employee-note").hidden = true;
-}
-
 function statusTitle(status) {
   const titles = {
     free: "свободен",
@@ -650,90 +999,50 @@ function statusTitle(status) {
   return titles[status] || status;
 }
 
-/**
- * Сохранение правок карточки.
- *
- * Координаты идут отдельной ручкой — той же, что шлёт телефон инженера:
- * место сотрудника меняется одним способом, кто бы его ни менял.
- * Статус занятого не трогаем: его освобождает снятие вызова, а не правка
- * карточки, иначе вызов остался бы без исполнителя.
- */
-async function saveEmployeeEdit(payload) {
-  const employee = state.editingEmployee;
-  const changes = {
-    full_name: payload.full_name,
-    shift: payload.shift,
-    qualifications: payload.qualifications,
-  };
-  if (!isBusyStatus(employee.status)) {
-    changes.status = payload.on_shift ? "free" : "offline";
-  }
+/* --- Расписание смен --- */
 
-  const updated = await Api.updateEmployee(employee.id, changes);
-  if (employee.lat !== payload.lat || employee.lon !== payload.lon) {
-    await Api.sendLocation(employee.id, payload.lat, payload.lon);
-  }
+const SHIFT_NAMES = { day: "дневная", night: "ночная" };
 
-  cancelEmployeeEdit();
-  setNote("employee-note", `${updated.full_name}: изменения сохранены`, "is-ok");
+function sessionAirport() {
+  return (state.user.airports || []).find((item) => item.icao === state.user.airport_icao) || null;
 }
 
-async function onEmployeeSubmit(event) {
+function loadShifts() {
+  const airport = sessionAirport();
+  el("shifts-airport").textContent = airport ? airport.icao : "—";
+  el("shifts-form").hidden = !airport;
+  if (!airport) {
+    setNote("shifts-note", "Выберите аэропорт в шапке", "");
+    return;
+  }
+  el("shift-tz").value = airport.timezone;
+  el("shift-start").value = airport.day_start;
+  el("shift-end").value = airport.day_end;
+  setNote("shifts-note", shiftNow(airport), "");
+}
+
+function shiftNow(airport) {
+  return `Сейчас в ${airport.icao} ${airport.local_time} — идёт ${SHIFT_NAMES[airport.current_shift]} смена.`;
+}
+
+async function onShiftsSubmit(event) {
   event.preventDefault();
-
-  const place = selectedPlace("emp-place");
-  if (place === null) {
-    setNote("employee-note", placeError(), "is-error");
-    return;
-  }
-
-  const types = el("emp-types")
-    .value.split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-
-  if (!types.length) {
-    setNote("employee-note", "Укажите хотя бы один тип ВС", "is-error");
-    return;
-  }
-
-  const payload = {
-    full_name: el("emp-name").value.trim(),
-    airport_icao: state.user.airport_icao,
-    shift: el("emp-shift").value,
-    qualifications: [
-      {
-        category: el("emp-mark").value,
-        aircraft_types: types,
-        valid_until: el("emp-valid").value.trim(),
-      },
-    ],
-    lat: place.lat,
-    lon: place.lon,
-    on_shift: el("emp-on-shift").checked,
-    login: el("emp-login").value.trim() || null,
-    password: el("emp-password").value || null,
-  };
-
-  el("employee-submit").disabled = true;
+  const airport = sessionAirport();
+  if (!airport) return;
+  el("shifts-submit").disabled = true;
   try {
-    if (state.editingEmployee !== null) {
-      await saveEmployeeEdit(payload);
-    } else {
-      const employee = await Api.createEmployee(payload);
-      const access = payload.login
-        ? ` Вход в приложение инженера: ${payload.login}.`
-        : "";
-      setNote("employee-note", `${employee.full_name} зарегистрирован.${access}`, "is-ok");
-      el("emp-name").value = "";
-      el("emp-login").value = "";
-      el("emp-password").value = "";
-    }
-    await loadEmployees();
+    const updated = await Api.setShiftSchedule(airport.icao, {
+      timezone: el("shift-tz").value.trim(),
+      day_start: el("shift-start").value,
+      day_end: el("shift-end").value,
+    });
+    state.user = await Api.me();
+    loadShifts();
+    setNote("shifts-note", `Сохранено. ${shiftNow(updated)}`, "is-ok");
   } catch (error) {
-    setNote("employee-note", error.detail, "is-error");
+    setNote("shifts-note", error.detail, "is-error");
   } finally {
-    el("employee-submit").disabled = false;
+    el("shifts-submit").disabled = false;
   }
 }
 

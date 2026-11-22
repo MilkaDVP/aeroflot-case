@@ -275,6 +275,25 @@
   color: var(--text);
 }
 
+/* Вызов разбирает другой диспетчер — карточка приглушена. */
+.call-who.is-claimed { color: var(--busy); }
+.call-who.is-claimed-mine { color: var(--route); }
+.call.is-claimed-other { opacity: 0.7; }
+.call.is-claimed-other.selected { opacity: 1; }
+
+.claim-notice {
+  padding: var(--gap);
+  border: 1px solid var(--busy);
+  border-radius: var(--radius-lg);
+  background: var(--busy-soft);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.claim-notice b { color: var(--busy); }
+.claim-notice .muted { color: var(--text-muted); font-size: var(--fs-sm); }
+.claim-notice button { margin-top: var(--gap-sm); }
+
 .call-who.is-queued {
   color: var(--warn);
 }
@@ -451,6 +470,76 @@
   stroke-dasharray: 7 6;
 }
 
+/* Тёмная окантовка под линией маршрута — чтобы линия читалась на снимке. */
+.route-casing {
+  fill: none;
+  stroke: var(--bg-deep);
+  stroke-opacity: 0.85;
+  stroke-width: 7.5px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Отметки «А» (начало), «Б» (стоянка) и «М» (забрать машину). */
+.route-end { pointer-events: none; }
+
+.route-end-disc {
+  fill: var(--route);
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.route-end-finish .route-end-disc { fill: var(--danger-strong); }
+.route-end-pickup .route-end-disc { fill: var(--bg-deep); stroke: var(--route); }
+
+.route-end-halo {
+  fill: var(--danger);
+  opacity: 0.25;
+  animation: route-pulse 1.6s ease-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+.route-end-letter {
+  fill: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* Маршрут не построен: пунктирное кольцо вокруг стоянки и подпись. */
+.route-missing { pointer-events: none; }
+
+.route-missing-ring {
+  fill: var(--danger-soft);
+  stroke: var(--danger);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 4;
+}
+
+.route-missing-label {
+  fill: var(--danger-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-deep);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+@keyframes route-pulse {
+  0% { transform: scale(0.7); opacity: 0.45; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-end-halo { animation: none; }
+}
+
 .history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); }
 
 #call-actions {
@@ -472,6 +561,38 @@
 .vehicle.is-reserved {
   stroke: var(--warn);
 }
+
+/* Перенос машин, людей и бортов удержанием: метка «поднимается» —
+   крупнее (масштаб задаёт карта), с рамкой и тенью — и идёт за курсором. */
+.hit-area { fill: transparent; }
+.movable-marker.is-movable { cursor: grab; }
+.map.dragging-object,
+.map.dragging-object * { cursor: grabbing !important; }
+
+.select-ring {
+  fill: var(--route-soft);
+  stroke: #fff;
+  stroke-width: 2;
+  display: none;
+}
+
+.movable-marker.is-lifted .select-ring,
+.movable-marker.is-dragging .select-ring { display: inline; }
+.vehicle-marker.is-lifted .vehicle,
+.vehicle-marker.is-dragging .vehicle { fill: var(--route); stroke: #fff; }
+
+.movable-marker.is-lifted,
+.movable-marker.is-dragging {
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.6));
+}
+
+/* Борт «прилип» к стоянке: отпустите — встанет на неё. */
+.movable-marker.is-snapped .select-ring {
+  fill: var(--ok-soft);
+  stroke: var(--ok);
+}
+
+
 
 .label-vehicle {
   fill: var(--route);
@@ -498,44 +619,134 @@
   font-weight: 600;
 }
 
-/* Инструменты имитации — сверху слева: снизу слева легенда, снизу справа
-   кнопки масштаба, сверху справа переключатель подложки. Это единственный
-   свободный угол, и кнопка ни на что не наезжает. */
+/* Поиск по карте — сверху слева: снизу слева легенда, снизу справа
+   кнопки масштаба, сверху справа переключатель подложки. */
 .map-tools {
   position: absolute;
   left: var(--gap);
   top: var(--gap);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--gap-xs);
 }
 
-.map-tools button {
-  padding: 7px 12px;
+/* --- Поиск по карте --- */
+
+.map-search { position: relative; }
+
+.map-search-input {
+  width: 300px;
+  height: 32px;
+  padding: 0 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  color: var(--text-muted);
+  color: var(--text);
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs);
+}
+
+.map-search-input::placeholder { color: var(--text-dim); }
+.map-search-input:focus { outline: none; border-color: var(--route); }
+
+.map-search-list {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 340px;
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.map-search-list[hidden] { display: none; }
+
+.map-search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
-/* Включённый режим виден издалека: пока он активен, клик по карте
-   означает не выбор стоянки, а перестановку человека. */
-.map-tools button.active {
-  border-color: var(--warn);
-  background: var(--warn-soft);
-  color: var(--warn);
+.map-search-item.is-active { background: var(--route-soft); }
+.map-search-item.is-disabled { opacity: 0.45; cursor: default; }
+
+.map-search-icon {
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
-.map-tools-hint {
-  padding: 6px 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+.map-search-icon.is-aircraft { color: #93a7bb; }
+.map-search-icon.is-stand { color: var(--stand); }
+.map-search-icon.is-tech_center { color: var(--warn); }
+.map-search-icon.is-employee { color: var(--ok); }
+.map-search-icon.is-vehicle { color: var(--route); }
+
+.map-search-text { display: flex; flex-direction: column; min-width: 0; }
+.map-search-text b { font-weight: 600; font-size: var(--fs); color: var(--text); }
+.map-search-text small {
   font-size: var(--fs-xs);
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-search-empty { padding: 8px; color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* Подсветка найденного объекта на карте. */
+.search-flash { pointer-events: none; }
+
+.search-flash-ring {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 3;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: search-ping 1s ease-out 4 both;
+}
+
+.search-flash-core {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2.5;
+}
+
+.search-flash-label {
+  fill: var(--warn);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-deep);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+@keyframes search-ping {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-flash-ring { animation: none; opacity: 0.6; }
+}
+
+@media (max-width: 900px) {
+  .map-search-input { width: 200px; }
+  .map-search-list { width: min(340px, calc(100vw - 32px)); }
 }
 
 .map-controls {
@@ -1525,3 +1736,6 @@
   font-size: var(--fs-sm);
   color: var(--warn);
 }
+
+/* Смена сессии не совпадает с идущей по часам аэропорта. */
+#ctx-shift.is-off-schedule { color: var(--warn); }

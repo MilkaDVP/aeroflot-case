@@ -30,7 +30,15 @@ from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
 from models.employee import Employee
-from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
+from models.user import (
+    ROLE_ADMIN,
+    ROLE_ENGINEER,
+    ROLE_LOCAL_ADMIN,
+    ROLE_SHIFT_SUPERVISOR,
+    AuthSession,
+    User,
+    role_at_least,
+)
 from services.assignment import record_position, release_vehicle, working_call_of
 from schemas.employee import (
     EmployeeCreateRequest,
@@ -44,8 +52,18 @@ router = APIRouter(prefix="/api/employees", tags=["Сотрудники"])
 
 ERROR_NOT_FOUND = "Сотрудник не найден"
 ERROR_NOT_SELF = "Инженер может изменять только собственную карточку"
+ERROR_CARD_FORBIDDEN = "Менять статус и смену сотрудников может начальник смены и старше"
+ERROR_FIELDS_FORBIDDEN = (
+    "Квалификацию, ФИО и скорость меняет администратор аэропорта; "
+    "начальнику смены доступны статус и смена"
+)
+
+# Поля карточки, которые вправе менять начальник смены: присутствие
+# и смена. Квалификация — решение администратора аэропорта.
+SUPERVISOR_FIELDS = {"status", "shift"}
 ERROR_BAD_SHIFT = "Смена должна быть day или night"
 ERROR_NO_AIRPORT = "Аэропорт {icao} не заведён в системе"
+ERROR_FOREIGN_AIRPORT = "Заводить сотрудников можно только в своём аэропорту, а не в {icao}"
 ERROR_BAD_SOURCE = "Источник координат должен быть gps, simulation или manual, а не {source}"
 ERROR_LOGIN_PAIR = "Логин и пароль задаются вместе: одного без другого недостаточно"
 ERROR_LOGIN_TAKEN = "Логин {login} уже занят"
@@ -94,6 +112,29 @@ def load_employee(db, context, employee_id):
     return employee
 
 
+def ensure_card_editor(context, employee, fields):
+    """
+    Кто какие поля карточки вправе менять.
+
+    Инженер — статус и смену только своей карточки. Начальник смены —
+    статус и смену любого сотрудника своего аэропорта. Администратор
+    аэропорта и старше — всё. Диспетчер карточки не правит: он
+    распределяет вызовы, а присутствием людей управляет начальник смены.
+    """
+    role = context.user.role
+    if role == ROLE_ENGINEER:
+        ensure_own_card(context, employee)
+        allowed = SUPERVISOR_FIELDS
+    elif role_at_least(role, ROLE_LOCAL_ADMIN):
+        return
+    elif role_at_least(role, ROLE_SHIFT_SUPERVISOR):
+        allowed = SUPERVISOR_FIELDS
+    else:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_CARD_FORBIDDEN)
+    if set(fields) - allowed:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_FIELDS_FORBIDDEN)
+
+
 def ensure_own_card(context, employee):
     """
     Инженер правит только свою карточку.
@@ -117,11 +158,12 @@ def list_employees(
     Сотрудники текущего аэропорта.
 
     По умолчанию — смена из контекста сессии: диспетчер работает со своей
-    сменой. Параметр shift позволяет посмотреть состав другой смены.
+    сменой. Параметр shift позволяет посмотреть состав другой смены,
+    shift=all — всех сотрудников аэропорта (для учётных записей).
     """
     query = db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao)
     selected_shift = shift or context.shift
-    if selected_shift:
+    if selected_shift and selected_shift != "all":
         query = query.filter(Employee.shift == selected_shift)
 
     return [to_response(employee) for employee in query.order_by(Employee.full_name).all()]
@@ -135,11 +177,12 @@ def list_employees(
 )
 def create_employee(
     payload: EmployeeCreateRequest,
-    context: Context = Depends(require_roles(ROLE_ADMIN)),
+    context: Context = Depends(require_roles(ROLE_LOCAL_ADMIN)),
     db: Session = Depends(get_db),
 ):
     """
-    Регистрация сотрудника. Только администратор.
+    Регистрация сотрудника. Администратор аэропорта — только в своём
+    аэропорту, технический администратор — в любом.
 
     Можно сразу поставить на смену — тогда сотрудник участвует в подборе,
     не заходя в приложение. И можно выдать логин и пароль — тогда он сам
@@ -147,6 +190,15 @@ def create_employee(
     """
     if payload.shift not in (SHIFT_DAY, SHIFT_NIGHT):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_SHIFT)
+
+    if (
+        context.user.role != ROLE_ADMIN
+        and payload.airport_icao.upper() not in context.user.airport_icaos
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            ERROR_FOREIGN_AIRPORT.format(icao=payload.airport_icao.upper()),
+        )
 
     airport = db.get(Airport, payload.airport_icao.upper())
     if airport is None:
@@ -200,7 +252,7 @@ def create_employee(
 def delete_employee(
     employee_id: int,
     db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(require_roles_in_airport(ROLE_ADMIN)),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     employee = load_employee(db, context, employee_id)
     active = db.query(Call.id).filter(
@@ -225,9 +277,11 @@ def update_employee(
 ):
     """Частичное обновление карточки: статус, смена, квалификации."""
     employee = load_employee(db, context, employee_id)
-    ensure_own_card(context, employee)
-
     changes = payload.model_dump(exclude_unset=True)
+    ensure_card_editor(
+        context, employee, [field for field, value in changes.items() if value is not None]
+    )
+
     if "qualifications" in changes and changes["qualifications"] is not None:
         changes["qualifications"] = [
             item.model_dump() for item in payload.qualifications
@@ -288,7 +342,7 @@ def toggle_shift(
     момента он становится кандидатом на назначение.
     """
     employee = load_employee(db, context, employee_id)
-    ensure_own_card(context, employee)
+    ensure_card_editor(context, employee, ["status", "shift"])
 
     # Уйти со смены с незакрытым вызовом нельзя: вызов остался бы
     # назначенным на человека, которого на перроне уже нет.

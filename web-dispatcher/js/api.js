@@ -6,6 +6,36 @@
  * диспетчер не обязан входить заново из-за случайного F5 за смену.
  */
 
+/*
+ * Старшинство ролей — то же, что на сервере (models/user.py). Старшая роль
+ * получает права младших; инженер в эту цепочку не входит. Решает всё
+ * равно сервер: здесь роль нужна, чтобы не показывать заведомо
+ * недоступные кнопки.
+ */
+const ROLE_RANK = {
+  dispatcher: 1,
+  shift_supervisor: 2,
+  local_admin: 3,
+  admin: 4,
+};
+
+const ROLE_TITLES = {
+  admin: "технический администратор",
+  local_admin: "администратор аэропорта",
+  shift_supervisor: "начальник смены",
+  dispatcher: "диспетчер",
+  engineer: "инженер",
+};
+
+/** Не ниже ли роль пользователя заданной. */
+function roleAtLeast(role, minimum) {
+  return (ROLE_RANK[role] || 0) >= ROLE_RANK[minimum];
+}
+
+function roleTitle(role) {
+  return ROLE_TITLES[role] || role;
+}
+
 const STORAGE_TOKEN = "aeroflot.token";
 const STORAGE_USER = "aeroflot.user";
 
@@ -133,6 +163,17 @@ const Api = {
   moveAircraft: (id, point) => request("POST", `/api/aircraft/${id}/location`, point),
   deleteEmployee: (id) => request("DELETE", `/api/employees/${id}`),
 
+  // Учётные записи: список и сеансы — начальник смены и старше,
+  // заведение и правка — администратор аэропорта и старше.
+  users: () => request("GET", "/api/admin/users"),
+  createUser: (payload) => request("POST", "/api/admin/users", payload),
+  updateUser: (id, payload) => request("PATCH", `/api/admin/users/${id}`, payload),
+  deleteUser: (id) => request("DELETE", `/api/admin/users/${id}`),
+  logoutUser: (id) => request("POST", `/api/admin/users/${id}/logout`),
+  // Расписание смен аэропорта: часовой пояс и граница дневной смены.
+  setShiftSchedule: (icao, payload) =>
+    request("PUT", `/api/airports/${icao}/shift-schedule`, payload),
+
   aircraft: () => request("GET", "/api/aircraft"),
   // Открытый справочник неисправностей: поиск словами экипажа или номером
   // главы ATA и пополнение из формы вызова.
@@ -149,6 +190,11 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
+  // Захват вызова: один вызов разбирает один диспетчер. takeover —
+  // начальник смены забирает чужой вызов себе.
+  claimCall: (callId, takeover = false) =>
+    request("POST", `/api/calls/${callId}/claim`, { takeover }),
+  releaseCall: (callId) => request("POST", `/api/calls/${callId}/release`),
   // switchOver — переключить занятого, ждущего запчасти, на этот вызов.
   // travel — как поедет: auto (как быстрее), walk, with_lead (с первым).
   assign: (callId, employee_id, override_reason, switchOver, travel) =>

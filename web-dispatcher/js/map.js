@@ -66,6 +66,9 @@ class AirportMap {
       aircraft: createGroup("layer-aircraft"),
       vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
+      // Отметки начала и конца маршрута — поверх людей и бортов:
+      // иначе буква «Б» пряталась под силуэтом самолёта на стоянке.
+      routeEnds: createGroup("layer-route-ends"),
       // Слой редактора: точки и связи, которые администратор наносит
       // на карту. На рабочем экране диспетчера остаётся пустым.
       editor: createGroup("layer-editor"),
@@ -83,10 +86,22 @@ class AirportMap {
     // Сколько экранных пикселей приходится на метр местности при зуме 1.
     this.basePxPerMetre = 1;
     this.onStandClick = null;
-    // В режиме перемещения первый клик выбирает объект, второй задаёт место.
-    this.onObjectClick = null;
-    this.onGroundClick = null;
-    this.svg.addEventListener("click", (event) => this.handleGroundClick(event));
+    this.onAircraftClick = null;
+
+    // Перенос подвижных объектов (машин, людей, бортов) мышью.
+    // Колбэк получает вид объекта, сам объект и новое место в градусах.
+    this.onObjectDrop = null;
+    this.onObjectRefused = null;
+    this.drag = null;
+    this.swallowClick = false;
+    // Последние и отложенные на время переноса данные каждого слоя.
+    this.lastDraw = {};
+    this.pendingDraw = {};
+    // Перенесённые, но ещё не подтверждённые сервером объекты: до ответа
+    // они рисуются на новом месте, а не прыгают назад по старым данным.
+    this.overrides = new Map();
+    this.cancelPan = null;
+    this.setupObjectDrag();
 
     this.tiles = null;
     // Следы перемещения: идентификатор сотрудника -> последние точки.
@@ -304,16 +319,7 @@ class AirportMap {
         shape.setAttribute("r", 3.5);
         shape.setAttribute("class", "stand");
         marker.append(shape, title(`Стоянка ${node.ref}`));
-        marker.addEventListener("click", (event) => {
-          // В режиме перемещения клик по стоянке означает «поставить
-          // сюда человека», а не «завести вызов на этот борт». Иначе
-          // самое естественное место для перестановки — стоянка —
-          // оказалось бы единственным, куда переставить нельзя.
-          if (this.onGroundClick) {
-            event.stopPropagation();
-            this.onGroundClick({ lat: node.lat, lon: node.lon });
-            return;
-          }
+        marker.addEventListener("click", () => {
           if (this.onStandClick) {
             this.onStandClick(node);
           }
@@ -338,32 +344,36 @@ class AirportMap {
 
   /** Метки воздушных судов на стоянках. */
   drawAircraft(aircraftList) {
+    if (this.deferWhileDragging("aircraft", [aircraftList])) return;
     const layer = this.layers.aircraft;
     layer.replaceChildren();
 
     for (const aircraft of aircraftList) {
-      const node = this.nodesById.get(aircraft.stand_node_id);
-      if (!node) {
+      const place = this.aircraftPlace(aircraft);
+      if (!place) {
         continue;
       }
 
-      const marker = this.createMarker(node.x, node.y);
+      const marker = this.createMarker(place.x, place.y);
       const shape = document.createElementNS(SVG_NS, "path");
       // Простой силуэт носом вверх: на любом масштабе читается лучше,
       // чем иконка с мелкими деталями.
       shape.setAttribute("d", "M 0 -7 L 6 5 L -6 5 Z");
       shape.setAttribute("class", "aircraft");
       marker.append(
+        selectRing(0, 0, 12),
         shape,
+        hitArea(0, 0),
         title(
           `${aircraft.board_number} · ${aircraft.aircraft_type} · стоянка ${aircraft.stand_ref}`
         )
       );
       marker.dataset.aircraftId = aircraft.id;
-      marker.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (this.onObjectClick) this.onObjectClick("aircraft", aircraft, node, event);
-        else if (this.onStandClick) this.onStandClick(node);
+      // Щелчок по борту — карточка с кнопкой «Зарегистрировать вызов»,
+      // а не сразу форма: иначе, пытаясь перетащить борт, диспетчер
+      // каждый раз открывал бы окно поверх карты.
+      this.makeDraggable(marker, "aircraft", aircraft, () => {
+        if (this.onAircraftClick) this.onAircraftClick(aircraft, marker);
       });
       layer.append(marker);
     }
@@ -380,6 +390,7 @@ class AirportMap {
    * Две метки в одной точке только мешали бы.
    */
   drawVehicles(vehicles) {
+    if (this.deferWhileDragging("vehicle", [vehicles])) return;
     const layer = this.layers.vehicles;
     layer.replaceChildren();
 
@@ -387,7 +398,8 @@ class AirportMap {
       if (vehicle.status === "in_use") {
         continue;
       }
-      const position = this.projectLatLon(vehicle.lat, vehicle.lon);
+      const override = this.overrides.get(`vehicle:${vehicle.id}`) || vehicle;
+      const position = this.projectLatLon(override.lat, override.lon);
       const marker = this.createMarker(position.x, position.y);
 
       const shape = document.createElementNS(SVG_NS, "rect");
@@ -409,12 +421,9 @@ class AirportMap {
       label.textContent = vehicle.call_sign;
 
       marker.dataset.vehicleId = vehicle.id;
-      marker.addEventListener("click", (event) => {
-        if (!this.onObjectClick) return;
-        event.stopPropagation();
-        this.onObjectClick("vehicle", vehicle, vehicle, event);
-      });
-      marker.append(shape, label, title(vehicleTooltip(vehicle)));
+      marker.classList.add("vehicle-marker");
+      marker.append(selectRing(0, 0, 12), shape, hitArea(0, 0), label, title(vehicleTooltip(vehicle)));
+      this.makeDraggable(marker, "vehicle", vehicle);
       layer.append(marker);
     }
 
@@ -428,12 +437,16 @@ class AirportMap {
    * Класс приходит снаружи: карта не знает про допуски, она их рисует.
    */
   drawEmployees(employees, classifier) {
+    if (this.deferWhileDragging("employee", [employees, classifier])) return;
     const layer = this.layers.employees;
     layer.replaceChildren();
 
-    const placed = employees.filter(
-      (employee) => employee.lat !== null && employee.lon !== null
-    );
+    const placed = employees
+      .filter((employee) => employee.lat !== null && employee.lon !== null)
+      .map((employee) => {
+        const override = this.overrides.get(`employee:${employee.id}`);
+        return override ? { ...employee, lat: override.lat, lon: override.lon } : employee;
+      });
     this.drawTrails(placed);
     const offsets = spreadOverlapping(placed);
 
@@ -441,6 +454,8 @@ class AirportMap {
       const position = this.projectLatLon(employee.lat, employee.lon);
       const marker = this.createMarker(position.x, position.y);
       const offset = offsets.get(employee.id);
+
+      marker.append(selectRing(offset.dx, offset.dy, 11));
 
       // Спецтранспорт отмечается кольцом: наличие машины меняет время
       // в пути вчетверо, это должно считываться без наведения мыши.
@@ -458,17 +473,12 @@ class AirportMap {
       shape.setAttribute("cy", offset.dy);
       shape.setAttribute("r", 5);
       shape.setAttribute("class", `employee ${classifier(employee)}`);
-      marker.append(shape, title(employeeTooltip(employee)));
+      marker.append(shape, hitArea(offset.dx, offset.dy), title(employeeTooltip(employee)));
       marker.classList.add("employee-marker");
       // По этому признаку метку находят обработчики и автопроверки:
       // искать человека по подписи ненадёжно.
       marker.dataset.employeeId = employee.id;
-      marker.addEventListener("click", (event) => {
-        if (this.onObjectClick) {
-          event.stopPropagation();
-          this.onObjectClick("employee", employee, employee, event);
-        }
-      });
+      this.makeDraggable(marker, "employee", employee);
 
       layer.append(marker);
     }
@@ -476,18 +486,341 @@ class AirportMap {
     this.updateMarkerScale();
   }
 
+  /* --- Перетаскивание подвижных объектов: машин, людей, бортов --- */
+
   /**
-   * Клик по карте мимо значков — в географических координатах.
-   *
-   * Клики по стоянкам и сотрудникам обрабатываются их собственными
-   * обработчиками и сюда не доходят.
+   * Пока объект тянут, опрос сервера не перерисовывает его слой — иначе
+   * метка выскочила бы из-под курсора. Свежие данные дорисуются сразу
+   * после отпускания.
    */
-  handleGroundClick(event) {
-    if (!this.onGroundClick || !this.graph) {
+  deferWhileDragging(kind, args) {
+    this.lastDraw[kind] = args;
+    if (this.drag && this.drag.kind === kind) {
+      this.pendingDraw[kind] = args;
+      return true;
+    }
+    this.pendingDraw[kind] = null;
+    return false;
+  }
+
+  redraw(kind) {
+    const args = this.pendingDraw[kind] || this.lastDraw[kind];
+    if (!args) return;
+    if (kind === "aircraft") this.drawAircraft(...args);
+    if (kind === "vehicle") this.drawVehicles(...args);
+    if (kind === "employee") this.drawEmployees(...args);
+  }
+
+  /** Можно ли переносить объект. Машину — только свободную. */
+  canMove(kind, item) {
+    return kind !== "vehicle" || item.status === "free";
+  }
+
+  /**
+   * Перенос объекта мышью.
+   *
+   * Нажали на метку и повели — она «поднимается» (становится крупнее)
+   * и идёт за курсором, пока кнопка не отпущена. Подержали без движения —
+   * метка тоже поднимается: видно, что объект взят. Карта двигается,
+   * если зажать пустое место.
+   *
+   * onPlainClick — что делает обычный щелчок (у борта — регистрация вызова).
+   */
+  makeDraggable(marker, kind, item, onPlainClick) {
+    marker.classList.add("movable-marker");
+    if (this.canMove(kind, item)) marker.classList.add("is-movable");
+
+    marker.addEventListener("mousedown", (event) => this.pressObject(event, kind, item, marker));
+    marker.addEventListener("click", (event) => {
+      event.stopPropagation();
+      // Щелчок, которым закончился перенос, — не щелчок по объекту.
+      if (this.swallowClick) {
+        this.swallowClick = false;
+        return;
+      }
+      if (onPlainClick) onPlainClick();
+    });
+  }
+
+  pressObject(event, kind, item, marker) {
+    if (event.button !== 0) {
       return;
     }
-    const point = this.toGraphCoords(event.clientX, event.clientY);
-    this.onGroundClick(this.unprojectXY(point.x, point.y));
+    const press = {
+      kind,
+      item,
+      marker,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      origin: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) },
+      moved: false,
+      lifted: false,
+    };
+
+    // Занятую машину не берём: нажатие на ней двигает карту, как на пустом
+    // месте, а удержание объясняет, почему её не перенести.
+    if (!this.canMove(kind, item)) {
+      this.drag = press;
+      press.timer = setTimeout(() => {
+        if (this.drag !== press) return;
+        this.drag = null;
+        if (this.onObjectRefused) this.onObjectRefused(kind, item);
+      }, HOLD_TO_DRAG_MS);
+      return;
+    }
+
+    // Нажатие на объект берёт его: карта под ним не двигается, а объект
+    // поднимается, как только мышь сдвинулась или кнопку подержали.
+    event.stopPropagation();
+    event.preventDefault();
+    press.grabbed = true;
+    this.drag = press;
+    press.timer = setTimeout(() => {
+      if (this.drag === press) this.lift(press);
+    }, HOLD_TO_DRAG_MS);
+  }
+
+  /** «Поднять» метку: крупнее, с рамкой, дальше идёт за курсором. */
+  lift(press) {
+    if (press.lifted) return;
+    clearTimeout(press.timer);
+    press.lifted = true;
+    press.marker.classList.add("is-lifted");
+    this.liftMarker(press.marker, true);
+    this.svg.classList.add("dragging-object");
+    this.startEdgePan(press);
+  }
+
+  /** Ставит поднятую метку под курсор — после движения мыши, зума или автопрокрутки. */
+  followCursor(drag) {
+    const point = this.toGraphCoords(drag.lastX, drag.lastY);
+    if (drag.kind === "aircraft") {
+      // Борт рядом со стоянкой «прилипает» к ней; дальше от стоянок —
+      // встаёт ровно под курсором (ВПП, рулёжка).
+      drag.snapStand = this.standNear(point);
+      drag.marker.classList.toggle("is-snapped", Boolean(drag.snapStand));
+      if (drag.snapStand) {
+        this.placeMarker(drag.marker, drag.snapStand.x, drag.snapStand.y);
+        return;
+      }
+    }
+    this.placeMarker(drag.marker, point.x, point.y);
+  }
+
+  /** Стоянка в пределах AIRCRAFT_SNAP_PX экранных пикселей от точки, или null. */
+  standNear(point) {
+    const stand = this.nearestStand(point);
+    if (!stand) return null;
+    const pxPerUnit = this.basePxPerMetre * this.transform.scale;
+    const distancePx = Math.hypot(stand.x - point.x, stand.y - point.y) * pxPerUnit;
+    return distancePx <= AIRCRAFT_SNAP_PX ? stand : null;
+  }
+
+  /**
+   * Где рисовать борт: на стоянке, в свободной точке или там, куда его
+   * только что перенесли (до ответа сервера). node — вершина графа, к
+   * которой он привязан (для щелчка по стоянке).
+   */
+  aircraftPlace(aircraft) {
+    const override = this.overrides.get(`aircraft:${aircraft.id}`);
+    if (override && override.standNodeId) {
+      const node = this.nodesById.get(override.standNodeId);
+      return node ? { x: node.x, y: node.y, node } : null;
+    }
+    const node = this.nodesById.get(aircraft.stand_node_id) || null;
+    const free = override || (aircraft.on_stand === false ? aircraft : null);
+    if (free && free.lat != null && free.lon != null) {
+      const point = this.projectLatLon(free.lat, free.lon);
+      return { x: point.x, y: point.y, node };
+    }
+    return node ? { x: node.x, y: node.y, node } : null;
+  }
+
+  /**
+   * Автопрокрутка у края карты.
+   *
+   * Пока поднятую метку держат у края (или за ним), карта плавно едет
+   * в ту сторону, и метка остаётся под курсором — так объект можно унести
+   * в любую часть аэропорта, не отпуская кнопку. Чем ближе к краю,
+   * тем быстрее.
+   */
+  startEdgePan(drag) {
+    const step = () => {
+      if (this.drag !== drag) return;
+      const box = this.svg.getBoundingClientRect();
+      // inner — расстояние от курсора до края внутри карты;
+      // отрицательное — курсор уже за краем, скорость наибольшая.
+      const speed = (inner) =>
+        inner >= EDGE_PAN_ZONE_PX
+          ? 0
+          : EDGE_PAN_MAX_PX * Math.min(1, (EDGE_PAN_ZONE_PX - inner) / EDGE_PAN_ZONE_PX);
+      const dx = speed(drag.lastX - box.left) - speed(box.right - drag.lastX);
+      const dy = speed(drag.lastY - box.top) - speed(box.bottom - drag.lastY);
+      if (dx || dy) {
+        this.transform.x += dx / this.basePxPerMetre;
+        this.transform.y += dy / this.basePxPerMetre;
+        this.applyTransform();
+        this.followCursor(drag);
+        drag.moved = true;
+      }
+      drag.frame = requestAnimationFrame(step);
+    };
+    drag.frame = requestAnimationFrame(step);
+  }
+
+  setupObjectDrag() {
+    window.addEventListener("mousemove", (event) => {
+      const drag = this.drag;
+      if (!drag) {
+        return;
+      }
+      drag.lastX = event.clientX;
+      drag.lastY = event.clientY;
+      if (!drag.lifted) {
+        const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+        // Дрожание руки при щелчке — ещё не перенос.
+        if (distance < DRAG_THRESHOLD_PX) return;
+        if (!drag.grabbed) {
+          // Занятая машина: это было панорамирование.
+          clearTimeout(drag.timer);
+          this.drag = null;
+          this.flushPending(drag.kind);
+          return;
+        }
+        this.lift(drag);
+      }
+      drag.moved = true;
+      drag.marker.classList.add("is-dragging");
+      this.followCursor(drag);
+    });
+
+    // Колесо во время переноса: можно отдалить карту, унести объект
+    // далеко и приблизить обратно — метка остаётся под курсором.
+    this.svg.addEventListener("wheel", () => {
+      const drag = this.drag;
+      if (drag && drag.lifted) {
+        requestAnimationFrame(() => this.followCursor(drag));
+      }
+    });
+
+    window.addEventListener("mouseup", (event) => {
+      const drag = this.drag;
+      if (!drag) {
+        return;
+      }
+      this.finishDrag(drag);
+      if (drag.lifted) {
+        this.swallowClick = true;
+        // Щелчок после отпускания может и не прийти (курсор ушёл
+        // с метки) — флаг не должен пережить этот жест.
+        setTimeout(() => { this.swallowClick = false; }, 0);
+      }
+      if (drag.moved) {
+        drag.lastX = event.clientX;
+        drag.lastY = event.clientY;
+        this.drop(drag, this.toGraphCoords(drag.lastX, drag.lastY));
+      }
+      this.flushPending(drag.kind);
+    });
+
+    window.addEventListener("keydown", (event) => {
+      const drag = this.drag;
+      if (event.key !== "Escape" || !drag) {
+        return;
+      }
+      // Esc во время переноса отменяет его: метка возвращается на место.
+      this.finishDrag(drag);
+      this.placeMarker(drag.marker, drag.origin.x, drag.origin.y);
+      this.flushPending(drag.kind);
+    });
+  }
+
+  finishDrag(drag) {
+    clearTimeout(drag.timer);
+    cancelAnimationFrame(drag.frame);
+    this.drag = null;
+    this.endDragVisuals(drag);
+  }
+
+  endDragVisuals(drag) {
+    this.svg.classList.remove("dragging-object");
+    drag.marker.classList.remove("is-dragging", "is-lifted", "is-snapped");
+    this.liftMarker(drag.marker, false);
+  }
+
+  flushPending(kind) {
+    if (this.pendingDraw[kind]) this.redraw(kind);
+  }
+
+  /**
+   * Объект отпущен в точке графа. До ответа сервера он рисуется на новом
+   * месте; при отказе возвращается туда, где стоял.
+   */
+  drop(drag, point) {
+    const { kind, item } = drag;
+    const key = `${kind}:${item.id}`;
+    let position = this.unprojectXY(point.x, point.y);
+
+    if (kind === "aircraft") {
+      // Отпустили у стоянки — борт встаёт на неё; иначе — ровно туда,
+      // куда отпустили (ВПП, рулёжка). Сервер получает явное указание.
+      const stand = this.standNear(point);
+      drag.marker.classList.remove("is-snapped");
+      if (stand) {
+        this.placeMarker(drag.marker, stand.x, stand.y);
+        this.overrides.set(key, { standNodeId: stand.id });
+        position = { lat: stand.lat, lon: stand.lon, stand_node_id: stand.id };
+      } else {
+        this.overrides.set(key, position);
+        position = { ...position, free: true };
+      }
+    } else {
+      this.overrides.set(key, position);
+    }
+    if (kind === "employee") {
+      this.trails.delete(item.id);
+    }
+
+    const done = () => {
+      this.overrides.delete(key);
+      this.redraw(kind);
+    };
+    if (this.onObjectDrop) {
+      this.onObjectDrop(kind, item, position, done);
+    } else {
+      done();
+    }
+  }
+
+  nearestStand(point) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const node of this.nodesById.values()) {
+      if (node.type !== "stand") continue;
+      const distance = Math.hypot(node.x - point.x, node.y - point.y);
+      if (distance < bestDistance) {
+        best = node;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  /** Переставляет значок в точку графа, сохраняя экранный размер. */
+  placeMarker(marker, x, y) {
+    marker.dataset.x = x;
+    marker.dataset.y = y;
+    const lift = Number(marker.dataset.lift) || 1;
+    marker.setAttribute("transform", `translate(${x} ${y}) scale(${this.markerScale * lift})`);
+  }
+
+  /** «Поднимает» метку при переносе: она крупнее, пока её держат. */
+  liftMarker(marker, lifted) {
+    if (lifted) marker.dataset.lift = LIFT_SCALE;
+    else delete marker.dataset.lift;
+    this.placeMarker(marker, Number(marker.dataset.x), Number(marker.dataset.y));
   }
 
   /**
@@ -506,6 +839,13 @@ class AirportMap {
 
     for (const employee of employees) {
       seen.add(employee.id);
+      // Точка, поставленная вручную (перенос на карте), — не движение:
+      // след от старого места к новому выглядел бы как пройденный путь.
+      // Такой след сбрасывается и начинается заново с настоящих координат.
+      if (employee.location_source === "manual") {
+        this.trails.delete(employee.id);
+        continue;
+      }
       const position = this.projectLatLon(employee.lat, employee.lon);
       const trail = this.trails.get(employee.id) || [];
       const last = trail[trail.length - 1];
@@ -543,20 +883,81 @@ class AirportMap {
    * не отличил бы «идёт пешком» от «едет».
    */
   drawRoute(nodeIds, pickupNodeId) {
-    const layer = this.layers.route;
-    layer.replaceChildren();
+    this.clearRoute();
 
-    if (!nodeIds || nodeIds.length < 2) {
+    const known = (nodeIds || []).filter((id) => this.nodesById.has(id));
+    if (known.length === 0) {
+      return false;
+    }
+    // Сотрудник уже на стоянке: линии нет, но конец маршрута отмечен.
+    if (known.length === 1) {
+      this.appendRouteEnd(this.nodesById.get(known[0]), "finish", "Б", "Сотрудник уже у борта");
+      this.updateMarkerScale();
+      return true;
+    }
+
+    const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
+    if (split > 0 && split < known.length) {
+      this.appendRouteLine(known.slice(0, split + 1), "route route-walk");
+      this.appendRouteLine(known.slice(split), "route");
+    } else {
+      this.appendRouteLine(known, "route");
+    }
+
+    // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
+    // а силуэт борта на стоянке легко принять за обычный значок карты —
+    // без отметок было непонятно, откуда и куда идёт линия.
+    const first = this.nodesById.get(known[0]);
+    const last = this.nodesById.get(known[known.length - 1]);
+    if (split > 0 && split < known.length - 1) {
+      this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "М", "Здесь забрать машину");
+    }
+    this.appendRouteEnd(first, "start", "А", "Начало маршрута");
+    this.appendRouteEnd(last, "finish", "Б", "Конец маршрута — стоянка борта");
+    this.updateMarkerScale();
+    return true;
+  }
+
+  /**
+   * Маршрут, а если его нет — явная отметка «маршрут не построен»
+   * на стоянке вызова.
+   */
+  showRoute(nodeIds, pickupNodeId, standNodeId, missingText) {
+    if (!this.drawRoute(nodeIds, pickupNodeId) && standNodeId) {
+      this.drawRouteMissing(standNodeId, missingText);
+    }
+  }
+
+  /**
+   * Маршрут не построен: подсветка стоянки и подпись.
+   *
+   * Раньше в этом случае карта просто оставалась без линии, и на месте
+   * вызова виднелся только мелкий силуэт борта — диспетчер не понимал,
+   * маршрут ещё считается, не нужен или не нашёлся.
+   */
+  drawRouteMissing(standNodeId, text) {
+    this.clearRoute();
+
+    const node = this.nodesById.get(standNodeId);
+    if (!node) {
       return;
     }
 
-    const split = pickupNodeId ? nodeIds.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < nodeIds.length) {
-      this.appendRouteLine(nodeIds.slice(0, split + 1), "route route-walk");
-      this.appendRouteLine(nodeIds.slice(split), "route");
-      return;
-    }
-    this.appendRouteLine(nodeIds, "route");
+    const marker = this.createMarker(node.x, node.y);
+    marker.classList.add("route-missing");
+
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("r", 20);
+    ring.setAttribute("class", "route-missing-ring");
+
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("y", 38);
+    label.setAttribute("class", "route-missing-label");
+    label.textContent = text || "Маршрут не построен";
+
+    marker.append(ring, label, title(text || "Маршрут не построен"));
+    this.layers.routeEnds.append(marker);
+    this.updateMarkerScale();
   }
 
   /** Одна ломаная маршрута по вершинам графа. */
@@ -570,14 +971,49 @@ class AirportMap {
       return;
     }
 
+    // Тёмная подложка под линией: на спутниковом снимке синяя линия
+    // без окантовки сливалась с крышами и рулёжками.
+    const casing = document.createElementNS(SVG_NS, "polyline");
+    casing.setAttribute("points", points.join(" "));
+    casing.setAttribute("class", "route-casing");
+
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.join(" "));
     line.setAttribute("class", className);
-    this.layers.route.append(line);
+    this.layers.route.append(casing, line);
+  }
+
+  /** Отметка конца маршрута постоянного экранного размера с буквой внутри. */
+  appendRouteEnd(node, kind, letter, hint) {
+    if (!node) {
+      return;
+    }
+    const marker = this.createMarker(node.x, node.y);
+    marker.classList.add("route-end", `route-end-${kind}`);
+
+    if (kind === "finish") {
+      const halo = document.createElementNS(SVG_NS, "circle");
+      halo.setAttribute("r", 24);
+      halo.setAttribute("class", "route-end-halo");
+      marker.append(halo);
+    }
+
+    const disc = document.createElementNS(SVG_NS, "circle");
+    disc.setAttribute("r", kind === "pickup" ? 11 : 14);
+    disc.setAttribute("class", "route-end-disc");
+
+    const text = document.createElementNS(SVG_NS, "text");
+    text.setAttribute("y", 0.5);
+    text.setAttribute("class", "route-end-letter");
+    text.textContent = letter;
+
+    marker.append(disc, text, title(hint));
+    this.layers.routeEnds.append(marker);
   }
 
   clearRoute() {
     this.layers.route.replaceChildren();
+    this.layers.routeEnds.replaceChildren();
   }
 
   /**
@@ -635,7 +1071,7 @@ class AirportMap {
     for (const marker of this.viewport.querySelectorAll("g.marker")) {
       marker.setAttribute(
         "transform",
-        `translate(${marker.dataset.x} ${marker.dataset.y}) scale(${scale})`
+        `translate(${marker.dataset.x} ${marker.dataset.y}) scale(${scale * (Number(marker.dataset.lift) || 1)})`
       );
     }
     this.updateLabelVisibility();
@@ -705,6 +1141,18 @@ class AirportMap {
   setupPanZoom() {
     let dragging = false;
     let origin = null;
+
+    // Удержание объекта превращает начатое панорамирование в его перенос:
+    // карта возвращается туда, где была в момент нажатия.
+    this.cancelPan = () => {
+      if (dragging && origin) {
+        this.transform.x = origin.x;
+        this.transform.y = origin.y;
+        this.applyTransform();
+      }
+      dragging = false;
+      this.svg.classList.remove("dragging");
+    };
 
     this.svg.addEventListener("mousedown", (event) => {
       dragging = true;
@@ -805,6 +1253,58 @@ class AirportMap {
     this.transform.y = centre.y - this.transform.scale * node.y;
     this.applyTransform();
   }
+
+  /** Наводит карту на произвольную точку графа — для поиска по карте. */
+  focusOnPoint(x, y, scale = 5) {
+    if (!this.baseView) {
+      return;
+    }
+    const centre = this.screenCentre();
+    this.transform.scale = clamp(Math.max(this.transform.scale, scale), MIN_ZOOM, MAX_ZOOM);
+    this.transform.x = centre.x - this.transform.scale * x;
+    this.transform.y = centre.y - this.transform.scale * y;
+    this.applyTransform();
+  }
+
+  /**
+   * Короткая подсветка найденного объекта: расходящиеся кольца
+   * и подпись. Через несколько секунд исчезает сама — это указатель
+   * «вот он», а не постоянная отметка.
+   */
+  flashAt(x, y, text) {
+    if (!this.layers.search) {
+      this.layers.search = createGroup("layer-search");
+      this.viewport.append(this.layers.search);
+    }
+    const layer = this.layers.search;
+    layer.replaceChildren();
+    clearTimeout(this.flashTimer);
+
+    const marker = this.createMarker(x, y);
+    marker.classList.add("search-flash");
+    for (const delay of [0, 0.5]) {
+      const ring = document.createElementNS(SVG_NS, "circle");
+      ring.setAttribute("r", 22);
+      ring.setAttribute("class", "search-flash-ring");
+      ring.style.animationDelay = `${delay}s`;
+      marker.append(ring);
+    }
+    const core = document.createElementNS(SVG_NS, "circle");
+    core.setAttribute("r", 16);
+    core.setAttribute("class", "search-flash-core");
+    marker.append(core);
+
+    if (text) {
+      const label = document.createElementNS(SVG_NS, "text");
+      label.setAttribute("y", -24);
+      label.setAttribute("class", "search-flash-label");
+      label.textContent = text;
+      marker.append(label);
+    }
+    layer.append(marker);
+    this.updateMarkerScale();
+    this.flashTimer = setTimeout(() => layer.replaceChildren(), 4500);
+  }
 }
 
 /* --- Вспомогательные функции --- */
@@ -813,6 +1313,40 @@ function createGroup(className) {
   const group = document.createElementNS(SVG_NS, "g");
   group.setAttribute("class", className);
   return group;
+}
+
+// Сколько держать кнопку на объекте, чтобы он «поднялся» для переноса.
+const HOLD_TO_DRAG_MS = 300;
+// Смещение мыши, после которого нажатие считается движением.
+const DRAG_THRESHOLD_PX = 4;
+// Автопрокрутка при переносе: ширина полосы у края карты, в которой
+// карта начинает ехать, и наибольшая скорость, пикселей за кадр.
+const EDGE_PAN_ZONE_PX = 48;
+const EDGE_PAN_MAX_PX = 14;
+// Насколько близко к стоянке (в экранных пикселях) нужно отпустить борт,
+// чтобы он встал на неё, а не в свободную точку.
+const AIRCRAFT_SNAP_PX = 24;
+// Во сколько раз крупнее метка, пока её держат и переносят.
+const LIFT_SCALE = 1.5;
+
+/** Кольцо выделения подвижного объекта; видно только у выбранного. */
+function selectRing(cx, cy, r) {
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", cx);
+  ring.setAttribute("cy", cy);
+  ring.setAttribute("r", r);
+  ring.setAttribute("class", "select-ring");
+  return ring;
+}
+
+/** Невидимая увеличенная зона захвата: мелкую метку мышью ловить трудно. */
+function hitArea(cx, cy) {
+  const hit = document.createElementNS(SVG_NS, "circle");
+  hit.setAttribute("cx", cx);
+  hit.setAttribute("cy", cy);
+  hit.setAttribute("r", 12);
+  hit.setAttribute("class", "hit-area");
+  return hit;
 }
 
 function title(text) {

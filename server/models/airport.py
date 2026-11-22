@@ -55,3 +55,10 @@ class Airport(Base):
     drill_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("0")
     )
+
+    # Расписание смен (services/shift_clock.py): часовой пояс IANA и
+    # граница дневной смены «ЧЧ:ММ». Пусто — Москва, 08:00–20:00.
+    # Меняют начальник смены и администраторы.
+    timezone: Mapped[str | None] = mapped_column(String, nullable=True)
+    day_shift_start: Mapped[str | None] = mapped_column(String, nullable=True)
+    day_shift_end: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -106,6 +106,9 @@ class TestQueue(ApiTestCase):
     def test_диспетчер_не_вправе_ставить_в_очередь(self):
         self.busy_sokolov()
         call = self.create_call("VP-BES")
+        # Вызов заводил начальник смены, и он у него в работе; отпускаем,
+        # чтобы проверить именно право на очередь, а не захват вызова.
+        self.client.post(f"/api/calls/{call['id']}/release", headers=auth_header(self.supervisor))
         response = self.assign(
             self.dispatcher, call["id"], self.employee(SOKOLOV)["id"], "очень надо"
         )

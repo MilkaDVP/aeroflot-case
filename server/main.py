@@ -25,6 +25,7 @@ from api import (
     reference,
     reports,
     shift,
+    users,
     vehicles,
 )
 from database import SessionLocal, begin_dispatch_write, create_all
@@ -142,6 +143,7 @@ app.include_router(drill.router)
 app.include_router(reports.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
+app.include_router(users.router)
 
 
 @app.get("/api/health", tags=["Служебное"], summary="Проверка живости")

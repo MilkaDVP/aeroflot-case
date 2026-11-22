@@ -100,10 +100,19 @@ class TestAuth(ApiTestCase):
         body = response.json()
         self.assertEqual(body["role"], "dispatcher")
         self.assertTrue(body["token"])
-        # У диспетчера два аэропорта, поэтому сервер не выбирает за него:
-        # шаг выбора аэропорта из §5 обязателен.
+        # Диспетчер привязан к одному аэропорту — он выбирается сам.
+        self.assertEqual(body["airport_icao"], "UUEE")
+        self.assertEqual(len(body["airports"]), 1)
+
+    def test_технический_администратор_выбирает_аэропорт(self):
+        # Только технический администратор видит все аэропорты, поэтому
+        # у него шаг выбора аэропорта из §5 обязателен.
+        response = self.client.post(
+            "/api/auth/login", json={"login": "admin", "password": "admin"}
+        )
+        body = response.json()
         self.assertIsNone(body["airport_icao"])
-        self.assertEqual(len(body["airports"]), 2)
+        self.assertGreaterEqual(len(body["airports"]), 2)
 
     def test_единственный_аэропорт_выбирается_сам(self):
         # У начальника смены аэропорт один — шаг выбора пропускается.

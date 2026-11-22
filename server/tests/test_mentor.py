@@ -272,5 +272,5 @@ class TestSummaryAndAccess(MentorCase):
         self.assign_best(call["id"])
         self.assertTrue(self.feed()["events"])
 
-        domodedovo = self.login("dispatcher", "dispatcher", airport="UUDD")
+        domodedovo = self.login("dispatcher_uudd", "dispatcher", airport="UUDD")
         self.assertEqual(self.feed(domodedovo)["events"], [])
