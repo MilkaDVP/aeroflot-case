@@ -678,3 +678,13 @@
 /* Скрытое поле формы скрыто всегда — даже если раскладка строки
    (grid/flex) задаёт ему display. */
 .admin-form [hidden] { display: none !important; }
+
+/* Предупреждение над списком: например, аэропорт не выбран. */
+.admin-note.is-warn {
+  margin-bottom: 10px;
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.admin-note.is-warn[hidden] { display: none; }

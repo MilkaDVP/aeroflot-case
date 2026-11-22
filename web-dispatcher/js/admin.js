@@ -568,6 +568,9 @@ function canManageAccounts() {
 async function loadUsers() {
   el("users-scope").textContent =
     state.user.role === "admin" ? "· вся система" : `· ${state.user.airport_icao || "—"}`;
+  // Без аэропорта сессии карточек инженеров нет — квалификацию и допуски
+  // не изменить. Об этом надо сказать прямо, а не показывать неполный список.
+  el("users-airport-note").hidden = Boolean(state.user.airport_icao);
 
   try {
     const users = await Api.users();
@@ -652,7 +655,19 @@ function accountRow(user) {
     actions.append(actionButton("Завершить сеанс", "", () => logoutAccount(user)));
   }
   if (user.can_edit && canManageAccounts()) {
-    actions.append(actionButton("Изменить", "", () => startAccountEdit(user)));
+    if (user.role === ENGINEER) {
+      // Инженер правится вместе с карточкой (квалификация, допуски), а она
+      // есть только в аэропорту сессии. Сюда попадают инженеры, чья
+      // карточка не загружена: аэропорт не выбран или он другой.
+      const edit = actionButton("Изменить", "", () => {});
+      edit.disabled = true;
+      edit.title = state.user.airport_icao
+        ? `Инженер аэропорта ${user.airport_icao}: переключите аэропорт в шапке, чтобы изменить квалификацию`
+        : "Выберите аэропорт в шапке, чтобы изменить квалификацию и допуски";
+      actions.append(edit);
+    } else {
+      actions.append(actionButton("Изменить", "", () => startAccountEdit(user)));
+    }
     actions.append(actionButton("Удалить", "danger", () => removeAccount(user)));
   }
   return row;
@@ -754,6 +769,15 @@ function syncUserForm() {
   const editing = state.editingUser;
   const engineer = el("user-role").value === ENGINEER;
   el("user-engineer-fields").hidden = !engineer;
+  // Инженер заводится в аэропорту сессии: без него места и карточки нет.
+  const needAirport = engineer && editing === null && !state.user.airport_icao;
+  el("user-submit").disabled = needAirport;
+  if (needAirport) {
+    setNote("user-note", "Выберите аэропорт в шапке: инженер заводится в нём вместе с квалификацией", "is-error");
+  } else if (el("user-note").dataset.airportHint) {
+    el("user-note").hidden = true;
+  }
+  el("user-note").dataset.airportHint = needAirport ? "1" : "";
   // Инженер заводится в аэропорту сессии: места берутся из его схемы.
   el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || editing !== null;
 
