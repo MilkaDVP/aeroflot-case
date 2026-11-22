@@ -143,6 +143,27 @@ class TestMovement(DrillCase):
         self.assertGreater(distance, 0)
         self.assertLess(distance, 20)
 
+    def test_перенос_на_последнее_ребро_ведёт_к_борту(self):
+        from algorithm.geo import haversine_m
+        from graph_registry import get_graph
+
+        self.enable()
+        call = self.register()
+        bot = self.assign_best(call["id"])["employee_id"]
+        route = self.call(call["id"])
+        self.assertTrue(route["pickup_node_id"])
+        graph = get_graph("UUEE")
+        start, goal = [graph.node(n) for n in route["route_node_ids"][-2:]]
+        lat, lon = [start[k] * 0.7 + goal[k] * 0.3 for k in ("lat", "lon")]
+        self.assertEqual(self.send_location(bot, lat, lon).status_code, 200)
+        updated = self.call(call["id"])
+        self.assertIsNone(updated["pickup_node_id"])
+        self.assertEqual(updated["route_node_ids"], [goal["id"]])
+        self.step(1)
+        pos = self.employee(bot)
+        self.assertLess(haversine_m(pos["lat"], pos["lon"], goal["lat"], goal["lon"]),
+                        haversine_m(lat, lon, goal["lat"], goal["lon"]))
+
     def test_без_учений_никто_не_движется(self):
         call = self.register()
         best = self.assign_best(call["id"])

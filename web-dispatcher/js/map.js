@@ -542,10 +542,14 @@ class AirportMap {
    * пеший — пунктиром, на машине — сплошной линией. Иначе диспетчер
    * не отличил бы «идёт пешком» от «едет».
    */
-  drawRoute(nodeIds, pickupNodeId) {
+  drawRoute(nodeIds, pickupNodeId, employee) {
     const layer = this.layers.route;
     layer.replaceChildren();
 
+    if (nodeIds?.length === 1 && employee?.lat != null && employee.lon != null) {
+      this.appendRouteLine(nodeIds, "route", this.projectLatLon(employee.lat, employee.lon));
+      return;
+    }
     if (!nodeIds || nodeIds.length < 2) {
       return;
     }
@@ -560,12 +564,13 @@ class AirportMap {
   }
 
   /** Одна ломаная маршрута по вершинам графа. */
-  appendRouteLine(nodeIds, className) {
+  appendRouteLine(nodeIds, className, start) {
     const points = nodeIds
       .map((id) => this.nodesById.get(id))
       .filter(Boolean)
       .map((node) => `${node.x},${node.y}`);
 
+    if (start) points.unshift(`${start.x},${start.y}`);
     if (points.length < 2) {
       return;
     }

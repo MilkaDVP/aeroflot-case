@@ -17,6 +17,7 @@
 """
 
 from algorithm.geo import haversine_m
+from algorithm.transport import plan_for
 from clock import utc_now
 from constants import (
     AIRCRAFT_GROUP_BY_TYPE,
@@ -36,8 +37,8 @@ from graph_registry import get_graph
 from models.airport import Airport
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, Call
 from models.employee import Employee
-from services import mentor
-from services.assignment import assigned_route, mark_arrived, record_position, working_call_of
+from services import mentor, support
+from services.assignment import assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
 
 MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
@@ -120,11 +121,33 @@ def reroute_after_move(db, employee):
     if call is None or call.status not in MOVING_STATUSES:
         return True
     graph = get_graph(employee.airport_icao)
-    plan = assigned_route(call, graph)
+    vehicle = employee.vehicle
+    if vehicle and vehicle.status == VEHICLE_RESERVED and not any(
+        item.vehicle_id == vehicle.id and item.status in MOVING_STATUSES
+        for item in support.support_calls(call)
+    ):
+        # После переноса пешком до борта может быть быстрее, чем через машину.
+        plan = plan_for(graph, employee.as_algorithm_dict(), call.stand_node_id,
+                        [vehicle.as_algorithm_dict()])
+        if plan and not plan.pickup:
+            release_vehicle(employee)
+            call.vehicle = None
+    else:
+        plan = assigned_route(call, graph)
     if plan is None or not plan.node_ids:
         return False
-    entry = graph.node(plan.node_ids[0])
-    call.route_node_ids = plan.node_ids
+    nodes = plan.node_ids
+    entry = graph.node(nodes[0])
+    if len(nodes) > 1 and nodes[0] != plan.pickup_node_id:
+        ahead = graph.node(nodes[1])
+        to_entry = haversine_m(employee.lat, employee.lon, entry["lat"], entry["lon"])
+        to_ahead = haversine_m(employee.lat, employee.lon, ahead["lat"], ahead["lon"])
+        span = haversine_m(entry["lat"], entry["lon"], ahead["lat"], ahead["lon"])
+        # Точка уже лежит на первом ребре. Продолжаем к дальнему узлу.
+        if to_entry < span and to_ahead < span and to_entry + to_ahead <= span + 1:
+            nodes = nodes[1:]
+            entry = ahead
+    call.route_node_ids = nodes
     call.pickup_node_id = plan.pickup_node_id
     # Ноль — первый узел графа. До него остаётся пройти от точки клика.
     call.sim_progress_m = -haversine_m(employee.lat, employee.lon, entry["lat"], entry["lon"])

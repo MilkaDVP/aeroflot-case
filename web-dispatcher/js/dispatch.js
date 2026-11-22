@@ -159,10 +159,10 @@ async function refresh() {
         refreshExecutorMenu();
         loadExtraCandidates(selected);
       }
-      if (previous.stand_node_id !== selected.stand_node_id ||
+      if (selected.route_node_ids?.length === 1 || previous.stand_node_id !== selected.stand_node_id ||
           previous.pickup_node_id !== selected.pickup_node_id ||
           String(previous.route_node_ids) !== String(selected.route_node_ids)) {
-        airportMap.drawRoute(selected.route_node_ids, selected.pickup_node_id);
+        drawAssignedRoute(selected);
       }
       renderAssignedCard(state.selectedCall);
       updateAssignButton();
@@ -267,6 +267,11 @@ document.getElementById("call-history").addEventListener("click", async (event) 
  * и нарисовал бы на карте чужой маршрут — диспетчер увидел бы тревогу
  * по вызову, который уже обслуживается.
  */
+function drawAssignedRoute(call) {
+  const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
+  airportMap.drawRoute(call.route_node_ids, call.pickup_node_id, employee);
+}
+
 function showAssignment(call) {
   state.suggestion = null;
   state.picked = [];
@@ -274,11 +279,7 @@ function showAssignment(call) {
   elements.assignButton.disabled = true;
 
   renderAssignedCard(call);
-  if (call.route_node_ids && call.route_node_ids.length > 1) {
-    airportMap.drawRoute(call.route_node_ids, call.pickup_node_id);
-  } else {
-    airportMap.clearRoute();
-  }
+  drawAssignedRoute(call);
   airportMap.drawEmployees(state.employees, employeeClass);
   loadExtraCandidates(call);
 }
