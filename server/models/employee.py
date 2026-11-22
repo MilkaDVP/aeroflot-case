@@ -28,6 +28,7 @@ class Employee(Base):
 
     __tablename__ = "employees"
 
+    is_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String)

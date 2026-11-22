@@ -113,11 +113,11 @@ class TestMovement(DrillCase):
         self.assertEqual(self.last("arrival", call["id"])["verdict"], "good")
 
     def test_пеший_забирает_машину_по_пути(self):
-        # Морозов идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
+        # Учебный механик идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
         self.enable()
         call = self.register()
-        morozov = self.employee_id("Морозов Д. С.")
-        self.assign(call["id"], morozov, "учения", self.supervisor)
+        mechanic = self.employee_id("Учебный инженер 1 · B1.1")
+        self.assign(call["id"], mechanic, "учения", self.supervisor)
 
         self.step(5 * 60)
         vehicles = self.client.get("/api/vehicles", headers=auth_header(self.dispatcher)).json()
@@ -144,16 +144,20 @@ class TestMovement(DrillCase):
         )
 
     def test_сотрудника_с_телефоном_сервер_не_двигает(self):
-        self.enable()
         call = self.register()
-        best = self.assign_best(call["id"])
+        real = self.assign_best(call["id"])["employee_id"]
         engineer = self.login("sokolov", "engineer")
-        self.send_location(best["employee_id"], 55.97868, 37.39716, "simulation", token=engineer)
-
-        self.step(120)
-
-        after = self.employee(best["employee_id"])
-        self.assertAlmostEqual(after["lat"], 55.97868, places=5)
+        self.enable()
+        training = self.register()
+        bot = self.assign_best(training["id"])["employee_id"]
+        self.assertNotEqual(bot, real)
+        self.assertEqual(self.hold(real).status_code, 409)
+        for source in ("gps", "simulation", "manual"):
+            response = self.send_location(real, 55.97868, 37.39716, source, token=engineer)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.step(10), 1)
+        self.enable(False)
+        self.assertAlmostEqual(self.employee(real)["lat"], 55.97868, places=5)
         self.assertEqual(self.call(call["id"])["status"], "assigned")
 
 
@@ -196,4 +200,5 @@ class TestHold(DrillCase):
         best = self.assign_best(call["id"])
         self.hold(best["employee_id"])
         self.enable(False)
+        self.enable()
         self.assertFalse(self.employee(best["employee_id"])["held"])

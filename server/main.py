@@ -96,6 +96,9 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         custom = load_from_database(db)
+        for icao in drill_service.enabled_airports(db):
+            drill_service.ensure_training_team(db, icao)
+        db.commit()
     finally:
         db.close()
 

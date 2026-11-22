@@ -29,6 +29,7 @@ from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
+from services.drill import is_enabled
 from models.employee import Employee
 from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_SHIFT_SUPERVISOR
 from schemas.call import (
@@ -214,9 +215,10 @@ def defect_summary(call):
 
 def shift_employees(db, context):
     """Сотрудники аэропорта сессии в виде словарей для алгоритма."""
-    employees = (
-        db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao).all()
-    )
+    employees = db.query(Employee).filter_by(
+        archived=False, airport_icao=context.airport_icao,
+        is_training=is_enabled(db, context.airport_icao),
+    ).all()
     return [employee.as_algorithm_dict() for employee in employees]
 
 
@@ -488,6 +490,8 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
+    if employee.is_training != is_enabled(db, context.airport_icao):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Исполнитель недоступен в текущем режиме")
     check_permit(call, employee)
 
     # Подбор выполняется перед каждым назначением. Предложение системы

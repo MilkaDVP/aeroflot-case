@@ -50,7 +50,7 @@ def set_drill(
     payload: DrillState,
     context: Context = Depends(require_roles(ROLE_ADMIN)),
     airport: Context = Depends(require_airport),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_dispatch_db),
 ):
     """Только администратор. При выключении все задержки снимаются."""
     drill.set_enabled(db, context.airport_icao, payload.enabled)
@@ -79,6 +79,8 @@ def hold_employee(
     if not drill.is_enabled(db, context.airport_icao):
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_DRILL_OFF)
 
+    if not employee.is_training:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Задержать можно только учебного инженера")
     employee.held = payload.held
     db.commit()
     return HoldResponse(employee_id=employee.id, held=employee.held)

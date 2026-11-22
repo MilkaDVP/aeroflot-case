@@ -29,6 +29,7 @@ from constants import (
 from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
+from services.drill import is_enabled
 from models.employee import Employee
 from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
 from services.assignment import record_position, release_vehicle, working_call_of
@@ -119,7 +120,10 @@ def list_employees(
     По умолчанию — смена из контекста сессии: диспетчер работает со своей
     сменой. Параметр shift позволяет посмотреть состав другой смены.
     """
-    query = db.query(Employee).filter(Employee.archived.is_(False), Employee.airport_icao == context.airport_icao)
+    query = db.query(Employee).filter_by(
+        archived=False, airport_icao=context.airport_icao,
+        is_training=is_enabled(db, context.airport_icao),
+    )
     selected_shift = shift or context.shift
     if selected_shift:
         query = query.filter(Employee.shift == selected_shift)

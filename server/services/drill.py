@@ -13,17 +13,17 @@
 и ускоренное движение при настоящем сроке дало бы картину, в которой
 успевают все.
 
-Двигаются только сотрудники с ручной точкой. Того, чей телефон шлёт
-координаты (GPS или имитация в приложении), сервер не трогает: его место
-определяет он сам.
+Двигаются только учебные инженеры без учётных записей.
 """
 
 from algorithm.geo import haversine_m
 from clock import utc_now
 from constants import (
-    LOCATION_GPS,
+    AIRCRAFT_GROUP_BY_TYPE,
+    SHIFT_DAY,
+    SHIFT_NIGHT,
+    STATUS_FREE,
     LOCATION_MANUAL,
-    LOCATION_SIMULATION,
     MODE_WALK,
     STATUS_BUSY,
     STATUS_EN_ROUTE,
@@ -40,8 +40,25 @@ from services import mentor
 from services.assignment import mark_arrived, record_position
 
 MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
-# Источники координат, при которых место сотрудника задаёт его телефон.
-PHONE_SOURCES = (LOCATION_GPS, LOCATION_SIMULATION)
+
+
+def ensure_training_team(db, icao):
+    if db.query(Employee.id).filter_by(airport_icao=icao, is_training=True).first():
+        return
+    graph = get_graph(icao)
+    bases = graph.nodes_of_type("tech_center") or graph.nodes_of_type("stand")
+    for shift in (SHIFT_DAY, SHIFT_NIGHT):
+        for index, mark in enumerate(("B1.1", "B2", "A1")):
+            node = bases[index % len(bases)]
+            db.add(Employee(
+                full_name=f"Учебный инженер {index + 1} · {mark}", is_training=True,
+                airport_icao=icao, shift=shift, status=STATUS_FREE,
+                lat=node["lat"], lon=node["lon"], location_source=LOCATION_MANUAL,
+                location_at=utc_now(), qualifications=[{
+                    "category": mark, "aircraft_types": list(AIRCRAFT_GROUP_BY_TYPE),
+                    "valid_until": "9999-12-31",
+                }],
+            ))
 
 
 def is_enabled(db, airport_icao):
@@ -59,7 +76,9 @@ def set_enabled(db, airport_icao, enabled):
     """
     airport = db.get(Airport, airport_icao)
     airport.drill_enabled = enabled
-    if not enabled:
+    if enabled:
+        ensure_training_team(db, airport_icao)
+    else:
         held = db.query(Employee).filter(
             Employee.airport_icao == airport_icao, Employee.held.is_(True)
         )
@@ -98,7 +117,7 @@ def step(db, airport_icao, dt_s, now=None):
 def advance(db, call, dt_s, now):
     """Продвигает исполнителя одного вызова; False — если он не движется."""
     employee = call.assigned_employee
-    if employee is None or employee.held or employee.location_source in PHONE_SOURCES:
+    if employee is None or employee.held or not employee.is_training:
         return False
     if not call.route_node_ids:
         return False
