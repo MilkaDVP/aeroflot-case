@@ -104,10 +104,10 @@ class Call(Base):
 
     # Кого предложила система и кого назначил человек.
     suggested_employee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("employees.id"), nullable=True
+        ForeignKey("route_participants.id"), nullable=True
     )
     assigned_employee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("employees.id"), nullable=True, index=True
+        ForeignKey("route_participants.id"), nullable=True, index=True
     )
     override_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -128,7 +128,7 @@ class Call(Base):
     # без неё в разборе не отличить «долго искали исполнителя» от
     # «назначили и передумали».
     previous_employee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("employees.id"), nullable=True
+        ForeignKey("route_participants.id"), nullable=True
     )
     unassign_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     unassigned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -160,10 +160,10 @@ class Call(Base):
         lazy="selectin",
     )
     assigned_employee = relationship(
-        "Employee", foreign_keys=[assigned_employee_id], lazy="selectin"
+        "RouteParticipant", foreign_keys=[assigned_employee_id], lazy="selectin"
     )
     previous_employee = relationship(
-        "Employee", foreign_keys=[previous_employee_id], lazy="selectin"
+        "RouteParticipant", foreign_keys=[previous_employee_id], lazy="selectin"
     )
 
     @property

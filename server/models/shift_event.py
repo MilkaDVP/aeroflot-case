@@ -32,7 +32,7 @@ class ShiftEvent(Base):
     # Сотрудник, о котором замечание. Вместе с вызовом и видом события
     # защищает от повторов: наблюдение «не успевает» выносится один раз
     # на исполнителя, а после переназначения — заново.
-    employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), nullable=True)
+    employee_id: Mapped[int | None] = mapped_column(ForeignKey("route_participants.id"), nullable=True)
 
     kind: Mapped[str] = mapped_column(String)
     verdict: Mapped[str] = mapped_column(String)

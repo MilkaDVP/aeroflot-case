@@ -23,12 +23,14 @@ from constants import STATUS_OFFLINE, VEHICLE_IN_USE
 from database import Base
 
 
-class Employee(Base):
+class RouteParticipant(Base):
     """Карточка сотрудника ОТО: квалификация, смена, статус, местоположение."""
 
-    __tablename__ = "employees"
+    __tablename__ = "route_participants"
 
     is_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    __mapper_args__ = {"polymorphic_on": is_training, "polymorphic_abstract": True}
+
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String)
@@ -100,3 +102,17 @@ class Employee(Base):
             # до 14:11», и без пояса браузер сдвинет её на разницу с UTC.
             "busy_until": to_iso_utc(self.busy_until),
         }
+
+
+class Employee(RouteParticipant):
+    """Реальный сотрудник аэропорта."""
+    __tablename__ = "employees"
+    id: Mapped[int] = mapped_column(ForeignKey("route_participants.id"), primary_key=True)
+    __mapper_args__ = {"polymorphic_identity": False}
+
+
+class TrainingEngineer(RouteParticipant):
+    """Участник учений, которому нельзя выдать аккаунт сотрудника."""
+    __tablename__ = "training_engineers"
+    id: Mapped[int] = mapped_column(ForeignKey("route_participants.id"), primary_key=True)
+    __mapper_args__ = {"polymorphic_identity": True}

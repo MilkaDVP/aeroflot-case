@@ -120,6 +120,8 @@ const Api = {
   airports: () => request("GET", "/api/airports"),
   airportGraph: (icao) => request("GET", `/api/airports/${icao}`),
 
+  airportRoster: () => request("GET", "/api/employees?all_shifts=true"),
+  mapParticipants: () => request("GET", "/api/employees?include_training=true"),
   employees: (shift) =>
     request("GET", shift ? `/api/employees?shift=${shift}` : "/api/employees"),
   // Имитация координат с рабочего экрана: задание разрешает задавать

@@ -116,6 +116,18 @@ function bindEvents() {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   }
 
+  el("back-to-dispatch").addEventListener("click", async (event) => {
+    if (state.user.airport_icao && state.user.shift) return;
+    event.preventDefault();
+    const icao = state.user.airport_icao || state.user.airports[0]?.icao;
+    if (!icao) return window.alert("Нет доступного аэропорта");
+    try {
+      await Api.selectAirport(icao, state.user.shift || "day");
+      window.location.href = "dispatch.html";
+    } catch (error) {
+      window.alert(error.detail);
+    }
+  });
   el("logout").addEventListener("click", logout);
   el("ctx-airport").addEventListener("change", switchAirport);
   el("import-form").addEventListener("submit", onImportSubmit);
@@ -502,7 +514,7 @@ async function loadEmployees() {
   try {
     await loadGraphOnce();
     fillPlaces("emp-place");
-    const employees = await Api.employees();
+    const employees = await Api.airportRoster();
     renderEmployees(employees);
   } catch (error) {
     el("employees-list").innerHTML = `<div class="error">${escapeHtml(error.detail)}</div>`;

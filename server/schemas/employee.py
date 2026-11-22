@@ -33,6 +33,7 @@ class EmployeeResponse(BaseModel):
     location_source: str | None = None
     seen_at: str | None = None
     # Задержан на месте в режиме учений.
+    is_training: bool = False
     held: bool = False
 
 

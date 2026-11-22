@@ -106,7 +106,7 @@ async function refresh() {
   const version = ++refreshVersion;
   try {
     const [employees, aircraft, calls, vehicles, drill, reports] = await Promise.all([
-      Api.employees(),
+      Api.mapParticipants(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
@@ -920,7 +920,7 @@ function holdButton(call) {
     return [];
   }
   const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
-  if (!employee) {
+  if (!employee?.is_training) {
     return [];
   }
   const button = linkButton(

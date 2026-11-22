@@ -30,7 +30,7 @@ from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
 from services.drill import is_enabled
-from models.employee import Employee
+from models.employee import RouteParticipant
 from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_SHIFT_SUPERVISOR
 from schemas.call import (
     AssignRequest,
@@ -215,7 +215,7 @@ def defect_summary(call):
 
 def shift_employees(db, context):
     """Сотрудники аэропорта сессии в виде словарей для алгоритма."""
-    employees = db.query(Employee).filter_by(
+    employees = db.query(RouteParticipant).filter_by(
         archived=False, airport_icao=context.airport_icao,
         is_training=is_enabled(db, context.airport_icao),
     ).all()
@@ -289,7 +289,7 @@ def describe_busy(db, entry):
     в 14:40», но и чем человек занят: того, кто ждёт запчасти, можно
     переключить без вреда, а того, кто вскрыл агрегат, — нельзя.
     """
-    employee = db.get(Employee, entry["employee_id"])
+    employee = db.get(RouteParticipant, entry["employee_id"])
     working = working_call_of(db, employee) if employee is not None else None
     if working is None:
         return
@@ -486,7 +486,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         ride_vehicle = lead.vehicle
         if ride_vehicle is None:
             raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_LEAD_VEHICLE)
-    employee = db.get(Employee, payload.employee_id)
+    employee = db.get(RouteParticipant, payload.employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
@@ -583,7 +583,7 @@ def add_support(
         item.assigned_employee_id for item in support.support_calls(root)
     ]
     if payload.employee_id in team:
-        employee = db.get(Employee, payload.employee_id)
+        employee = db.get(RouteParticipant, payload.employee_id)
         raise HTTPException(
             status.HTTP_409_CONFLICT, ERROR_ALREADY_ON_CALL.format(name=employee.full_name)
         )

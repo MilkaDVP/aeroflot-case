@@ -36,7 +36,7 @@ from constants import (
 from graph_registry import get_graph
 from models.airport import Airport
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, Call
-from models.employee import Employee
+from models.employee import TrainingEngineer
 from services import mentor, support
 from services.assignment import assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
 
@@ -44,14 +44,14 @@ MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
 
 def ensure_training_team(db, icao):
-    if db.query(Employee.id).filter_by(airport_icao=icao, is_training=True).first():
+    if db.query(TrainingEngineer.id).filter_by(airport_icao=icao).first():
         return
     graph = get_graph(icao)
     bases = graph.nodes_of_type("tech_center") or graph.nodes_of_type("stand")
     for shift in (SHIFT_DAY, SHIFT_NIGHT):
         for index, mark in enumerate(("B1.1", "B2", "A1")):
             node = bases[index % len(bases)]
-            db.add(Employee(
+            db.add(TrainingEngineer(
                 full_name=f"Учебный инженер {index + 1} · {mark}", is_training=True,
                 airport_icao=icao, shift=shift, status=STATUS_FREE,
                 lat=node["lat"], lon=node["lon"], location_source=LOCATION_MANUAL,
@@ -80,8 +80,8 @@ def set_enabled(db, airport_icao, enabled):
     if enabled:
         ensure_training_team(db, airport_icao)
     else:
-        held = db.query(Employee).filter(
-            Employee.airport_icao == airport_icao, Employee.held.is_(True)
+        held = db.query(TrainingEngineer).filter(
+            TrainingEngineer.airport_icao == airport_icao, TrainingEngineer.held.is_(True)
         )
         for employee in held:
             employee.held = False

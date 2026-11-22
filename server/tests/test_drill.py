@@ -33,7 +33,7 @@ class DrillCase(MentorCase):
             db.close()
 
     def employee(self, employee_id):
-        employees = self.client.get("/api/employees", headers=auth_header(self.dispatcher)).json()
+        employees = self.client.get("/api/employees?include_training=true", headers=auth_header(self.dispatcher)).json()
         return next(item for item in employees if item["id"] == employee_id)
 
     def call(self, call_id):
@@ -52,6 +52,23 @@ class DrillCase(MentorCase):
 
 class TestSwitch(DrillCase):
     """Кто включает учения и что происходит вне их."""
+
+    def test_учебная_команда_отдельна_от_штата(self):
+        from models.employee import Employee, TrainingEngineer
+
+        self.enable()
+        with SessionLocal() as db:
+            self.assertFalse(db.query(Employee).filter_by(is_training=True).first())
+            self.assertEqual(db.query(TrainingEngineer).filter_by(airport_icao="UUEE").count(), 6)
+        headers = auth_header(self.admin)
+        roster = self.client.get("/api/employees?all_shifts=true", headers=headers).json()
+        names = [person["full_name"] for person in roster]
+        self.assertIn("Соколов А. В.", names)
+        self.assertIn("Тарасов Е. И.", names)
+        self.assertFalse(any(name.startswith("Учебный инженер") for name in names))
+        people = self.client.get("/api/employees?include_training=true", headers=headers).json()
+        self.assertTrue(any(person["full_name"].startswith("Учебный инженер") for person in people))
+        self.assertTrue(any(person["full_name"] == "Соколов А. В." for person in people))
 
     def test_по_умолчанию_выключены(self):
         state = self.client.get("/api/drill", headers=auth_header(self.dispatcher)).json()
@@ -116,7 +133,7 @@ class TestMovement(DrillCase):
         # Учебный механик идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
         self.enable()
         call = self.register()
-        mechanic = self.employee_id("Учебный инженер 1 · B1.1")
+        mechanic = self.suggest(call["id"])["best"]["employee_id"]
         self.assign(call["id"], mechanic, "учения", self.supervisor)
 
         self.step(5 * 60)

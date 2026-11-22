@@ -31,7 +31,7 @@ from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
 from services.shifts import end_shift, start_clock
 from services.drill import is_enabled, reroute_after_move
-from models.employee import Employee
+from models.employee import Employee, RouteParticipant
 from models.user import ROLE_ADMIN, ROLE_ENGINEER, AuthSession, User
 from services.assignment import record_position, release_vehicle, working_call_of
 from schemas.employee import (
@@ -76,11 +76,12 @@ def to_response(employee):
         location_at=to_iso_utc(employee.location_at),
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
+        is_training=employee.is_training,
         held=bool(employee.held),
     )
 
 
-def load_employee(db, context, employee_id):
+def load_employee(db, context, employee_id, model=Employee):
     """
     Сотрудник по идентификатору с проверкой аэропорта сессии.
 
@@ -88,7 +89,7 @@ def load_employee(db, context, employee_id):
     диспетчер одного аэропорта мог бы менять статус сотрудника другого,
     просто подставив чужой идентификатор.
     """
-    employee = db.get(Employee, employee_id)
+    employee = db.get(model, employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
     if context.airport_icao:
@@ -112,6 +113,8 @@ def ensure_own_card(context, employee):
 @router.get("", response_model=list[EmployeeResponse], summary="Сотрудники аэропорта")
 def list_employees(
     shift: str | None = None,
+    include_training: bool = False,
+    all_shifts: bool = False,
     context: Context = Depends(require_airport),
     db: Session = Depends(get_db),
 ):
@@ -121,15 +124,15 @@ def list_employees(
     По умолчанию — смена из контекста сессии: диспетчер работает со своей
     сменой. Параметр shift позволяет посмотреть состав другой смены.
     """
-    query = db.query(Employee).filter_by(
+    model = RouteParticipant if include_training and is_enabled(db, context.airport_icao) else Employee
+    query = db.query(model).filter_by(
         archived=False, airport_icao=context.airport_icao,
-        is_training=is_enabled(db, context.airport_icao),
     )
     selected_shift = shift or context.shift
-    if selected_shift:
-        query = query.filter(Employee.shift == selected_shift)
+    if selected_shift and not all_shifts:
+        query = query.filter(model.shift == selected_shift)
 
-    return [to_response(employee) for employee in query.order_by(Employee.full_name).all()]
+    return [to_response(employee) for employee in query.order_by(model.full_name).all()]
 
 
 @router.post(
@@ -273,7 +276,7 @@ def update_location(
     устареть. Прогноз прибытия по GPS-фиксации, которой больше
     полутора минут, ненадёжен, а точку, поставленную вручную, не обновляют намеренно.
     """
-    employee = load_employee(db, context, employee_id)
+    employee = load_employee(db, context, employee_id, RouteParticipant)
     ensure_own_card(context, employee)
 
     if payload.source not in LOCATION_SOURCES:

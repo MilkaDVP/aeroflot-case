@@ -42,7 +42,7 @@ class Vehicle(Base):
     # У кого машина: у инженера, который на ней едет, либо за кем она
     # зарезервирована на вызов и ждёт, пока он до неё дойдёт.
     employee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("employees.id"), nullable=True, index=True
+        ForeignKey("route_participants.id"), nullable=True, index=True
     )
     # Скорость именно этой машины; None — нормативная скорость спецтранспорта.
     speed_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -50,7 +50,7 @@ class Vehicle(Base):
         DateTime, default=utc_now, onupdate=utc_now
     )
 
-    employee = relationship("Employee", back_populates="vehicle", lazy="selectin")
+    employee = relationship("RouteParticipant", back_populates="vehicle", lazy="selectin")
 
     def position(self):
         """

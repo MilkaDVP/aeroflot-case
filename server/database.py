@@ -52,7 +52,21 @@ def create_all():
     # Импорт нужен ради регистрации моделей в метаданных Base.
     import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        if connection.dialect.name == "sqlite":
+            connection.execute(text("BEGIN IMMEDIATE"))
+        schema = inspect(connection)
+        legacy = schema.has_table("employees") and not schema.has_table("route_participants")
+        if legacy:
+            connection.execute(text("ALTER TABLE employees RENAME TO route_participants"))
+        Base.metadata.create_all(bind=connection)
+        if legacy:
+            columns = {c["name"] for c in inspect(connection).get_columns("route_participants")}
+            flag = "is_training" if "is_training" in columns else "0"
+            for table, value in (("employees", 0), ("training_engineers", 1)):
+                connection.execute(text(
+                    f"INSERT INTO {table} (id) SELECT id FROM route_participants WHERE {flag} = {value}"
+                ))
     added = add_missing_columns(engine)
     if added:
         print(f"База дополнена колонками: {', '.join(added)}")
