@@ -513,6 +513,7 @@ class AirportMap {
 
   /** Можно ли переносить объект. Машину — только свободную. */
   canMove(kind, item) {
+    if (kind === "employee") return item.is_training || item.location_source !== "gps";
     return kind !== "vehicle" || item.status === "free";
   }
 

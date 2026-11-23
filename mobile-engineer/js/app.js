@@ -846,7 +846,7 @@ function sendPosition(position) {
  * так сервер отличает «на связи, но GPS потерян» от «на связи и стоит».
  */
 function sendHeartbeat() {
-  if (locator.last && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+  if (locator.last?.source === "gps" && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
     sendPosition(locator.last);
   }
 }

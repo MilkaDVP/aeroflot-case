@@ -111,7 +111,7 @@ def load_employee(db, context, employee_id, model=Employee):
     employee = db.get(model, employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
-    if context.airport_icao:
+    if context.airport_icao and context.user.role != ROLE_ADMIN:
         check_same_airport(context, employee.airport_icao)
     return employee
 
@@ -242,8 +242,6 @@ def create_employee(
         employee.location_at = utc_now()
     db.add(employee)
 
-    if login and payload.on_shift:
-        start_clock(employee)
 
     if login:
         # Учётная запись создаётся вместе с карточкой и привязывается к ней:
@@ -369,6 +367,8 @@ def update_location(
     employee = load_employee(db, context, employee_id, RouteParticipant)
     ensure_own_card(context, employee)
 
+    if context.user.role != ROLE_ENGINEER and employee.location_source == "gps" and payload.source == LOCATION_MANUAL:
+        raise HTTPException(409, "Сотрудник передаёт координаты GPS")
     if payload.source not in LOCATION_SOURCES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -403,6 +403,8 @@ def toggle_shift(
     # Уйти со смены с незакрытым вызовом нельзя: вызов остался бы
     # назначенным на человека, которого на перроне уже нет.
     working = working_call_of(db, employee)
+    if not payload.on_shift and employee.always_on_shift:
+        raise HTTPException(409, "Администратор закрепил сотрудника на смене")
     if not payload.on_shift and working is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_LEAVE_WITH_CALL)
 
