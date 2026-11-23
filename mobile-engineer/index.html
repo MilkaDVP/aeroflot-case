@@ -42,12 +42,7 @@
     <p class="brand-sub" id="shift-marks">—</p>
   </div>
 
-  <div class="card">
-    <p>
-      Выход на смену переводит вас в статус «свободен» и включает передачу
-      координат. С этого момента диспетчер может назначить вас на вызов.
-    </p>
-  </div>
+  <p class="muted center">Диспетчер увидит вас на карте и сможет назначать вызовы</p>
 
   <div class="error" id="shift-error" hidden></div>
 
@@ -64,54 +59,38 @@
     <span id="work-status">на смене</span>
     <span class="spacer"></span>
     <button class="chip" id="geo-mode">GPS</button>
-    <!-- Связь с диспетчером: отметки и сообщения в одном листе -->
-    <button class="chip icon-chip" id="chat-open" aria-label="Сообщения диспетчеру" hidden>
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M4 5h16v11H8l-4 4z" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linejoin="round"/>
-      </svg>
-      <span class="chip-badge" id="chat-badge" hidden></span>
-    </button>
-    <details id="work-notices">
-      <summary aria-label="Уведомления" title="Уведомления">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M5 17h14l-2-3v-4a5 5 0 0 0-10 0v4z M10 20h4"/>
-        </svg>
-      </summary>
-      <div class="notice-panel">
-        <button id="extend-shift" hidden>Смена заканчивается. Продлить на 12 часов</button>
-        <div class="link-banner" id="link-banner" hidden></div>
-        <button class="geo-notice" id="geo-notice" hidden>GPS недоступен. Нажмите, чтобы указать своё место вручную</button>
-      </div>
-    </details>
     <button class="chip" aria-label="Меню" id="work-menu">⋯</button>
   </header>
+
 
   <!--
     Карта видна всегда, а не только при вызове: инженеру нужно понимать,
     где он находится, и иметь возможность поставить точку до того,
     как вызов придёт.
   -->
+  <div class="map-overlay">
+  <!-- Важное — плашкой над картой, только когда есть что сказать -->
+  <div class="alerts">
+    <button id="extend-shift" hidden>Смена заканчивается · Продлить</button>
+    <div class="link-banner" id="link-banner" hidden></div>
+    <button class="geo-notice" id="geo-notice" hidden>Нет GPS · Указать место вручную</button>
+  </div>
   <section id="nav-guidance" aria-label="Следующий манёвр" hidden>
     <span id="nav-icon" aria-hidden="true"></span>
     <div><strong id="nav-distance"></strong><div id="nav-next"></div></div>
     <button type="button" id="nav-voice" aria-label="Голосовые подсказки"></button>
   </section>
+  </div>
   <div class="map-wrap">
-    <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet">
-      <defs><pattern id="map-grid-pattern" width="50" height="50" patternUnits="userSpaceOnUse">
-        <path d="M 0 50 V 0 H 50" fill="none" stroke="#a0becf" stroke-opacity=".48" stroke-width="1" vector-effect="non-scaling-stroke"/>
-      </pattern></defs>
-      <rect id="map-grid" width="100%" height="100%" fill="url(#map-grid-pattern)" pointer-events="none"/>
-    </svg>
+    <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
     <button class="map-toggle" id="map-toggle" aria-pressed="false">Спутник</button>
-    <!-- Масштаб: ещё щипок двумя пальцами и перетаскивание -->
-    <div class="map-zoom">
-      <button type="button" id="map-zoom-in" aria-label="Приблизить">+</button>
-      <button type="button" id="map-zoom-out" aria-label="Отдалить">−</button>
-      <button type="button" id="map-reset" aria-label="Весь маршрут" title="Весь маршрут">◎</button>
-    </div>
-    <div class="map-hint" id="map-hint" hidden>Коснитесь карты, чтобы указать, где вы</div>
+    <!-- Вернуть карту к себе: крупный план вокруг своей метки -->
+    <button type="button" class="map-locate" id="map-reset" aria-label="Ко мне" title="Ко мне">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+      </svg>
+    </button>
+    <div class="map-hint" id="map-hint" hidden>Коснитесь карты там, где вы</div>
   </div>
 
   <div class="work-dock">
@@ -120,11 +99,7 @@
       <div class="idle-mark"></div>
       <div class="idle-text">
         <h2>Вызовов нет</h2>
-        <p class="muted">Вызов придёт сюда автоматически</p>
-      </div>
-      <div class="idle-meta">
-        <span class="muted">Ваше место</span>
-        <b class="num" id="idle-coords">—</b>
+        <p class="muted">Вызов придёт сам</p>
       </div>
     </div>
 
@@ -168,13 +143,13 @@
     </div>
     <div class="error work-error" id="call-error" hidden></div>
 
-    <section id="repair-panel" hidden>
-      <form id="repair-form"><label>Категория MEL <select id="repair-mel" required><option value="">Выберите</option><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
-      <button type="submit">Сохранить категорию</button></form>
-      <label><input type="checkbox" id="missing-tools"> Не хватает инструмента</label>
-    </section>
     <div class="dock-actions">
-      <button type="button" id="decline-call" class="big" hidden>Отказаться от вызова</button>
+      <button type="button" id="decline-call" class="big" hidden>Отказаться</button>
+      <!-- Одно окно на всё, что инженер сообщает диспетчеру -->
+      <button type="button" class="big report-open" id="chat-open" hidden aria-label="Сообщить диспетчеру">
+        <span aria-hidden="true">⚠</span> Сообщить
+        <span class="chip-badge" id="chat-badge" hidden></span>
+      </button>
       <button class="big primary action" id="call-action" hidden>—</button>
     </div>
   </div>
@@ -211,22 +186,29 @@
 </div>
 
 <!--
-  Сообщения диспетчеру. У борта сверху две отметки, которые нужны
-  системе: «Жду запчасти» (инженера можно переключить на срочный борт)
-  и AOG (ставит только инженер, после осмотра). Всё остальное инженер
-  пишет сам — готовых фраз нет.
+  Сообщить диспетчеру: AOG, категория MEL, нехватка инструмента
+  и сообщение своими словами — в одном окне. У диспетчера вызов
+  загорается красным.
 -->
 <div class="sheet-backdrop" id="chat-sheet" hidden>
-  <div class="sheet">
-    <h3>Диспетчеру</h3>
-    <div class="quick-marks" id="quick-marks" hidden>
-      <button class="mark-toggle" id="parts-toggle">Жду запчасти</button>
-      <button class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
+  <div class="sheet report">
+    <h3>Сообщить диспетчеру</h3>
+    <div class="report-marks" id="quick-marks">
+      <button type="button" class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
+      <div class="mel-switch" id="mel-switch" role="group" aria-label="Категория MEL">
+        <span>MEL</span>
+        <button type="button" data-mel="A">A</button>
+        <button type="button" data-mel="B">B</button>
+        <button type="button" data-mel="C">C</button>
+        <button type="button" data-mel="D">D</button>
+      </div>
+      <button type="button" class="mark-toggle" id="tools-toggle">Нет инструмента</button>
     </div>
+    <p class="report-hint" id="report-hint" hidden></p>
     <div class="chat-list" id="chat-list"></div>
     <form class="chat-form" id="chat-form">
-      <input id="chat-input" maxlength="500" autocomplete="off" placeholder="Написать диспетчеру">
-      <button type="submit" class="primary" id="chat-send">Отправить</button>
+      <input id="chat-input" maxlength="500" autocomplete="off" placeholder="Опишите проблему">
+      <button type="submit" class="primary" id="chat-send" aria-label="Отправить">➤</button>
     </form>
     <button class="big ghost" id="chat-close">Закрыть</button>
   </div>

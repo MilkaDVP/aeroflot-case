@@ -939,7 +939,7 @@ class AirportMap {
   drawRoute(nodeIds, pickupNodeId, employee, stops) {
     this.clearRoute();
 
-    const known = (nodeIds || []).filter((id) => this.nodesById.has(id));
+    let known = (nodeIds || []).filter((id) => this.nodesById.has(id));
     if (known.length === 0) {
       return false;
     }
@@ -959,18 +959,26 @@ class AirportMap {
       return true;
     }
 
+    // Как у инженера на телефоне: пройденная часть исчезает, линия
+    // начинается от его текущего места.
+    const progress = this.routeProgress(known, employee, pickupNodeId, stops);
+    if (progress) {
+      if (known.indexOf(pickupNodeId) < progress.index) pickupNodeId = null;
+      known = known.slice(progress.index);
+    }
+    const lead = progress ? progress.lead : undefined;
     const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < known.length) {
-      this.appendRouteLine(known.slice(0, split + 1), "route route-walk");
+    if (split > 0 && split < known.length - 1) {
+      this.appendRouteLine(known.slice(0, split + 1), "route route-walk", lead);
       this.appendRouteLine(known.slice(split), "route");
     } else {
-      this.appendRouteLine(known, "route");
+      this.appendRouteLine(known, "route", lead);
     }
 
     // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
     // а силуэт борта на стоянке легко принять за обычный значок карты —
     // без отметок было непонятно, откуда и куда идёт линия.
-    const first = this.nodesById.get(known[0]);
+    const first = progress ? progress.position : this.nodesById.get(known[0]);
     const last = this.nodesById.get(known[known.length - 1]);
     if (split > 0 && split < known.length - 1) {
       this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "М", "Здесь забрать машину");
@@ -978,6 +986,7 @@ class AirportMap {
     // Промежуточные точки: склад (получить инструмент, 30 с). Посадка
     // отмечена буквой «М» выше; высадка у борта — это конец маршрута.
     for (const stop of stops || []) {
+      if (!known.includes(stop.node_id)) continue;
       if (stop.kind === "warehouse") {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "С",
           `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
@@ -990,6 +999,37 @@ class AirportMap {
     this.appendRouteEnd(last, "finish", "Б", "Конец маршрута — стоянка борта");
     this.updateMarkerScale();
     return true;
+  }
+
+  /**
+   * Где исполнитель на маршруте: ближайшая точка ломаной до его места.
+   * Ищем только до первой ещё не пройденной остановки (склад, машина):
+   * маршрут туда и обратно идёт по одной дороге, и без этого ограничения
+   * инженер «перескочил» бы на обратный участок.
+   * Возвращает {index, lead, position} или null: index — следующая
+   * вершина впереди, lead — начало линии (место инженера и его проекция).
+   */
+  routeProgress(known, employee, pickupNodeId, stops) {
+    if (!employee || employee.lat == null || employee.lon == null || known.length < 2) return null;
+    const position = this.projectLatLon(employee.lat, employee.lon);
+    const pending = [pickupNodeId, ...(stops || []).map((stop) => stop.node_id)]
+      .map((id) => known.indexOf(id)).filter((index) => index > 0);
+    const limit = pending.length ? Math.min(...pending) : known.length - 1;
+    let best = null;
+    for (let i = 1; i <= limit; i += 1) {
+      const a = this.nodesById.get(known[i - 1]);
+      const b = this.nodesById.get(known[i]);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const length = dx * dx + dy * dy;
+      const t = length ? Math.max(0, Math.min(1, ((position.x - a.x) * dx + (position.y - a.y) * dy) / length)) : 0;
+      const point = { x: a.x + t * dx, y: a.y + t * dy };
+      const offset = Math.hypot(position.x - point.x, position.y - point.y);
+      // Следующая вершина впереди: конец отрезка, если инженер ещё
+      // не дошёл до него, иначе начало (он стоит ровно на нём).
+      if (!best || offset < best.offset) best = { offset, index: t <= 0 ? i - 1 : i, point };
+    }
+    if (!best) return null;
+    return { index: best.index, lead: [position, best.point], position };
   }
 
   /**
@@ -1041,7 +1081,8 @@ class AirportMap {
       .filter(Boolean)
       .map((node) => `${node.x},${node.y}`);
 
-    if (start) points.unshift(`${start.x},${start.y}`);
+    // start — точка или несколько точек перед первой вершиной.
+    if (start) points.unshift(...[].concat(start).map((p) => `${p.x},${p.y}`));
     if (points.length < 2) {
       return;
     }

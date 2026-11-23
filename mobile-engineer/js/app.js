@@ -44,9 +44,6 @@ const ACTIONS = {
   arrived: { label: "Закрыть вызов", action: "closed" },
 };
 
-// Этапы работ, которые отмечает инженер. Остальное он пишет словами.
-const STAGE_WAITING_PARTS = "waiting_parts";
-const STAGE_WORKING = "repair";
 const CLOSE_CONFIRM = "Работы завершены? Закрытый вызов вернуть нельзя.";
 
 const el = (id) => document.getElementById(id);
@@ -409,16 +406,6 @@ function renderWork() {
   const current = state.call?.call;
   el("call-action").hidden = !current || !ACTIONS[current.status];
   el("decline-call").hidden = current?.status !== "assigned";
-  el("repair-panel").hidden = current?.status !== "arrived";
-  if (current?.status === "arrived") {
-    const form = el("repair-form");
-    const key = [current.id, current.mel_category].join("/");
-    if (form.dataset.key !== key) {
-      el("repair-mel").value = current.mel_category || "";
-      form.dataset.key = key;
-    }
-    el("missing-tools").checked = !!current.missing_tools;
-  }
   el("chat-open").hidden = !hasCall;
   if (!hasCall) {
     closeSheet("chat-sheet");
@@ -468,7 +455,7 @@ function renderWork() {
 
   const step = ACTIONS[call.status];
   el("call-action").textContent = step ? step.label : "Ожидание";
-  el("call-action").disabled = !step || (step.action === "closed" && !call.mel_category);
+  el("call-action").disabled = !step;
 
   el("work-status").textContent = statusTitle(call.status);
   el("work-status-dot").className = "status-dot busy";
@@ -481,26 +468,36 @@ function renderWork() {
 }
 
 /**
- * Блок «у борта»: этап работ и AOG. Виден только после прибытия —
- * до осмотра ни этапа, ни диагноза ещё нет.
+ * Отметки в окне «Сообщить»: AOG, категория MEL, нехватка инструмента.
+ * Ставятся только у борта — до осмотра диагноза нет; сообщение
+ * словами можно отправить всегда.
  */
 function renderAtAircraft(call) {
-  // Отметки имеют смысл только у борта: до осмотра ни запчастей, ни AOG нет.
-  el("quick-marks").hidden = call.status !== "arrived";
-  el("parts-toggle").classList.toggle("active", call.work_stage === STAGE_WAITING_PARTS);
-  el("aog-toggle").classList.toggle("active", call.aog);
+  const atAircraft = call.status === "arrived";
+  for (const button of el("quick-marks").querySelectorAll("button")) {
+    button.disabled = !atAircraft;
+  }
+  el("aog-toggle").classList.toggle("active", Boolean(call.aog));
+  el("tools-toggle").classList.toggle("active", Boolean(call.missing_tools));
+  for (const button of el("mel-switch").querySelectorAll("button")) {
+    button.classList.toggle("active", button.dataset.mel === call.mel_category);
+  }
+  const hint = el("report-hint");
+  hint.hidden = atAircraft && !hint.dataset.ask;
+  hint.textContent = atAircraft ? "Выберите категорию MEL" : "Отметки — после прибытия к борту";
 }
 
-/**
- * «Жду запчасти» — переключатель: пока он включён, диспетчер может
- * отправить инженера на срочный борт, и к этому он потом вернётся.
- */
-function toggleWaitingParts() {
+function setMel(category) {
   const call = state.call && state.call.call;
-  if (!call) {
-    return;
-  }
-  changeStage(call.work_stage === STAGE_WAITING_PARTS ? STAGE_WORKING : STAGE_WAITING_PARTS);
+  if (!call || call.status !== "arrived") return;
+  delete el("report-hint").dataset.ask;
+  recordAction("assessment", { mel_category: category });
+}
+
+function toggleMissingTools() {
+  const call = state.call && state.call.call;
+  if (!call || call.status !== "arrived") return;
+  recordAction("equipment", { missing_tools: !call.missing_tools });
 }
 
 /* --- Связь с диспетчером --- */
@@ -578,15 +575,6 @@ async function sendChatMessage(event) {
     showToast(state.offline ? "Нет связи — сообщение не отправлено" : error.detail, true);
   } finally {
     el("chat-send").disabled = false;
-  }
-}
-
-async function changeStage(stage) {
-  try {
-    await Api.setStage(stage);
-    await refresh();
-  } catch (error) {
-    showToast(error.detail, true);
   }
 }
 
@@ -678,11 +666,8 @@ function vehicleInstruction(vehicle) {
 }
 
 function renderIdle() {
-  el("work-status").textContent = state.returnLeg?.instruction || (state.onShift ? "на смене, свободен" : "на смене");
+  el("work-status").textContent = state.returnLeg?.instruction || (state.onShift ? "свободен" : "на смене");
   el("work-status-dot").className = "status-dot";
-  el("idle-coords").textContent = state.position
-    ? `${state.position.lat.toFixed(5)}, ${state.position.lon.toFixed(5)}`
-    : "не определены";
 }
 
 function statusTitle(status) {
@@ -876,11 +861,6 @@ el("decline-call").onclick = async () => {
   const id = state.call?.call.id;
   if (await askConfirm("Вернуть вызов диспетчеру?", "Отказаться") && state.call?.call.id === id && state.call.call.status === "assigned") await recordAction("declined");
 };
-el("repair-form").onsubmit = event => {
-  event.preventDefault();
-  recordAction("assessment", {mel_category: el("repair-mel").value});
-};
-el("missing-tools").onchange = event => recordAction("equipment", {missing_tools: event.target.checked});
 
 let arrivalKey = "", insideSince = 0;
 function checkAircraftArrival() {
@@ -901,6 +881,13 @@ el("call-action").addEventListener("click", async () => {
   const call = state.call && state.call.call;
   const step = call && ACTIONS[call.status];
   if (!step) {
+    return;
+  }
+  // Без категории MEL вызов не закрыть — сразу открываем окно, где её выбрать.
+  if (step.action === "closed" && !call.mel_category) {
+    el("report-hint").dataset.ask = "1";
+    renderAtAircraft(call);
+    openChat();
     return;
   }
   // Закрытие необратимо для инженера, а кнопка — во всю ширину экрана:
@@ -1060,7 +1047,7 @@ function switchToManualPlace() {
  */
 function onMapTap(point) {
   if (locator.mode !== "simulation") {
-    showToast("Чтобы указать место пальцем, нажмите «Место» вверху и выберите «Вручную»");
+    showToast("Указать место пальцем: GPS вверху → «Вручную»");
     return;
   }
   applySimulated(point.lat, point.lon);
@@ -1075,14 +1062,18 @@ function applySimulated(lat, lon) {
 }
 
 function bindEvents() {
-  el("parts-toggle").addEventListener("click", toggleWaitingParts);
   el("aog-toggle").addEventListener("click", toggleAog);
+  el("tools-toggle").addEventListener("click", toggleMissingTools);
+  for (const button of el("mel-switch").querySelectorAll("button")) {
+    button.addEventListener("click", () => setMel(button.dataset.mel));
+  }
   el("chat-form").addEventListener("submit", sendChatMessage);
-  el("map-zoom-in").addEventListener("click", () => routeMap.zoomBy(1.6));
-  el("map-zoom-out").addEventListener("click", () => routeMap.zoomBy(1 / 1.6));
   el("map-reset").addEventListener("click", () => routeMap.resetView());
   el("chat-open").addEventListener("click", openChat);
-  el("chat-close").addEventListener("click", () => closeSheet("chat-sheet"));
+  el("chat-close").addEventListener("click", () => {
+    delete el("report-hint").dataset.ask;
+    closeSheet("chat-sheet");
+  });
   el("confirm-yes").addEventListener("click", () => answerConfirm(true));
   el("confirm-no").addEventListener("click", () => answerConfirm(false));
   el("geo-notice").addEventListener("click", switchToManualPlace);

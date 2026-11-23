@@ -37,6 +37,9 @@ const FALLBACK_SPAN_M = 2400;
 // растягиваться на несколько метров во весь экран.
 const MIN_ROUTE_SPAN_M = 160;
 const PADDING_RATIO = 0.14;
+// Крупный план вокруг инженера: видны ближайшие повороты, стоянки
+// и их номера.
+const FOLLOW_SPAN_M = 150;
 
 // Масштаб, который инженер задаёт сам (щипок, колесо, кнопки): во сколько
 // раз ближе автоматического вида. Пределы — чтобы не «улететь» в одну
@@ -59,10 +62,9 @@ class RouteMap {
 
     this.tileLayer = group("layer-tiles");
     this.contentLayer = group("layer-content");
-    this.grid = this.svg.querySelector("#map-grid");
     this.graphLayer = group("airport-network");
-    this.svg.insertBefore(this.tileLayer, this.grid);
-    this.svg.append(this.graphLayer, this.contentLayer);
+    this.labelLayer = group("airport-labels");
+    this.svg.append(this.tileLayer, this.graphLayer, this.labelLayer, this.contentLayer);
 
     // Свой вид инженера переживает обновления данных: карта больше не
     // возвращается к автоматическому охвату на каждом опросе.
@@ -193,7 +195,7 @@ class RouteMap {
     this.rerender();
   }
 
-  /** «◎» — обратно к автоматическому виду: маршрут и своя точка целиком. */
+  /** «◎» — обратно к крупному плану вокруг инженера. */
   resetView() {
     this.userZoom = 1;
     this.userPan = { x: 0, y: 0 };
@@ -219,13 +221,12 @@ class RouteMap {
       scaleRef: Math.min(width, height),
     };
     this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
-    const spacing = 50 * 2 ** Math.round(Math.log2(this.view.scaleRef / 600));
-    const pattern = this.svg.querySelector("#map-grid-pattern");
-    pattern.setAttribute("width", spacing);
-    pattern.setAttribute("height", spacing);
-    pattern.firstElementChild.setAttribute("d", `M 0 ${spacing} V 0 H ${spacing}`);
-    for (const [attr, value] of Object.entries({x:this.view.minX, y:this.view.minY, width, height}))
-      this.grid.setAttribute(attr, value);
+    // Подписи стоянок — постоянного экранного размера; издалека их
+    // не показываем, иначе сотня номеров сливается в кашу.
+    const font = this.view.scaleRef * 0.032;
+    this.labelLayer.setAttribute("font-size", font);
+    this.labelLayer.setAttribute("stroke-width", font * 0.28);
+    this.labelLayer.style.display = this.view.scaleRef > 1200 ? "none" : "";
     if (this.onViewChange) this.onViewChange(this.isUserView());
   }
 
@@ -239,30 +240,74 @@ class RouteMap {
     this.rerenderTimer = setTimeout(() => this.rerender(), 120);
   }
 
+  /**
+   * Схема аэропорта — та же, что на карте диспетчера: контур территории,
+   * здания и склады, зоны обслуживания ВС, дороги по видам (служебная,
+   * пешеходная, рулёжка, ВПП), стоянки с номерами. Координаты x/y
+   * в графе уже в метрах от опорной точки — в той же проекции, что здесь.
+   */
   setGraph(graph) {
     this.graphOrigin = graph?.ref_point || graph?.nodes[0];
     this.graphLayer.replaceChildren();
+    this.labelLayer.replaceChildren();
     if (this.graphOrigin) {
       this.reference = this.graphOrigin;
-      const nodes = new Map(graph.nodes.map(n => [n.id, this.project(n)]));
-      const segments = [];
+      const at = (node) => (Number.isFinite(node.x) ? { x: node.x, y: node.y } : this.project(node));
+      const ring = (points) => "M" + points.map((p) => `${p[0]},${p[1]}`).join(" L") + " Z";
+      const area = (points, className, hint) => {
+        const path = svgElement("path", { d: ring(points), class: className });
+        if (hint) path.append(svgTitle(hint));
+        this.graphLayer.append(path);
+      };
+      for (const points of graph.boundary || []) area(points, "area area-boundary");
+      for (const item of graph.objects || []) {
+        for (const points of item.rings || []) area(points, `area area-${item.kind || "object"}`, item.name);
+        if (item.label && item.kind !== "runway" && item.name) {
+          this.labelLayer.append(svgElement("text", { x: item.label[0], y: item.label[1], class: "label-area" }, item.name));
+        }
+      }
+      for (const zone of graph.zones || []) {
+        for (const points of zone.rings || []) area(points, "area area-zone", `Зона обслуживания ВС ${zone.ref}`);
+      }
+
+      const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
       for (const edge of graph.edges) {
         const a = nodes.get(edge.from_id), b = nodes.get(edge.to_id);
-        if (a && b) segments.push(`M${a.x} ${a.y}L${b.x} ${b.y}`);
+        if (!a || !b) continue;
+        const pa = at(a), pb = at(b);
+        const middle = (edge.points || []).map((p) => `L${p[0]} ${p[1]}`).join("");
+        const kind = edge.kind ? ` road-${edge.kind}` : "";
+        this.graphLayer.append(svgElement("path", {
+          d: `M${pa.x} ${pa.y}${middle}L${pb.x} ${pb.y}`,
+          class: (edge.vehicle_allowed ? "road" : "road walk-only") + kind,
+        }));
       }
-      const path = document.createElementNS(SVG_NS, "path");
-      path.setAttribute("d", segments.join(" "));
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "#80a4b5");
-      path.setAttribute("stroke-width", "1.4");
-      path.setAttribute("vector-effect", "non-scaling-stroke");
-      this.graphLayer.append(path);
+
+      for (const node of graph.nodes) {
+        if (node.type === "junction") continue;
+        const p = at(node);
+        if (["warehouse", "vehicle_parking", "terminal", "tech_center"].includes(node.type)) {
+          const size = node.type === "tech_center" ? 10 : 7;
+          this.graphLayer.append(svgElement("rect", {
+            x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, class: `place place-${node.type}`,
+          }));
+          if (node.type === "tech_center" && node.ref) {
+            this.labelLayer.append(svgElement("text", { x: p.x, y: p.y - 9, class: "label-tech" }, node.ref));
+          }
+          continue;
+        }
+        this.graphLayer.append(svgElement("circle", { cx: p.x, cy: p.y, r: 3.5, class: "stand" }));
+        if (node.ref) {
+          this.labelLayer.append(svgElement("text", { x: p.x, y: p.y - 6, class: "label-stand" }, node.ref));
+        }
+      }
     }
     this.rerender();
   }
 
   setImagery(enabled) {
     this.showImagery = enabled;
+    this.svg.classList.toggle("has-imagery", enabled);
     this.tileLayer.replaceChildren();
   }
 
@@ -304,8 +349,15 @@ class RouteMap {
     }
 
     this.reference = this.graphOrigin || centre || all[0];
-    const extent = centre ? [centre] : all;
-    this.fit(extent.map((point) => this.project(point)), !centre && points.length > 0, centre || usingFallback);
+    // Главный вид — крупный план вокруг инженера: карта едет за ним,
+    // как в навигаторе. Пока места нет — маршрут или аэропорт целиком.
+    if (position && !centre) {
+      this.fit([this.project(position)], FOLLOW_SPAN_M);
+    } else {
+      const extent = centre ? [centre] : all;
+      this.fit(extent.map((point) => this.project(point)),
+        centre || usingFallback ? FALLBACK_SPAN_M : points.length ? MIN_ROUTE_SPAN_M : IDLE_SPAN_M);
+    }
     this.drawTiles();
 
     if (points.length >= 2) {
@@ -359,7 +411,7 @@ class RouteMap {
    * пустые полосы, куда подложка не доходила: тайлы считались только
    * для квадрата, а места на экране было больше.
    */
-  fit(points, hasRoute, usingFallback) {
+  fit(points, minimum) {
     const box = this.svg.getBoundingClientRect();
     const boxWidth = box.width || 320;
     const boxHeight = box.height || 320;
@@ -371,11 +423,6 @@ class RouteMap {
       Math.max(...xs) - Math.min(...xs),
       Math.max(...ys) - Math.min(...ys)
     );
-    const minimum = hasRoute
-      ? MIN_ROUTE_SPAN_M
-      : usingFallback
-        ? FALLBACK_SPAN_M
-        : IDLE_SPAN_M;
     const span = Math.max(extent, minimum) * (1 + PADDING_RATIO * 2);
 
     // Заданный охват укладывается в меньшую сторону, большая получает
@@ -601,6 +648,17 @@ function groundResolution(lat, zoom) {
  */
 function tileIndex(metres, resolution, worldOrigin) {
   return Math.floor((metres / resolution + worldOrigin) / TILE_SIZE);
+}
+
+function svgElement(name, attributes, text) {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+function svgTitle(text) {
+  return svgElement("title", {}, text);
 }
 
 function group(className) {

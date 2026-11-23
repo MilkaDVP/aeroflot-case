@@ -173,6 +173,9 @@ function buildCallCard(call, selectedId, onSelect) {
   if (call.id === selectedId) {
     item.classList.add("selected");
   }
+  if (callProblem(call).length) {
+    item.classList.add("has-problem");
+  }
   if (call.claimed_by_login && Session.user && call.claimed_by_login !== Session.user.login) {
     item.classList.add("is-claimed-other");
   }
@@ -185,7 +188,7 @@ function buildCallCard(call, selectedId, onSelect) {
       <span class="call-board">${escapeHtml(call.board_number)}</span>
       ${deadlineLabel(call)}
     </div>
-    <div class="call-badges">${callFlags(call)}${messageFlag(call)}</div>
+    <div class="call-badges">${problemFlag(call)}${callFlags(call)}${messageFlag(call)}</div>
     <div class="call-where">
       ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
       <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span>
@@ -741,7 +744,7 @@ function whoLine(call) {
  * Поле ввода и список сообщений живут до смены вызова.
  */
 function renderAssignedPanel(container, call, onSend, scrollToEnd) {
-  const summary = widget("Исполнитель", [buildAssignmentBlock(call), buildTeam(call)]);
+  const summary = widget("Исполнитель", [buildProblem(call), buildAssignmentBlock(call), buildTeam(call)]);
   const list = container.querySelector(".messages");
   if (list?.dataset.callId === String(call.id)) {
     container.firstElementChild.replaceWith(summary);
@@ -870,6 +873,41 @@ function supportLines(call) {
         )}</div>`
     )
     .join("");
+}
+
+/**
+ * Проблема у борта, о которой сообщил инженер: AOG, нехватка инструмента
+ * или сообщение, на которое диспетчер ещё не ответил. Пока она есть,
+ * вызов горит красным. Ответ в «Связи с инженером» снимает подсветку
+ * по сообщению; AOG и инструмент снимает сам инженер.
+ */
+function callProblem(call) {
+  const reasons = [];
+  if (call.aog) reasons.push("AOG");
+  if (call.missing_tools) reasons.push("Нет инструмента");
+  const messages = call.messages || [];
+  const lastEngineer = messages.filter((item) => item.author_role === "engineer").at(-1);
+  const lastDispatcher = messages.filter((item) => item.author_role !== "engineer").at(-1);
+  if (lastEngineer && (!lastDispatcher || lastDispatcher.id < lastEngineer.id)) {
+    reasons.push(`«${lastEngineer.text}»`);
+  }
+  return reasons;
+}
+
+function problemFlag(call) {
+  const reasons = callProblem(call);
+  if (!reasons.length) return "";
+  return `<span class="flag flag-problem" title="${escapeHtml(reasons.join(" · "))}">⚠ Проблема</span>`;
+}
+
+/** Красный блок над исполнителем: что случилось и что ответить. */
+function buildProblem(call) {
+  const reasons = callProblem(call);
+  if (!reasons.length) return null;
+  const box = document.createElement("div");
+  box.className = "problem-block";
+  box.innerHTML = `<b>⚠ Проблема</b>${reasons.map((text) => `<div>${escapeHtml(text)}</div>`).join("")}`;
+  return box;
 }
 
 /**

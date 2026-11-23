@@ -211,9 +211,11 @@ async function refresh() {
         refreshExecutorMenu();
         loadExtraCandidates(selected);
       }
-      // Маршрут из одной вершины рисуется от его текущего места — оно
-      // меняется на каждом опросе, поэтому перерисовываем всегда.
+      // В пути линия начинается от текущего места инженера и укорачивается
+      // по мере движения — оно меняется на каждом опросе, поэтому
+      // перерисовываем всегда.
       if (previous.status !== selected.status ||
+          ["assigned", "accepted"].includes(selected.status) ||
           selected.route_node_ids?.length === 1 ||
           previous.stand_node_id !== selected.stand_node_id ||
           previous.pickup_node_id !== selected.pickup_node_id ||
