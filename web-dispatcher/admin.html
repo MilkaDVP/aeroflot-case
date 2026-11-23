@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="css/theme.css?v=__BUILD__">
   <link rel="stylesheet" href="css/dispatch.css?v=__BUILD__">
   <link rel="stylesheet" href="css/admin.css?v=__BUILD__">
+  <link rel="stylesheet" href="css/flightradar.css?v=__BUILD__">
 </head>
 <body>
   <div class="admin">
@@ -294,6 +295,20 @@
             <button type="submit" class="primary" id="aircraft-submit">Поставить</button>
           </form>
           <div class="admin-note" id="aircraft-note" hidden></div>
+
+          <h2 class="with-gap">Онлайн-загрузка из Flightradar24</h2>
+          <p class="muted small">
+            По нажатию сервер получит текущие позиции и добавит только борта
+            со скоростью до 30 узлов рядом со свободной стоянкой. Существующие
+            борта и вызовы не изменяются. Автоматического опроса нет.
+          </p>
+          <form class="admin-form" id="fr24-sync-form">
+            <button type="submit" class="primary" id="fr24-sync-submit">
+              Загрузить текущие борта
+            </button>
+          </form>
+          <div class="admin-note" id="fr24-note" aria-live="polite" hidden></div>
+          <div class="admin-list" id="fr24-results" hidden></div>
         </div>
 
       </div>
@@ -307,5 +322,6 @@
   <script src="js/map.js?v=__BUILD__"></script>
   <script src="js/editor.js?v=__BUILD__"></script>
   <script src="js/admin.js?v=__BUILD__"></script>
+  <script src="js/flightradar.js?v=__BUILD__"></script>
 </body>
 </html>
