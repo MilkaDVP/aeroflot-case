@@ -40,6 +40,10 @@ class RouteParticipant(Base):
     # [{"category": "B1.1", "aircraft_types": ["A320"], "valid_until": "2027-03-15"}]
     qualifications: Mapped[list] = mapped_column(JSON, default=list)
 
+    waiting_lat: Mapped[float | None] = mapped_column(Float)
+    waiting_lon: Mapped[float | None] = mapped_column(Float)
+    return_to_waiting: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    return_vehicle: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     shift_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shift: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default=STATUS_OFFLINE)

@@ -122,7 +122,8 @@ class TestVehiclePool(ApiTestCase):
         self.assertNotIn("ТМ-04", free)
         self.assertIn("ТМ-05", free)
 
-    def test_после_работ_машина_остаётся_у_борта(self):
+    def test_после_работ_машина_возвращается_на_стоянку(self):
+        home = self.vehicles()["ТМ-04"]
         call = self.assign(self.create_call("VP-BZQ")["id"], MOROZOV)
         engineer = self.login("morozov", "engineer")
 
@@ -136,12 +137,18 @@ class TestVehiclePool(ApiTestCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
 
-        tm04 = self.vehicles()["ТМ-04"]
-        self.assertEqual(tm04["status"], "free")
-        self.assertIsNone(tm04["employee_name"])
-        lat, lon = self.stand_point(call["stand_node_id"])
-        self.assertAlmostEqual(tm04["lat"], lat, places=6)
-        self.assertAlmostEqual(tm04["lon"], lon, places=6)
+        self.assertEqual(self.vehicles()["ТМ-04"]["status"], "in_use")
+        employee_id = self.employee(MOROZOV)["id"]
+        response = self.client.post(
+            f"/api/employees/{employee_id}/location",
+            json={"lat": home["lat"], "lon": home["lon"], "source": "gps"},
+            headers=auth_header(engineer),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        parked = self.vehicles()["ТМ-04"]
+        self.assertEqual(parked["status"], "free")
+        self.assertIsNone(parked["employee_name"])
+        self.assertEqual((parked["lat"], parked["lon"]), (home["lat"], home["lon"]))
 
     def test_отменённый_вызов_возвращает_незабранную_машину_на_место(self):
         before = self.vehicles()["ТМ-04"]

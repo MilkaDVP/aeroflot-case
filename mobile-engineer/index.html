@@ -27,7 +27,7 @@
     <input id="login" autocomplete="username" autocapitalize="off" required>
 
     <label for="password">Пароль</label>
-    <input id="password" type="password" autocomplete="current-password" required>
+    <span style="display:flex;align-items:center;gap:.4rem"><input id="password" type="password" autocomplete="current-password" required><button type="button" aria-controls="password" aria-label="Показать пароль" aria-pressed="false" onclick="const field=document.getElementById(this.getAttribute('aria-controls'));const show=field.type==='password';field.type=show?'text':'password';this.setAttribute('aria-pressed',show);this.setAttribute('aria-label',show?'Скрыть пароль':'Показать пароль')">👁</button></span>
 
     <div class="error" id="login-error" hidden></div>
     <button type="submit" class="big primary" id="login-submit">Войти</button>

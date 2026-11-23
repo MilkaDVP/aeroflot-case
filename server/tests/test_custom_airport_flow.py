@@ -155,6 +155,66 @@ class TestCustomAirportFlow(ApiTestCase):
         self.assertIsNotNone(current["call"])
         self.assertEqual(current["call"]["board_number"], "RA-00001")
 
+    def test_roles_and_vehicle_return(self):
+        admin = self.build_airport()
+
+        def post(token, path, **payload):
+            r = self.client.post("/api/" + path, json=payload, headers=auth_header(token))
+            self.assertIn(r.status_code, (200, 201), r.text)
+            return r.json()
+
+        def create_account(actor, role):
+            post(actor, "admin/users", full_name=role, role=role, login="test-" + role,
+                 password="demo", airport_icao=ICAO)
+            return self.login("test-" + role, "demo", airport=ICAO)
+
+        local = create_account(admin, "local_admin")
+        supervisor = create_account(local, "shift_supervisor")
+        dispatcher = create_account(local, "dispatcher")
+        person = self.register_engineer(local)
+        board = self.put_aircraft(local)
+        def point(index):
+            return {key: NODES[index][key] for key in ("lat", "lon")}
+        old = post(local, "vehicles", call_sign="V1", **point(0))
+        new = post(local, "vehicles", call_sign="V2", **point(3))
+        for actor in (local, supervisor, dispatcher):
+            for index in (1, 0):
+                post(actor, f"employees/{person['id']}/location", **point(index))
+                post(actor, f"vehicles/{old['id']}/location", **point(index))
+                post(actor, f"aircraft/{board['id']}/location", free=True, **point(index))
+        post(local, f"aircraft/{board['id']}/location", stand_node_id="s1", **point(2))
+        job = post(dispatcher, "calls", aircraft_id=board["id"], defect_code="hydraulic_leak")
+        path = f"calls/{job['id']}"
+        post(dispatcher, path + "/assign", employee_id=person["id"], travel="walk")
+        engineer = self.login("poligonov", "engineer", airport=ICAO)
+        def location(index):
+            post(engineer, f"employees/{person['id']}/location", source="gps", **point(index))
+        def current():
+            return self.client.get("/api/me/current-call", headers=auth_header(engineer)).json()
+        post(engineer, "me/status", action="accepted")
+        location(3)
+        self.assertEqual(current()["route_points"][0]["id"], "s2")
+        post(dispatcher, path + "/transport?vehicle_id=" + str(old["id"]))
+        location(0)
+        location(1)
+        post(dispatcher, path + "/transport?vehicle_id=" + str(new["id"]))
+        self.assertIn("Верните", current()["instruction"])
+        location(0)
+        self.assertTrue(current()["vehicle"]["pickup"])
+        location(3)
+        self.assertFalse(current()["vehicle"]["pickup"])
+        location(2)
+        post(supervisor, path + "/transport")
+        self.assertIn("Верните", current()["instruction"])
+        location(3)
+        self.assertIsNone(current()["vehicle"])
+        location(2)
+        post(engineer, "me/status", action="arrived")
+        post(engineer, "me/status", action="closed")
+        self.assertIn("ожидания", current()["instruction"])
+        location(0)
+        self.assertNotIn("instruction", current())
+
     # --- Проверки при заведении ---
 
     def test_борт_ставится_только_на_стоянку(self):

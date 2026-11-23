@@ -155,6 +155,15 @@ def ensure_own_card(context, employee):
         raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_NOT_SELF)
 
 
+@router.get("/roster", response_model=list[EmployeeResponse])
+def admin_roster(context: Context = Depends(require_roles(ROLE_SHIFT_SUPERVISOR)),
+                 db: Session = Depends(get_db)):
+    query = db.query(Employee).filter_by(archived=False)
+    if context.user.role != ROLE_ADMIN:
+        query = query.filter(Employee.airport_icao.in_(context.user.airport_icaos))
+    return [to_response(e) for e in query.order_by(Employee.full_name)]
+
+
 @router.get("", response_model=list[EmployeeResponse], summary="Сотрудники аэропорта")
 def list_employees(
     shift: str | None = None,
@@ -236,6 +245,7 @@ def create_employee(
         status=STATUS_FREE if payload.on_shift else STATUS_OFFLINE,
         qualifications=[item.model_dump() for item in payload.qualifications],
         speed_kmh=payload.speed_kmh,
+        waiting_lat=payload.lat, waiting_lon=payload.lon,
         lat=payload.lat,
         lon=payload.lon,
     )
@@ -378,7 +388,13 @@ def update_location(
             ERROR_BAD_SOURCE.format(source=payload.source),
         )
 
+    if (context.user.role != ROLE_ENGINEER and employee.status in (STATUS_FREE, STATUS_OFFLINE)
+            and not employee.return_vehicle and not employee.return_to_waiting):
+        employee.waiting_lat, employee.waiting_lon = payload.lat, payload.lon
     record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
+    from services.assignment import refresh_navigation
+    if not employee.is_training:
+        refresh_navigation(db, employee)
     if employee.is_training and payload.source == LOCATION_MANUAL and not reroute_after_move(db, employee):
         raise HTTPException(status.HTTP_409_CONFLICT, "Из выбранной точки нет маршрута к борту")
     db.commit()

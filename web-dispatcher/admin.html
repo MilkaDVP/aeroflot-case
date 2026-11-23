@@ -167,12 +167,10 @@
             и присутствие на смене; заводить и править учётные записи
             и квалификацию — администратор аэропорта и старше.
           </p>
-          <!-- Инженеры и их квалификация — в аэропорту сессии. Пока он не
-               выбран (технический администратор), список неполный. -->
-          <div class="admin-note is-warn" id="users-airport-note" hidden>
-            Аэропорт не выбран. Выберите его в шапке («Аэропорт»), чтобы видеть
-            инженеров и менять их квалификацию и допуски.
-          </div>
+          <label for="people-search">Поиск по ФИО, логину, роли и допускам</label>
+          <input id="people-search" type="search">
+          <label for="people-airport">Аэропорт</label>
+          <select id="people-airport"></select>
           <div class="admin-list" id="users-list">
             <div class="empty">Загрузка…</div>
           </div>
@@ -228,10 +226,6 @@
               <label for="user-valid">Отметка действует до</label>
               <input id="user-valid" class="num" value="2027-12-31">
 
-              <label for="user-extra-marks">Дополнительные допуски (по одному на строку: категория | типы ВС через запятую | срок)</label>
-              <textarea id="user-extra-marks" rows="2"></textarea>
-              <label for="user-speed">Скорость пешком, км/ч</label>
-              <input type="number" id="user-speed" min="0.1" step="0.1">
               <label for="user-place">Где находится</label>
               <select id="user-place"></select>
 
@@ -248,7 +242,7 @@
 
             <div id="user-password-row">
               <label for="user-password" id="user-password-label">Пароль</label>
-              <input id="user-password" type="password" autocomplete="new-password" required>
+              <span style="display:flex;align-items:center;gap:.4rem"><input id="user-password" type="password" autocomplete="new-password" required><button type="button" aria-controls="user-password" aria-label="Показать пароль" aria-pressed="false" onclick="const field=document.getElementById(this.getAttribute('aria-controls'));const show=field.type==='password';field.type=show?'text':'password';this.setAttribute('aria-pressed',show);this.setAttribute('aria-label',show?'Скрыть пароль':'Показать пароль')">👁</button></span>
             </div>
 
             <button type="submit" class="primary" id="user-submit">Завести</button>

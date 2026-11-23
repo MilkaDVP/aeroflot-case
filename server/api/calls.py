@@ -31,6 +31,9 @@ from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
 from services.drill import is_enabled
 from models.employee import RouteParticipant
+from models.vehicle import Vehicle
+from constants import VEHICLE_FREE, VEHICLE_RESERVED, VEHICLE_IN_USE
+from services.assignment import assigned_route, update_assigned_route, release_vehicle
 from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
@@ -569,11 +572,49 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         # Своя машина, если она есть, остаётся там, где стоит: в этот
         # вызов она не входит, и на карточке её быть не должно.
         call.vehicle = None
+        if employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE:
+            employee.return_vehicle = True
+        else:
+            release_vehicle(employee)
     elif ride_vehicle is not None:
         # Машина остаётся за ответственным: он её забирает и отвечает за
         # неё; второй едет пассажиром, поэтому за ним она не числится.
         call.vehicle = ride_vehicle
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
+
+
+@router.post("/{call_id}/transport", response_model=CallResponse)
+def change_transport(call_id: int, vehicle_id: int | None = None,
+                     db: Session = Depends(get_dispatch_db),
+                     context: Context = Depends(require_roles(*DISPATCH_ROLES))):
+    call = load_call(db, context, call_id)
+    claims.ensure_can_change(db, call, context.user)
+    employee = call.assigned_employee
+    if not employee or call.status not in ("assigned", "accepted") or employee.is_training:
+        raise HTTPException(409, "Транспорт меняют у инженера в пути")
+    if call.vehicle_id == vehicle_id and not employee.return_vehicle:
+        return to_response(call, db)
+    target = db.get(Vehicle, vehicle_id) if vehicle_id else None
+    if vehicle_id is not None and (not target or target.archived or target.airport_icao != call.airport_icao
+                                   or (target.status != VEHICLE_FREE and target != employee.vehicle)):
+        raise HTTPException(409, "Машина недоступна")
+    if call.vehicle and call.vehicle.status == VEHICLE_RESERVED and not call.vehicle.employee:
+        call.vehicle.status = VEHICLE_FREE
+    old = employee.vehicle
+    employee.return_vehicle = bool(old and old != target and old.status == VEHICLE_IN_USE)
+    if old and old != target and not employee.return_vehicle:
+        release_vehicle(employee)
+    call.vehicle = target
+    if target and target != old:
+        target.status = VEHICLE_RESERVED
+        if not employee.return_vehicle:
+            target.employee = employee
+    plan = assigned_route(call, get_graph(call.airport_icao))
+    if not plan:
+        raise HTTPException(409, ERROR_NO_ROUTE)
+    update_assigned_route(call, plan)
+    db.commit()
+    return to_response(call, db)
 
 
 @router.post(

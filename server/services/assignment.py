@@ -209,6 +209,10 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     # объекты после коммита (expire_on_commit=False), и связь, загруженная
     # раньше как пустая, осталась бы пустой: ответ на назначение отдавал бы
     # исполнителя и машину как None, хотя в базе они записаны.
+    if employee.waiting_lat is None:
+        employee.waiting_lat, employee.waiting_lon = employee.lat, employee.lon
+    employee.return_to_waiting = False
+    employee.return_vehicle = False
     call.assigned_employee = employee
     call.status = CALL_ASSIGNED
     call.eta_minutes = round(plan.minutes, 1)
@@ -237,6 +241,10 @@ def enqueue(db, call, employee):
     текущий вызов и всё, что уже стоит перед этим в очереди, и только
     потом поедет сюда.
     """
+    if employee.waiting_lat is None:
+        employee.waiting_lat, employee.waiting_lon = employee.lat, employee.lon
+    employee.return_to_waiting = False
+    employee.return_vehicle = False
     call.assigned_employee = employee
     call.status = CALL_QUEUED
     call.queued_at = utc_now()
@@ -309,10 +317,18 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
         replan_queue(db, employee)
         return
 
+    if closed_call.vehicle and not closed_call.vehicle.employee and closed_call.vehicle.status == VEHICLE_RESERVED:
+        closed_call.vehicle.status = VEHICLE_FREE
     graph = get_graph(employee.airport_icao)
     queue = queued_calls_of(db, employee)
     if not queue:
-        release_vehicle(employee, graph, closed_call.stand_node_id if park_at_stand else None)
+        if employee.is_training:
+            release_vehicle(employee, graph, closed_call.stand_node_id if park_at_stand else None)
+        else:
+            employee.return_vehicle = bool(employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE)
+            if not employee.return_vehicle:
+                release_vehicle(employee)
+            employee.return_to_waiting = employee.waiting_lat is not None
         employee.status = STATUS_FREE
         employee.busy_until = None
         return
@@ -360,6 +376,8 @@ def unassign(db, call, reason):
     call.unassign_reason = reason
     call.unassigned_at = utc_now()
 
+    if call.vehicle and not call.vehicle.employee and call.vehicle.status == VEHICLE_RESERVED:
+        call.vehicle.status = VEHICLE_FREE
     call.assigned_employee = None
     call.vehicle = None
     call.pickup_node_id = None
@@ -481,6 +499,16 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
     now = now or utc_now()
     age = timedelta(seconds=fix_age_s) if source == LOCATION_GPS and fix_age_s else timedelta(0)
 
+    if source == LOCATION_GPS and employee.location_source == LOCATION_GPS and employee.location_at:
+        seconds = (now - age - employee.location_at).total_seconds()
+        if seconds <= 0:
+            return
+        if 2 <= seconds <= 90 and employee.lat is not None:
+            speed = haversine_m(employee.lat, employee.lon, lat, lon) * 3.6 / seconds
+            if employee.has_vehicle and 1 <= speed <= 80:
+                employee.vehicle.speed_kmh = speed
+            elif not employee.has_vehicle and 1 <= speed <= 12:
+                employee.speed_kmh = speed
     employee.lat = lat
     employee.lon = lon
     employee.location_source = source
@@ -489,6 +517,59 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
     employee.updated_at = now
 
     pick_up_if_near(employee)
+
+
+def return_destination(employee):
+    if employee.return_vehicle and employee.vehicle:
+        return employee.vehicle.lat, employee.vehicle.lon, MODE_VEHICLE, "Верните спецтранспорт на исходную стоянку"
+    if employee.return_to_waiting and employee.waiting_lat is not None:
+        return employee.waiting_lat, employee.waiting_lon, MODE_WALK, "Вернитесь на место ожидания"
+    return None
+
+
+def navigation_leg(employee):
+    target = return_destination(employee)
+    if not target or employee.lat is None:
+        return None
+    lat, lon, mode, instruction = target
+    graph = get_graph(employee.airport_icao)
+    node, _ = graph.nearest_node(lat, lon, mode)
+    route = route_from_point(graph, employee.lat, employee.lon, node["id"], mode) if node else None
+    points = [{"lat": employee.lat, "lon": employee.lon}]
+    if not route:
+        return {"instruction": instruction + " — нет доступного маршрута", "route_points": []}
+    if route:
+        points.extend(graph.node(n) for n in route.node_ids)
+        points.append({"lat": lat, "lon": lon})
+    return {"instruction": instruction, "route_points": points}
+
+
+def refresh_navigation(db, employee):
+    from algorithm.geo import distance_to_segment
+    target = return_destination(employee)
+    call = working_call_of(db, employee)
+    if target:
+        if haversine_m(employee.lat, employee.lon, *target[:2]) > PICKUP_RADIUS_M:
+            return
+        if employee.return_vehicle and employee.vehicle:
+            old = employee.vehicle
+            old.status = VEHICLE_FREE
+            old.employee = None
+            employee.return_vehicle = False
+            if call and call.vehicle and call.vehicle.status == VEHICLE_RESERVED and not call.vehicle.employee:
+                call.vehicle.employee = employee
+        else:
+            employee.return_to_waiting = False
+    if not call or call.status == CALL_ARRIVED:
+        return
+    graph = get_graph(employee.airport_icao)
+    nodes = [graph.node(n) for n in call.route_node_ids or []]
+    segments = zip(nodes, nodes[1:])
+    if target or not any(a and b and distance_to_segment(employee.lat, employee.lon, a, b) <= 50
+                         for a, b in segments):
+        plan = assigned_route(call, graph)
+        if plan:
+            update_assigned_route(call, plan)
 
 
 def pick_up_if_near(employee):

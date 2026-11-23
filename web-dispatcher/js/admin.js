@@ -144,6 +144,9 @@ function el(id) {
 }
 
 function bindEvents() {
+  for (const id of ["people-search", "people-airport"]) {
+    el(id).addEventListener("input", () => renderPeople(state.people.users, state.people.employees));
+  }
   for (const button of document.querySelectorAll("#tabs button")) {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   }
@@ -548,7 +551,7 @@ function clearGraph() {
 // Роли учётных записей в порядке старшинства — для выбора в форме.
 const ACCOUNT_ROLES = ["admin", "local_admin", "shift_supervisor", "dispatcher"];
 const ENGINEER = "engineer";
-const ENGINEER_CARD_FIELDS = ["user-name", "user-mark", "user-types", "user-valid", "user-speed", "user-extra-marks"];
+const ENGINEER_CARD_FIELDS = ["user-name", "user-mark", "user-types", "user-valid"];
 
 /** Роли, которые текущий пользователь вправе назначать: ниже своей. */
 function assignableRoles() {
@@ -568,21 +571,21 @@ function canManageAccounts() {
 async function loadUsers() {
   el("users-scope").textContent =
     state.user.role === "admin" ? "· вся система" : `· ${state.user.airport_icao || "—"}`;
-  // Без аэропорта сессии карточек инженеров нет — квалификацию и допуски
-  // не изменить. Об этом надо сказать прямо, а не показывать неполный список.
-  el("users-airport-note").hidden = Boolean(state.user.airport_icao);
-
   try {
     const users = await Api.users();
     // Карточки сотрудников есть только в выбранном аэропорту.
-    let employees = [];
+    const employees = await Api.adminRoster();
     if (state.user.airport_icao) {
       // Весь состав аэропорта, а не только смена текущей сессии:
       // в учётных записях нужны все люди (учебные инженеры — нет).
-      employees = await Api.airportRoster();
+
       await loadGraphOnce();
       fillPlaces("user-place");
     }
+    const picker = el("people-airport");
+    const selected = picker.value;
+    picker.replaceChildren(new Option("Все доступные", ""), ...state.user.airports.map(a => new Option(a.icao, a.icao)));
+    picker.value = selected;
     state.people = { users, employees };
     renderPeople(users, employees);
   } catch (error) {
@@ -604,11 +607,19 @@ function renderPeople(users, employees) {
   const accountOf = new Map(
     users.filter((user) => user.employee_id).map((user) => [user.employee_id, user])
   );
+  const airport = el("people-airport").value;
+  const terms = el("people-search").value.toLocaleLowerCase().trim().split(/\s+/);
+  function matches(icao, fields) {
+    const text = fields.join(" ").toLocaleLowerCase();
+    return (!airport || airport === icao) && terms.every(term => text.includes(term));
+  }
   const cardIds = new Set(employees.map((employee) => employee.id));
   const accounts = users.filter(
-    (user) => !(user.role === ENGINEER && cardIds.has(user.employee_id))
+    (user) => !(user.role === ENGINEER && cardIds.has(user.employee_id)) && matches(user.airport_icao, [user.login, user.full_name, user.role, roleTitle(user.role)])
   );
 
+  employees = employees.filter(e => matches(e.airport_icao, [e.full_name, accountOf.get(e.id)?.login,
+    roleTitle(ENGINEER), ENGINEER, e.shift, ...e.qualifications.flatMap(q => [q.category, ...q.aircraft_types, q.valid_until])]));
   if (!accounts.length && !employees.length) {
     container.innerHTML = '<div class="empty">Никого нет</div>';
     return;
@@ -687,7 +698,7 @@ function engineerRow(employee, account) {
   const { row, actions } = personRow({
     online: Boolean(account && account.online),
     title: employee.full_name,
-    sub: `${account ? account.login : "без входа в приложение"} · ${marks || "без отметок"}`,
+    sub: `${employee.airport_icao} · ${account ? account.login : "без входа в приложение"} · ${marks || "без отметок"}`,
     role: ENGINEER,
     meta: `${SHIFT_NAMES[employee.shift] || employee.shift} · ${statusTitle(employee.status)}`,
   });
@@ -839,7 +850,17 @@ function startAccountEdit(user) {
  * только смену, место и присутствие на смене; квалификацию и ФИО —
  * администратор аэропорта.
  */
-function startEngineerEdit(employee, account) {
+async function startEngineerEdit(employee, account) {
+  if (employee.airport_icao !== state.user.airport_icao) {
+    try {
+      await Api.selectAirport(employee.airport_icao, state.user.shift || "day");
+      state.user = await Api.me();
+      state.graph = null;
+      fillAirportSwitch();
+      await loadGraphOnce();
+      fillPlaces("user-place");
+    } catch (error) { window.alert(error.detail); return; }
+  }
   resetUserForm();
   state.editingUser = { kind: "engineer", employee, account };
   el("user-form-card").hidden = false;
@@ -849,9 +870,6 @@ function startEngineerEdit(employee, account) {
   el("user-role").value = ENGINEER;
   el("user-role").disabled = true;
   el("user-shift").value = employee.shift;
-  el("user-speed").value = employee.speed_kmh ?? "";
-  el("user-extra-marks").value = employee.qualifications.slice(1).map(mark =>
-    [mark.category, mark.aircraft_types.join(", "), mark.valid_until].join(" | ")).join("\n");
   const mark = employee.qualifications[0] || null;
   if (mark) {
     el("user-mark").value = mark.category;
@@ -907,16 +925,10 @@ function engineerCard() {
   const qualifications = types.length ? [
     { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
   ] : [];
-  for (const row of el("user-extra-marks").value.split("\n").filter(line => line.trim())) {
-    const [category, aircraft, valid_until] = row.split("|").map(part => part.trim());
-    if (!category || !aircraft || !valid_until) return { error: "Проверьте строку дополнительного допуска" };
-    qualifications.push({ category, aircraft_types: aircraft.split(",").map(type => type.trim()), valid_until });
-  }
   return {
     full_name: el("user-name").value.trim(),
     shift: el("user-shift").value,
     qualifications,
-    speed_kmh: el("user-speed").value ? Number(el("user-speed").value) : null,
     lat: place.lat,
     lon: place.lon,
     on_shift: el("user-on-shift").checked,
@@ -1008,7 +1020,7 @@ async function saveEngineer({ employee, account }) {
   }
   // Начальнику смены сервер разрешает только смену и статус.
   const changes = canManageAccounts()
-    ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications, speed_kmh: card.speed_kmh }
+    ? { full_name: card.full_name, shift: card.shift, qualifications: [...card.qualifications, ...employee.qualifications.slice(1)] }
     : { shift: card.shift };
   // Снятие со смены передаётся и для занятого (его вызов вернётся к
   // подбору); «на смене» для занятого не шлём — он и так на смене.
