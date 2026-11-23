@@ -242,8 +242,8 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId) {
-    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId];
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining = routePoints) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -276,7 +276,7 @@ class RouteMap {
     this.drawTiles();
 
     if (points.length >= 2) {
-      this.drawLegs(points, pickupNodeId);
+      this.drawLegs(remaining || [], pickupNodeId);
     }
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));

@@ -31,12 +31,21 @@ class LocalNavigation {
     const original = payload?.route_points || [];
     if (!pos || !original.length || !this.nodes) return original;
     const job = payload.call;
-    const signature = JSON.stringify([job?.id, payload.instruction, original.map(p => p.id || [p.lat,p.lon]), job?.route_stops, payload.vehicle?.pickup]);
+    const signature = JSON.stringify([job?.id, payload.instruction, original.map(p => p.id || [p.lat,p.lon]), job?.route_stops, job?.waypoints, payload.vehicle?.pickup]);
     if (signature !== this.signature) {
       this.signature = signature;
       this.stops = (payload.instruction ? [] : job?.route_stops || []).filter(s =>
         !(job.waypoints || []).some(w => w.node_id === s.node_id && w.done_at) &&
         !(s.kind === "warehouse" && job.tools_taken_at)).slice();
+      if (!payload.instruction) {
+        // Некоторые обязательные точки не требуют посадки или другой остановки.
+        const indexOnRoute = id => original.findIndex(p => p.id === id);
+        for (const waypoint of job?.waypoints || []) {
+          if (waypoint.done_at || this.stops.some(s => s.node_id === waypoint.node_id)) continue;
+          const next = this.stops.findIndex(s => indexOnRoute(s.node_id) > indexOnRoute(waypoint.node_id));
+          this.stops.splice(next < 0 ? this.stops.length : next, 0, waypoint);
+        }
+      }
       this.driving = payload.vehicle && !payload.vehicle.pickup;
       if (payload.instruction) this.driving = payload.instruction.startsWith("Верните спецтранспорт");
       this.path = null;

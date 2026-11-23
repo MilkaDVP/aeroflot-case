@@ -40,6 +40,7 @@ from constants import (
     STAGE_WAITING_PARTS,
     STATUS_ASSIGNED,
     STATUS_FREE,
+    TRAVEL_CURRENT,
     TRAVEL_WALK,
     TRAVEL_WITH_LEAD,
     STATUSES_BUSY,
@@ -207,6 +208,10 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
     """
     if employee.lat is None or employee.lon is None:
         return None, None
+    if travel == TRAVEL_CURRENT:
+        if not employee.has_vehicle:
+            raise HTTPException(409, "У инженера больше нет этого транспорта")
+        return plan_for(graph, employee.as_algorithm_dict(), stand_node_id, [], depots, waypoints), None
     if travel == TRAVEL_WALK:
         return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id, depots, waypoints), None
     if travel == TRAVEL_WITH_LEAD:

@@ -57,3 +57,14 @@ test("speech announces approach once per phase and respects mute", () => {
   context.updateGuidance({...cue,key:"new"});
   assert.equal(spoken.length, 3);
 });
+
+test("a later crossing cannot skip a pending waypoint; travelled metres disappear inside an edge", () => {
+  const {context} = setup();
+  const payload = {call:{...job.call, waypoints:[{node_id:"b", name:"Склад 2"}]}};
+  const halfway = {...a, lat:55.0005};
+  const crossing = [a,b,c,halfway];
+  const remainder = context.remainingLine(payload, crossing, halfway);
+  assert.ok(Math.abs(remainder[0].lat-halfway.lat)<1e-8);
+  assert.equal(remainder[1].id, "b");
+  assert.equal(context.nextManeuver(payload,crossing,halfway).action, "Пройдите точку Склад 2");
+});

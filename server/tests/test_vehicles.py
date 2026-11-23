@@ -97,6 +97,15 @@ class TestVehiclePool(ApiTestCase):
         self.assertFalse(sokolov["pickup"])
         self.assertEqual(sokolov["vehicle_call_sign"], "ТМ-01")
         self.assertEqual(len(sokolov["route"]["legs"]), 1)
+        response = self.client.post(
+            f"/api/calls/{call['id']}/assign",
+            json={"employee_id": sokolov["employee_id"], "travel": "current_vehicle",
+                  "override_reason": "Поедет на ТМ-01"},
+            headers=auth_header(self.supervisor),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["vehicle_call_sign"], "ТМ-01")
+        self.assertIsNone(response.json()["pickup_node_id"])
 
     # --- Резерв и возврат ---
 

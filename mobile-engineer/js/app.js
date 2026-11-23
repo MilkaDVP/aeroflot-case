@@ -821,7 +821,7 @@ function targetPoint() {
  * координат ещё нет — карта центрируется на аэропорте, чтобы человеку
  * было куда ткнуть пальцем в режиме имитации.
  */
-function drawRoute() {
+function drawRoute(position = state.position) {
   const payload = state.call || state.returnLeg;
   const points = state.offline || Date.now() - state.snapshotAt > CONFIG.pollIntervalMs * 2
     ? localNavigation.route(payload, state.position) : payload?.route_points || [];
@@ -830,7 +830,7 @@ function drawRoute() {
   routeMap.render(
     points,
     targetPoint(),
-    state.position,
+    position,
     state.airportPoint,
     state.call ? state.call.vehicle : null,
     state.call ? state.call.call.pickup_node_id : null,
@@ -838,7 +838,8 @@ function drawRoute() {
     state.call && !state.call.call.tools_taken_at
       ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
         || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id)
-      : null
+      : null,
+    remainingLine(payload, points, position)
   );
   el("map-hint").hidden = locator.mode !== "simulation";
 }
@@ -944,7 +945,27 @@ el("call-action").addEventListener("click", async () => {
  * GPS выдаёт точки чаще, чем нужно диспетчеру, а каждая отправка —
  * это радио и батарея. Ограничение частоты здесь, а не на сервере.
  */
+let animationFrame = 0, displayedPosition = null;
+function animatePosition(position, previous) {
+  cancelAnimationFrame(animationFrame);
+  if (!previous || haversineM(previous.lat, previous.lon, position.lat, position.lon) > 150) {
+    displayedPosition = position;
+    drawRoute(position);
+    return;
+  }
+  const start = performance.now();
+  const from = displayedPosition || previous;
+  function frame(now) {
+    const fraction = Math.min(1, (now-start)/450);
+    displayedPosition = {...position, lat:from.lat+(position.lat-from.lat)*fraction,
+      lon:from.lon+(position.lon-from.lon)*fraction};
+    drawRoute(displayedPosition);
+    if (fraction < 1) animationFrame = requestAnimationFrame(frame);
+  }
+  animationFrame = requestAnimationFrame(frame);
+}
 function onPosition(position) {
+  const previous = state.position;
   state.position = position;
   const payload = state.call;
   if ((state.offline || Date.now() - state.snapshotAt > 2 * CONFIG.pollIntervalMs) &&
@@ -962,7 +983,7 @@ function onPosition(position) {
     clearGeoNotice();
   }
   updateDistance();
-  drawRoute();
+  animatePosition(position, previous);
   if (!state.call) {
     renderIdle();
   }
@@ -1011,7 +1032,7 @@ function onGeoError(message) {
   // Отказ GPS на перроне — обычное дело, а не авария: вместо красной
   // плашки поверх маршрута — спокойная строка с действием.
   el("geo-notice").hidden = false;
-  el("geo-mode").textContent = "Место: нет GPS";
+  el("geo-mode").textContent = "GPS";
   el("geo-mode").classList.add("is-warn");
   el("geo-error").hidden = false;
   el("geo-error").textContent = message;
@@ -1021,7 +1042,7 @@ function onGeoError(message) {
 function clearGeoNotice() {
   el("geo-notice").hidden = true;
   el("geo-mode").classList.remove("is-warn");
-  el("geo-mode").textContent = locator.mode === "simulation" ? "Место: вручную" : "Место: GPS";
+  el("geo-mode").textContent = locator.mode === "simulation" ? "Ручной" : "GPS";
 }
 
 /** Из строки «GPS недоступен»: сразу ручной режим и подсказка, что делать. */
@@ -1129,10 +1150,10 @@ function setGeoMode(mode) {
   if (mode === "gps") {
     enableOrientation();
     locator.startGps();
-    el("geo-mode").textContent = "Место: GPS";
+    el("geo-mode").textContent = "GPS";
     el("geo-explain").textContent = "Ваше место определяет приёмник телефона.";
   } else {
-    el("geo-mode").textContent = "Место: вручную";
+    el("geo-mode").textContent = "Ручной";
     el("geo-mode").classList.remove("is-warn");
     el("geo-notice").hidden = true;
     el("geo-explain").textContent = "Нажмите «Готово» и коснитесь карты там, где вы стоите.";
@@ -1225,6 +1246,8 @@ async function logout() {
 }
 
 function stopWork() {
+  cancelAnimationFrame(animationFrame);
+  displayedPosition = null;
   updateGuidance(null);
   window.removeEventListener("deviceorientationabsolute", updateOrientation);
   window.removeEventListener("deviceorientation", updateOrientation);

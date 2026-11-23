@@ -478,7 +478,10 @@ function buildCandidateRow(candidate, ctx) {
  */
 function travelChoice(candidate, order, ctx) {
   const options = [];
-  if (candidate.vehicle_call_sign) {
+  const person = ctx.employees?.find(e => e.id === candidate.employee_id);
+  if (person?.has_vehicle) {
+    options.push(["auto", "Авто"], ["current_vehicle", person.vehicle_call_sign], ["walk", "пешком"]);
+  } else if (candidate.vehicle_call_sign) {
     options.push(["auto", candidate.pickup ? `через ${candidate.vehicle_call_sign}` : candidate.vehicle_call_sign]);
     options.push(["walk", "пешком"]);
   }

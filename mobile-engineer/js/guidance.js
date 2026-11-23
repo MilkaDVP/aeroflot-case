@@ -6,30 +6,43 @@ const STOP_GUIDANCE = {
   pass: ["●", "Пройдите контрольную точку"],
 };
 
+function remainingLine(payload, path, pos) {
+  if (!pos || path.length < 2) return path;
+  const call = payload?.call;
+  const waypoint = call?.waypoints?.find(w => !w.done_at);
+  const pending = new Set(payload?.instruction ? [] : [waypoint?.node_id, payload?.vehicle?.pickup && call?.pickup_node_id].filter(Boolean));
+  const stop = path.findIndex(p => pending.has(p.id));
+  const limit = stop < 0 ? path.length - 1 : stop;
+  let next = 0, first = path[0], closest = Infinity;
+  const scale = Math.cos(pos.lat * Math.PI / 180);
+  for (let i = 1; i <= limit; i++) {
+    const a = path[i-1], b = path[i];
+    const dx = (b.lon-a.lon)*scale, dy = b.lat-a.lat;
+    const t = Math.max(0, Math.min(1, ((pos.lon-a.lon)*scale*dx + (pos.lat-a.lat)*dy)/(dx*dx+dy*dy)));
+    if (!Number.isFinite(t)) continue;
+    const projected = {lat:a.lat+t*dy, lon:a.lon+t*(b.lon-a.lon)};
+    const offset = haversineM(pos.lat,pos.lon,projected.lat,projected.lon);
+    if (offset < closest) {
+      closest = offset;
+      next = i;
+      first = projected;
+      if (t === 0) { next = i-1; first = path[next]; }
+    }
+  }
+  return next && first !== path[next] ? [first,...path.slice(next)] : path.slice(next);
+}
+
 function nextManeuver(payload, points, pos) {
   if (!pos || !points.length || !payload ||
       (!payload.instruction && payload.call?.status !== "accepted")) return null;
   // Сервер может прислать точку борта поверх последнего узла.
   const distance = (a, b) => haversineM(a.lat, a.lon, b.lat, b.lon);
   const path = [];
-  for (const p of points) {
+  for (const p of remainingLine(payload, points, pos)) {
     if (!path.length || distance(path.at(-1), p) > 0.5) path.push(p);
     else if (p.id && !path.at(-1).id) path[path.length-1] = p;
   }
-  let next = 0, metres = distance(pos, path[0]), closest = Infinity;
-  const scale = Math.cos(pos.lat * Math.PI / 180);
-  for (let i = 1; i < path.length; i++) {
-    const a = path[i-1], b = path[i];
-    const dx = (b.lon-a.lon)*scale, dy = b.lat-a.lat;
-    const t = Math.max(0, Math.min(1, ((pos.lon-a.lon)*scale*dx + (pos.lat-a.lat)*dy)/(dx*dx+dy*dy)));
-    const offset = distance(pos, {lat:a.lat+t*dy, lon:a.lon+t*(b.lon-a.lon)});
-    if (offset < closest) {
-      closest = offset;
-      next = i;
-      metres = offset + (1-t)*distance(a,b);
-      if (t === 0) { next = i-1; metres = offset; }
-    }
-  }
+  let next = 0, metres = distance(pos,path[0]);
   const call = payload.call;
   for (let i = next; i < path.length; i++) {
     const p = path[i], prev = path[i-1], after = path[i+1];
@@ -43,6 +56,10 @@ function nextManeuver(payload, points, pos) {
     if (stops.length) {
       icon = STOP_GUIDANCE[stops[0].kind][0];
       action = stops.map(s => STOP_GUIDANCE[s.kind][1]).join(". ");
+    } else if (!payload.instruction && call?.waypoints?.some(w => !w.done_at && w.node_id === p.id)) {
+      icon = "●";
+      const waypoint = call.waypoints.find(w => !w.done_at && w.node_id === p.id);
+      action = waypoint.kind === "warehouse" ? "Заберите инструмент" : "Пройдите точку " + (waypoint.name || waypoint.node_id);
     } else if (!after) {
       icon = "⚑";
       action = payload.instruction || "Подойдите к борту";
@@ -80,7 +97,8 @@ function updateGuidance(cue) {
   document.getElementById("nav-distance").textContent = line;
   document.getElementById("nav-next").textContent = (near ? "" : "Затем " + cue.icon + " ") + cue.action;
   voiceButton.hidden = !voice || !window.SpeechSynthesisUtterance;
-  voiceButton.textContent = voiceEnabled ? "Звук вкл." : "Звук выкл.";
+  voiceButton.textContent = voiceEnabled ? "🔊" : "🔇";
+  voiceButton.setAttribute("aria-label", voiceEnabled ? "Отключить озвучку" : "Включить озвучку");
   voiceButton.setAttribute("aria-pressed", String(voiceEnabled));
   const band = near ? "now" : cue.metres <= 50 ? "soon" : "ahead";
   const rank = {ahead: 1, soon: 2, now: 3}[band];

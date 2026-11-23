@@ -510,6 +510,7 @@ function leadVehicle() {
   if (!lead || state.travel[leadId] === "walk") {
     return null;
   }
+  if (state.travel[leadId] === "current_vehicle") return state.employees.find(e => e.id === leadId)?.vehicle_call_sign;
   return lead.vehicle_call_sign || null;
 }
 
@@ -518,6 +519,7 @@ function panelContext() {
   return {
     picked: state.picked,
     travel: state.travel,
+    employees: state.employees,
     leadVehicle: leadVehicle(),
     adding: !isAssignable(state.selectedCall),
     onPick: pickCandidate,
