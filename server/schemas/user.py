@@ -20,6 +20,7 @@ class UserCreateRequest(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
+    login: str | None = Field(default=None, min_length=1)
     """Правка учётной записи: ФИО, новый пароль, роль. Всё необязательно."""
 
     full_name: str | None = None

@@ -95,6 +95,7 @@ def to_response(employee):
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
         is_training=employee.is_training,
+        always_on_shift=employee.always_on_shift,
         held=bool(employee.held),
     )
 
@@ -227,6 +228,7 @@ def create_employee(
     employee = Employee(
         full_name=payload.full_name.strip(),
         airport_icao=airport.icao,
+        always_on_shift=payload.on_shift,
         shift=payload.shift,
         status=STATUS_FREE if payload.on_shift else STATUS_OFFLINE,
         qualifications=[item.model_dump() for item in payload.qualifications],
@@ -294,6 +296,38 @@ def update_employee(
     ensure_card_editor(
         context, employee, [field for field, value in changes.items() if value is not None]
     )
+
+    account = db.query(User).filter_by(employee_id=employee.id).first()
+    login = changes.pop("login", None)
+    password = changes.pop("password", None)
+    if login or password:
+        if not account and not (login and password):
+            raise HTTPException(422, ERROR_LOGIN_PAIR)
+        if login:
+            existing = db.query(User).filter_by(login=login.strip()).first()
+            if existing and existing != account:
+                raise HTTPException(409, ERROR_LOGIN_TAKEN.format(login=login))
+        if not account:
+            account = User(role=ROLE_ENGINEER, employee_id=employee.id, full_name=employee.full_name)
+            account.airports.append(db.get(Airport, employee.airport_icao))
+            db.add(account)
+        if login:
+            account.login = login.strip()
+        if password:
+            from api.users import drop_sessions
+            account.password_hash = hash_password(password)
+            if account.id:
+                drop_sessions(db, account)
+    if account and changes.get("full_name"):
+        account.full_name = changes["full_name"]
+    if "always_on_shift" in changes:
+        online = account and account.id and db.query(AuthSession.token).filter_by(user_id=account.id).first()
+        if changes["always_on_shift"] or online:
+            if employee.status == STATUS_OFFLINE:
+                employee.status = STATUS_FREE
+            employee.shift_ends_at = None
+        elif employee.status != STATUS_OFFLINE:
+            end_shift(db, employee, "Смена завершена")
 
     if "qualifications" in changes and changes["qualifications"] is not None:
         changes["qualifications"] = [

@@ -31,6 +31,7 @@ class RouteParticipant(Base):
     is_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     __mapper_args__ = {"polymorphic_on": is_training, "polymorphic_abstract": True}
 
+    always_on_shift: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String)

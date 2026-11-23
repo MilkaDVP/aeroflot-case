@@ -87,9 +87,9 @@ async def lifespan(app: FastAPI):
     # Наполнение базы при первом запуске. Жюри разворачивает проект одной
     # командой и сразу видит рабочую систему, а не пустые экраны.
     if os.environ.get("SEED_ON_START", "1") == "1":
-        from seed import seed_if_empty
+        from seed import initialize_base
 
-        seed_if_empty()
+        initialize_base()
 
     loaded = preload_all()
 

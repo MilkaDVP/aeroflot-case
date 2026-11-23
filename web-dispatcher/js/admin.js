@@ -781,7 +781,7 @@ function syncUserForm() {
   // Инженер заводится в аэропорту сессии: места берутся из его схемы.
   el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || editing !== null;
 
-  el("user-login-row").hidden = editing !== null;
+  el("user-login-row").hidden = editing !== null && !canManageAccounts();
   el("user-login").required = !engineer && editing === null;
   el("user-password").required = !engineer && editing === null;
   el("user-login-label").textContent = engineer
@@ -822,6 +822,7 @@ function startAccountEdit(user) {
   fillRoleSelect(user.role);
   el("user-password").value = "";
   el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  el("user-login").value = user.login;
   openUserEdit(`Изменить: ${user.login}`);
 }
 
@@ -847,17 +848,18 @@ function startEngineerEdit(employee, account) {
     el("user-valid").value = mark.valid_until;
   }
   el("user-place").value = nearestPlaceId(employee) || el("user-place").value;
-  el("user-on-shift").checked = employee.status !== "offline";
+  el("user-on-shift").checked = employee.always_on_shift;
   // Занятого снять со смены может только технический администратор:
   // сервер вернёт его вызовы к подбору (services/shifts.end_shift).
   // Остальным это недоступно — сервер ответит отказом.
-  el("user-on-shift").disabled = isBusyStatus(employee.status) && state.user.role !== "admin";
+  el("user-on-shift").disabled = !canManageAccounts();
   for (const id of ENGINEER_CARD_FIELDS) el(id).disabled = !canManageAccounts();
 
   // Новый пароль задаётся, только если вход у инженера есть.
-  el("user-password-row").hidden = !(account && canManageAccounts());
+  el("user-password-row").hidden = !canManageAccounts();
   el("user-password").value = "";
   el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  el("user-login").value = account?.login || "";
   openUserEdit(`Изменить: ${employee.full_name}`);
   setNote("user-note", engineerHint(employee), "");
 }
@@ -945,7 +947,7 @@ async function createAccount() {
 }
 
 async function saveAccount(user) {
-  const changes = { full_name: el("user-name").value.trim() };
+  const changes = { full_name: el("user-name").value.trim(), login: el("user-login").value.trim() };
   if (el("user-password").value) changes.password = el("user-password").value;
   if (el("user-role").value !== user.role) changes.role = el("user-role").value;
   const updated = await Api.updateUser(user.id, changes);
@@ -991,16 +993,17 @@ async function saveEngineer({ employee, account }) {
     : { shift: card.shift };
   // Снятие со смены передаётся и для занятого (его вызов вернётся к
   // подбору); «на смене» для занятого не шлём — он и так на смене.
-  if (!card.on_shift || !isBusyStatus(employee.status)) {
-    changes.status = card.on_shift ? "free" : "offline";
+  if (canManageAccounts()) {
+    changes.always_on_shift = card.on_shift;
+    const login = el("user-login").value.trim();
+    if (login && login !== account?.login) changes.login = login;
+    if (el("user-password").value) changes.password = el("user-password").value;
   }
   const updated = await Api.updateEmployee(employee.id, changes);
   if (employee.lat !== card.lat || employee.lon !== card.lon) {
     await Api.sendLocation(employee.id, card.lat, card.lon);
   }
-  if (account && el("user-password").value) {
-    await Api.updateUser(account.id, { password: el("user-password").value });
-  }
+
   return `${updated.full_name}: изменения сохранены`;
 }
 
