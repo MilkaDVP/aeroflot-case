@@ -93,12 +93,17 @@ class TestTeamLifecycle(SupportCase):
         return call["support"][0]["call_id"]
 
     def arrive(self, call_id):
-        response = self.client.patch(
-            f"/api/calls/{call_id}/status",
-            json={"status": "arrived"},
-            headers=auth_header(self.dispatcher),
-        )
-        self.assertEqual(response.status_code, 200, response.text)
+        from database import SessionLocal
+        from models.call import Call
+        from services import mentor
+        from services.assignment import mark_arrived
+
+        with SessionLocal() as db:
+            call = db.get(Call, call_id)
+            call.status = "arrived"
+            if mark_arrived(db, call.assigned_employee, call):
+                mentor.review_arrival(db, call, call.assigned_employee)
+            db.commit()
 
     def test_срок_исполняет_первый_прибывший(self):
         # Второй приехал первым: основной ещё в пути, но тревоги по вызову
@@ -121,17 +126,17 @@ class TestTeamLifecycle(SupportCase):
         self.assertEqual(len(arrivals), 1)
         self.assertEqual(arrivals[0]["verdict"], "good")
 
-    def test_закрытие_основного_освобождает_обоих(self):
+    def test_отмена_основного_освобождает_обоих(self):
         call, first, second = self.team()
         self.arrive(call["id"])
         self.client.patch(
             f"/api/calls/{call['id']}/status",
-            json={"status": "closed"},
-            headers=auth_header(self.dispatcher),
+            json={"status": "cancelled"},
+            headers=auth_header(self.supervisor),
         )
         self.assertEqual(self.employee(first["employee_id"])["status"], "free")
         self.assertEqual(self.employee(second["employee_id"])["status"], "free")
-        self.assertEqual(self.call(self.support_call_id(call))["status"], "closed")
+        self.assertEqual(self.call(self.support_call_id(call))["status"], "cancelled")
 
     def test_снятие_второго_оставляет_основного(self):
         call, first, second = self.team()

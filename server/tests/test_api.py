@@ -330,13 +330,13 @@ class TestCallFlow(ApiTestCase):
         self.assertEqual(assignee["status"], "assigned")
         self.assertIsNotNone(assignee["busy_until"])
 
-        # Закрытие возвращает сотрудника в строй.
+        # Отмена возвращает сотрудника в строй.
         closed = self.client.patch(
             f"/api/calls/{call['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(token),
         ).json()
-        self.assertEqual(closed["status"], "closed")
+        self.assertEqual(closed["status"], "cancelled")
 
         employees = self.client.get("/api/employees", headers=auth_header(token)).json()
         assignee = next(item for item in employees if item["id"] == best_id)

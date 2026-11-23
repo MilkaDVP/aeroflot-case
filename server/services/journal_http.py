@@ -29,10 +29,12 @@ INTAKE_PATTERNS = (
     re.compile(r"^/api/intake/"),
     re.compile(r"/location$"),
     re.compile(r"^/api/me/"),
+    re.compile(r"^/api/v1/track$"),
 )
 # Успех этих запросов не пишется: поток данных или явная запись в коде.
 QUIET_PATTERNS = (
     re.compile(r"/location$"),
+    re.compile(r"^/api/v1/track$"),
     re.compile(r"/(claim|release|read)$"),
     re.compile(r"^/api/intake/"),
     re.compile(r"^/api/auth/login$"),
@@ -228,7 +230,7 @@ class JournalMiddleware:
             airport = request_body.get("airport_icao")
             if isinstance(airport, str):
                 found["airport"] = airport.upper()
-        if path.startswith("/api/intake/") and found["actor"] is None:
+        if path.startswith(("/api/intake/", "/api/v1/track")) and found["actor"] is None:
             found["actor"] = {"id": None, "name": "Внешняя система", "role": "external"}
 
         route = scope.get("route")

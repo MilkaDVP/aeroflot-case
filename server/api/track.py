@@ -32,6 +32,11 @@ def check_key(x_track_key: str | None = Header(default=None)):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный X-Track-Key")
 
 
+async def read_body(request: Request):
+    """Тело целиком — до захвата базы: медленный клиент не должен её держать."""
+    return await request.body()
+
+
 def _result(point, applied):
     return {"accepted": True, "applied": applied, "obj": point["obj"], "t": format_time(point["t"])}
 
@@ -54,7 +59,10 @@ def _result(point, applied):
         }
     },
 )
-async def track(request: Request, db: Session = Depends(get_dispatch_db)):
+def track(
+    raw: bytes = Depends(read_body),
+    db: Session = Depends(get_dispatch_db),
+):
     """
     Одна точка → объект результата; пакет {"points": [...]} → массив
     результатов в порядке точек.
@@ -66,7 +74,7 @@ async def track(request: Request, db: Session = Depends(get_dispatch_db)):
     - всё верно → 200, accepted: true, applied: true.
     """
     try:
-        body = json.loads(await request.body())
+        body = json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Тело запроса — не JSON")
 

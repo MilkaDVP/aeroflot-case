@@ -659,7 +659,7 @@ function fillExecutorDrawer(box) {
 
 document.getElementById("cancel-call").addEventListener("click", async () => {
   const call = state.selectedCall;
-  if (!call || !await askDialog({
+  if (!call || workStartedRefusal(call, true) || !await askDialog({
     title: `Отменить вызов №${call.id} к борту ${call.board_number}?`,
     text: "Назначения будут освобождены. Вызов останется в истории.",
     confirm: "Отменить вызов",
@@ -672,6 +672,14 @@ document.getElementById("cancel-call").addEventListener("click", async () => {
     showToast(error.detail, true);
   }
 });
+
+/** Работы начаты, а роль не та: объясняем сразу, не спрашивая причину. */
+function workStartedRefusal(call, team) {
+  const started = call.status === "arrived" || (team && (call.support || []).some((item) => item.status === "arrived"));
+  if (!started || roleAtLeast(Session.user?.role, "shift_supervisor")) return false;
+  showToast("Работы начаты: решение за начальником смены", true);
+  return true;
+}
 
 /** Кнопка в меню учитывает всех выбранных инженеров. */
 function updateAssignButton() {
@@ -914,7 +922,7 @@ async function switchOnto(busy) {
  */
 async function unassignSelected() {
   const call = state.selectedCall;
-  if (!call) {
+  if (!call || workStartedRefusal(call, true)) {
     return;
   }
   const reason = await askDialog({
@@ -1016,6 +1024,7 @@ async function assignPicked() {
 
 /** Снятие второго инженера: основной исполнитель остаётся на вызове. */
 async function removeSupport(member) {
+  if (workStartedRefusal(member)) return;
   const callId = state.selectedCall.id;
   closePopover();
   const reason = await askDialog({

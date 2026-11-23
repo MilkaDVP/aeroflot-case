@@ -173,7 +173,7 @@ class TestQueue(ApiTestCase):
 
         response = self.client.patch(
             f"/api/calls/{first['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.supervisor),
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -185,7 +185,7 @@ class TestQueue(ApiTestCase):
         first = self.busy_sokolov()
         self.client.patch(
             f"/api/calls/{first['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.supervisor),
         )
         sokolov = self.employee(SOKOLOV)
@@ -198,7 +198,7 @@ class TestQueue(ApiTestCase):
 
         self.client.patch(
             f"/api/calls/{second['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.supervisor),
         )
         self.assertEqual(self.employee(SOKOLOV)["status"], "assigned")

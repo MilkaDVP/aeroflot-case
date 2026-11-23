@@ -230,10 +230,13 @@ function enterWork() {
   // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
   window.addEventListener("online", refresh);
   setGeoMode("gps");
+  keepScreenOn();
+  document.addEventListener("visibilitychange", keepScreenOn);
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
   function tick() {
     checkAircraftArrival();
+    if (el("geo-notice").hidden) renderAccuracy();
     updateCountdown();
     const remaining = Date.parse(state.user?.shift_ends_at) - Date.now();
     el("extend-shift").hidden = !(remaining <= 15 * 60000);
@@ -404,7 +407,7 @@ function renderWork() {
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
   const current = state.call?.call;
-  el("call-action").hidden = !current || !ACTIONS[current.status];
+  el("call-action").hidden = !actionStep(current);
   el("decline-call").hidden = current?.status !== "assigned";
   el("chat-open").hidden = !hasCall;
   if (!hasCall) {
@@ -454,7 +457,7 @@ function renderWork() {
     call.eta_minutes === null ? "—" : `${formatMinutes(call.eta_minutes)} мин`;
   renderTools(call);
 
-  const step = ACTIONS[call.status];
+  const step = actionStep(call);
   el("call-action").textContent = step ? step.label : "Ожидание";
   el("call-action").disabled = !step;
 
@@ -478,12 +481,14 @@ function renderAtAircraft(call) {
     button.disabled = !atAircraft && button.id !== "problem-open";
   }
   el("aog-toggle").classList.toggle("active", Boolean(call.aog));
+  el("parts-toggle").classList.toggle("active", call.work_stage === "waiting_parts");
+  el("tools-toggle").classList.toggle("active", Boolean(call.missing_tools));
   for (const button of el("mel-switch").querySelectorAll("button")) {
     button.classList.toggle("active", button.dataset.mel === call.mel_category);
   }
   const hint = el("report-hint");
   hint.hidden = atAircraft && !hint.dataset.ask;
-  hint.textContent = atAircraft ? "Выберите категорию MEL" : "AOG и MEL — после прибытия к борту";
+  hint.textContent = atAircraft ? "Выберите категорию MEL" : "Отметки — после прибытия к борту";
 }
 
 function setMel(category) {
@@ -491,6 +496,29 @@ function setMel(category) {
   if (!call || call.status !== "arrived") return;
   delete el("report-hint").dataset.ask;
   recordAction("assessment", { mel_category: category });
+}
+
+function toggleMissingTools() {
+  const call = state.call && state.call.call;
+  if (!call || call.status !== "arrived") return;
+  recordAction("equipment", { missing_tools: !call.missing_tools });
+}
+
+/** Пока включено, начальник смены может отправить инженера на срочный борт. */
+async function toggleWaitingParts() {
+  const call = state.call && state.call.call;
+  if (!call || call.status !== "arrived") return;
+  const button = el("parts-toggle");
+  button.disabled = true;
+  el("chat-error").hidden = true;
+  try {
+    await Api.setStage(call.work_stage === "waiting_parts" ? "repair" : "waiting_parts");
+    await refresh();
+  } catch (error) {
+    showSheetError("chat-error", error);
+  } finally {
+    button.disabled = state.call?.call.status !== "arrived";
+  }
 }
 
 function openProblem() {
@@ -936,24 +964,71 @@ el("decline-call").onclick = async () => {
   if (await askConfirm("Вернуть вызов диспетчеру?", "Отказаться") && state.call?.call.id === id && state.call.call.status === "assigned") await recordAction("declined");
 };
 
-let arrivalKey = "", insideSince = 0;
+let arrivalKey = "", insideSince = 0, arrival = { manual: false, hint: "" };
+
+/** Следующий шаг инженера — что на главной кнопке. */
+function actionStep(call) {
+  if (!call) return null;
+  if (call.status === "accepted") return arrival.manual ? { label: "Я у борта", action: "arrived" } : null;
+  return ACTIONS[call.status] || null;
+}
+
+/** Чем подтверждается прибытие: способ и место — в журнал. */
+function arrivalFields(mode) {
+  const pos = locator.last;
+  if (!pos || (pos.source === "gps" && Date.now() - pos.measuredAt > ARRIVAL_HOLD_MS)) return { arrival: mode };
+  const fields = { arrival: mode, lat: pos.lat, lon: pos.lon };
+  if (Number.isFinite(pos.accuracy)) fields.accuracy_m = pos.accuracy;
+  return fields;
+}
+
+/** Ближайшая к точке стоянка — та, где борт (или схема ещё не загружена). */
+function targetIsNearest(pos, target) {
+  if (!localNavigation.nodes) return false;
+  const reach = haversineM(pos.lat, pos.lon, target.lat, target.lon);
+  for (const node of localNavigation.nodes.values()) {
+    if (node.type !== "stand" || haversineM(node.lat, node.lon, target.lat, target.lon) < 5) continue;
+    if (haversineM(pos.lat, pos.lon, node.lat, node.lon) < reach) return false;
+  }
+  return true;
+}
+
 function checkAircraftArrival() {
   const payload = state.call, call = payload?.call, pos = locator.last, target = payload?.aircraft_point;
   const key = [call?.id, target?.lat, target?.lon, pos?.source].join("/");
-  const valid = call?.status === "accepted" && pos && target && !payload.instruction &&
-    !payload.vehicle?.pickup && !(call.waypoints || []).some(p => !p.done_at) &&
-    (pos.source !== "gps" || (Date.now() - pos.measuredAt <= 15000 && pos.accuracy <= 25)) &&
-    haversineM(pos.lat, pos.lon, target.lat, target.lon) <= 25;
-  if (!valid || key !== arrivalKey) insideSince = 0;
+  if (key !== arrivalKey) insideSince = 0;
   arrivalKey = key;
-  if (!valid) return;
-  insideSince ||= Date.now();
-  if (Date.now() - insideSince >= 10000) recordAction("arrived");
+  if (call?.status !== "accepted" || payload.instruction) {
+    insideSince = 0;
+    arrival = { manual: false, hint: "" };
+  } else {
+    arrival = arrivalCheck(pos, target, insideSince, Date.now(), Boolean(pos && target && targetIsNearest(pos, target)));
+    // Машина не забрана или точка не пройдена — сама не засчитывается.
+    if (payload.vehicle?.pickup || (call.waypoints || []).some((p) => !p.done_at)) {
+      arrival = { ...arrival, since: 0, done: false, hint: arrival.left == null ? arrival.hint : "Пройдены не все точки маршрута" };
+    }
+    insideSince = arrival.since;
+  }
+  renderArrival(call);
+  if (arrival.done) recordAction("arrived", arrivalFields("auto"));
+}
+
+/** Подсказка о прибытии и кнопка «Я у борта»: меняются каждую секунду. */
+function renderArrival(call) {
+  const hint = el("arrival-hint");
+  const text = call?.status === "accepted" ? arrival.hint : "";
+  hint.hidden = !text;
+  hint.textContent = text;
+  if (call?.status !== "accepted") return;
+  const step = actionStep(call), button = el("call-action");
+  button.hidden = !step;
+  button.disabled = !step;
+  if (step) button.textContent = step.label;
 }
 
 el("call-action").addEventListener("click", async () => {
   const call = state.call && state.call.call;
-  const step = call && ACTIONS[call.status];
+  const step = actionStep(call);
   if (!step) {
     return;
   }
@@ -967,6 +1042,13 @@ el("call-action").addEventListener("click", async () => {
   // Закрытие необратимо для инженера, а кнопка — во всю ширину экрана:
   // случайное касание в перчатке закрывало вызов без вопросов.
   if (step.action === "closed" && !(await askConfirm(CLOSE_CONFIRM, "Закрыть вызов"))) {
+    return;
+  }
+
+  if (step.action === "arrived") {
+    if (await askConfirm(`Вы у борта ${call.board_number}?`, "Да, я у борта") && state.call?.call.id === call.id) {
+      await recordAction("arrived", arrivalFields("manual"));
+    }
     return;
   }
 
@@ -1043,6 +1125,7 @@ function onPosition(position) {
   if (!el("geo-notice").hidden) {
     clearGeoNotice();
   }
+  renderAccuracy();
   updateDistance();
   animatePosition(position, previous);
   if (!state.call) {
@@ -1099,6 +1182,15 @@ function onGeoError(message) {
   el("geo-error").textContent = message;
 }
 
+/** Точность GPS на кнопке: «GPS ±8 м»; плохая — жёлтая. */
+function renderAccuracy() {
+  const pos = locator.last;
+  if (locator.mode !== "gps" || pos?.source !== "gps" || !Number.isFinite(pos.accuracy)) return;
+  const old = Date.now() - pos.measuredAt > ARRIVAL_HOLD_MS;
+  el("geo-mode").textContent = old ? "GPS ?" : `GPS ±${Math.max(1, Math.round(pos.accuracy))} м`;
+  el("geo-mode").classList.toggle("is-warn", old || pos.accuracy > ARRIVAL_GOOD_M);
+}
+
 /** Место определено — напоминание про GPS больше не нужно. */
 function clearGeoNotice() {
   el("geo-notice").hidden = true;
@@ -1137,6 +1229,8 @@ function applySimulated(lat, lon) {
 
 function bindEvents() {
   el("aog-toggle").addEventListener("click", toggleAog);
+  el("parts-toggle").addEventListener("click", toggleWaitingParts);
+  el("tools-toggle").addEventListener("click", toggleMissingTools);
   el("problem-open").addEventListener("click", openProblem);
   el("problem-form").addEventListener("submit", sendProblem);
   el("problem-close").addEventListener("click", closeProblem);
@@ -1314,7 +1408,23 @@ async function logout() {
   showScreen("login");
 }
 
+/* Экран не гаснет на смене: с погасшим экраном браузер перестаёт передавать
+   GPS. Система снимает запрет при сворачивании — возвращаем его обратно. */
+let wakeLock = null;
+async function keepScreenOn() {
+  if (!state.onShift || document.hidden || !navigator.wakeLock || (wakeLock && !wakeLock.released)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    if (!state.onShift) wakeLock.release();
+  } catch {
+    // Телефон экономит заряд или не умеет — работаем как раньше.
+  }
+}
+
 function stopWork() {
+  document.removeEventListener("visibilitychange", keepScreenOn);
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
   cancelAnimationFrame(animationFrame);
   displayedPosition = null;
   updateGuidance(null);

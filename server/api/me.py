@@ -38,6 +38,7 @@ from services import mentor, support
 from services.assignment import (
     advance_after_close,
     mark_arrived,
+    note_arrival,
     queued_calls_of,
     working_call_of,
 )
@@ -89,6 +90,9 @@ class EngineerStatusRequest(BaseModel):
     lon: float | None = Field(default=None, ge=-180, le=180)
     mel_category: Literal["A", "B", "C", "D"] | None = None
     missing_tools: bool | None = None
+    # Прибытие: засчитано телефоном само или отмечено кнопкой.
+    arrival: Literal["auto", "manual"] = "manual"
+    accuracy_m: float | None = Field(default=None, ge=0)
     action_id: str | None = Field(default=None, min_length=8, max_length=64)
     # К какому вызову относится действие. Пока телефон был без связи,
     # диспетчер мог снять вызов: чужой вызов действие не тронет.
@@ -197,6 +201,26 @@ def current_call(context: Context = Depends(get_context), db: Session = Depends(
     )
 
 
+def ensure_near_aircraft(employee, call, payload):
+    """
+    Прибытие не отмечают издалека. Без координат (GPS нет) верим инженеру:
+    иначе потеря сигнала не дала бы закончить вызов.
+    """
+    from algorithm.geo import haversine_m
+    from services.assignment import ARRIVAL_MANUAL_M, aircraft_place
+
+    lat, lon, accuracy = payload.lat, payload.lon, payload.accuracy_m or 0
+    if lat is None or lon is None:
+        fresh = (employee.location_source == "gps" and employee.location_at and not payload.age_s
+                 and (utc_now() - employee.location_at).total_seconds() <= 30)
+        if not fresh:
+            return
+        lat, lon = employee.lat, employee.lon
+    point, _ = aircraft_place(call, get_graph(call.airport_icao))
+    if point and lat is not None and haversine_m(lat, lon, point["lat"], point["lon"]) - accuracy > ARRIVAL_MANUAL_M:
+        raise HTTPException(409, "Вы далеко от борта: прибытие не отмечено")
+
+
 @router.post("/status", response_model=CallResponse, summary="Принял / прибыл / завершил")
 def update_status(
     payload: EngineerStatusRequest,
@@ -242,6 +266,8 @@ def update_status(
         raise HTTPException(409, "Сначала верните транспорт")
     if payload.action == ACTION_ARRIVED and call.require_vehicle_pickup and call.vehicle and call.vehicle.status == VEHICLE_RESERVED:
         raise HTTPException(409, "Сначала заберите назначенный транспорт")
+    if payload.action == ACTION_ARRIVED:
+        ensure_near_aircraft(employee, call, payload)
     now = utc_now()
     performed = now - timedelta(seconds=payload.age_s or 0)
     if payload.action == "declined":
@@ -301,6 +327,7 @@ def update_status(
             if payload.action == ACTION_ARRIVED:
                 # Прибытие засчитывается по моменту нажатия, а не доставки:
                 # инженер, прибывший вовремя без связи, регламент не нарушил.
+                note_arrival(call, payload.arrival, payload.lat, payload.lon, payload.accuracy_m)
                 if mark_arrived(db, employee, call, performed):
                     mentor.review_arrival(db, call, employee, performed)
 

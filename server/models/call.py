@@ -96,6 +96,10 @@ class Call(Base):
     # определить не вправе.
     near_aircraft_since: Mapped[datetime | None] = mapped_column(DateTime)
     last_aircraft_fix: Mapped[datetime | None] = mapped_column(DateTime)
+    # Как отмечено прибытие (auto, manual) и где был инженер — для журнала.
+    arrival_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    arrival_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrival_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     mel_category: Mapped[str | None] = mapped_column(String(1))
     missing_tools: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     aog: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))

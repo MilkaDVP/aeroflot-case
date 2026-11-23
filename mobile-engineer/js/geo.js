@@ -18,6 +18,10 @@ const GEO_OPTIONS = {
   maximumAge: 5000,
 };
 
+// Через сколько фиксация считается постаревшей и как часто это проверять.
+const GEO_STALE_MS = 6000;
+const GEO_POLL_MS = 3000;
+
 class Locator {
   /**
    * @param {Function} onPosition вызывается при каждой новой позиции
@@ -27,6 +31,8 @@ class Locator {
     this.onPosition = onPosition;
     this.onError = onError || (() => {});
     this.watchId = null;
+    this.pollId = null;
+    this.polling = false;
     this.mode = "gps";
     this.last = null;
   }
@@ -48,6 +54,9 @@ class Locator {
     }
 
     this.stopGps();
+    // Неподвижный телефон сам новых точек почти не присылает: если фиксация
+    // постарела, запрашиваем свежую, иначе прибытие не засчитается.
+    this.pollId = setInterval(() => this.poll(), GEO_POLL_MS);
     this.watchId = navigator.geolocation.watchPosition(
       (position) => this.mode === "gps" && this.publish(position.coords.latitude, position.coords.longitude,
                                  position.coords.accuracy, position.timestamp, position.coords.heading),
@@ -57,7 +66,26 @@ class Locator {
     return true;
   }
 
+  poll() {
+    if (this.mode !== "gps" || document.hidden || this.polling) return;
+    if (this.last && Date.now() - this.last.measuredAt < GEO_STALE_MS) return;
+    this.polling = true;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        this.polling = false;
+        const { coords, timestamp } = position;
+        if (this.mode !== "gps" || this.watchId === null) return;
+        if (this.last && timestamp <= this.last.measuredAt) return;
+        this.publish(coords.latitude, coords.longitude, coords.accuracy, timestamp, coords.heading);
+      },
+      () => { this.polling = false; },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  }
+
   stopGps() {
+    clearInterval(this.pollId);
+    this.polling = false;
     if (this.watchId !== null) {
       navigator.geolocation.clearWatch(this.watchId);
       this.watchId = null;
@@ -93,6 +121,50 @@ class Locator {
     };
     this.onPosition(this.last);
   }
+}
+
+/* --- Прибытие к борту --- */
+
+const ARRIVAL_RADIUS_M = 25;
+// Посредственный GPS: засчитываем, если простоять дольше и рядом нет
+// стоянки ближе. Хуже — только кнопкой: соседние борта в 45 метрах.
+const ARRIVAL_GOOD_M = 25;
+const ARRIVAL_FAIR_M = 50;
+const ARRIVAL_GOOD_MS = 10000;
+const ARRIVAL_FAIR_MS = 20000;
+const ARRIVAL_FRESH_MS = 15000;
+// Начатый отсчёт переживает паузу в точках: остановился — телефон молчит.
+const ARRIVAL_HOLD_MS = 60000;
+// Рядом с бортом, с учётом погрешности, — можно отметить прибытие кнопкой.
+const ARRIVAL_MANUAL_M = 100;
+
+/**
+ * Что с прибытием сейчас.
+ * since — с какого момента инженер у борта (0 — не у борта).
+ * Возвращает { since, done, left, manual, hint }.
+ */
+function arrivalCheck(pos, target, since, now, isNearest = true) {
+  const none = (manual, hint) => ({ since: 0, done: false, left: null, manual, hint });
+  if (!target) return none(true, "");
+  if (!pos) return none(true, "Нет GPS");
+  const distance = haversineM(pos.lat, pos.lon, target.lat, target.lon);
+  const gps = pos.source === "gps";
+  const accuracy = gps ? pos.accuracy ?? Infinity : 0;
+  const age = gps ? now - pos.measuredAt : 0;
+  const known = Number.isFinite(accuracy) ? accuracy : 0;
+  if (age > (since ? ARRIVAL_HOLD_MS : ARRIVAL_FRESH_MS)) return none(true, "GPS давно не обновлялся");
+  if (distance - known > ARRIVAL_MANUAL_M) return none(false, "");
+  if (accuracy > ARRIVAL_FAIR_M) {
+    return none(true, Number.isFinite(accuracy) ? `GPS неточный: ±${Math.round(accuracy)} м` : "GPS неточный");
+  }
+  if (distance > ARRIVAL_RADIUS_M) return none(true, `До борта ${Math.round(distance)} м`);
+  const fair = accuracy > ARRIVAL_GOOD_M;
+  if (fair && !isNearest) return none(true, `GPS неточный: ±${Math.round(accuracy)} м`);
+  const start = since || now;
+  const left = Math.max(0, (fair ? ARRIVAL_FAIR_MS : ARRIVAL_GOOD_MS) - (now - start));
+  // Засчитываем только по свежей точке: прошёл мимо и потерял GPS — не прибыл.
+  if (!left && age > ARRIVAL_FRESH_MS) return { since: start, done: false, left: 0, manual: true, hint: "Жду GPS" };
+  return { since: start, done: left === 0, left, manual: true, hint: left ? `Прибытие через ${Math.ceil(left / 1000)} с` : "" };
 }
 
 function describeGeoError(error) {

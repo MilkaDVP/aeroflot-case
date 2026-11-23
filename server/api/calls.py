@@ -126,6 +126,10 @@ ERROR_CLOSED_CALL = "Вызов уже в истории. Изменить на�
 ERROR_UNASSIGN_NEEDS_REASON = (
     "Снятие исполнителя меняет ход обслуживания борта. Укажите причину (reason)"
 )
+ERROR_STARTED = "Работы начаты: снять исполнителя или отменить вызов вправе только начальник смены"
+ERROR_STATUS_BY_ACTION = (
+    "Статус меняют назначение и действия инженера. Диспетчер может только отменить вызов"
+)
 ERROR_UNASSIGNED_REASON = "снят с этого вызова: {reason}"
 
 # Кто вправе назначить не того, кого предложила система, и поставить вызов
@@ -134,6 +138,16 @@ ERROR_UNASSIGNED_REASON = "снят с этого вызова: {reason}"
 def can_override(context):
     """Переопределять решение системы вправе начальник смены и старше."""
     return role_at_least(context.user.role, ROLE_SHIFT_SUPERVISOR)
+
+
+def ensure_may_remove(context, *calls):
+    """Снять исполнителя после начала работ вправе только начальник смены."""
+    started = any(
+        item.status == CALL_ARRIVED or (item.status == CALL_QUEUED and item.first_arrived_at is not None)
+        for item in calls
+    )
+    if started and not can_override(context):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_STARTED)
 
 
 # Вызов можно назначить, пока им никто не занят.
@@ -893,6 +907,9 @@ def unassign_employee(
             status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_UNASSIGN_NEEDS_REASON
         )
 
+    team = [call] if call.parent_call_id is not None else [call, *support.support_calls(call)]
+    ensure_may_remove(context, *team)
+
     # Оценка снятия опирается на обстановку до него: после снятия вызов
     # уже «без исполнителя», и понять, успевал ли снятый, будет нельзя.
     removed = call.assigned_employee
@@ -920,12 +937,11 @@ def update_call_status(
     context: Context = Depends(require_roles(*DISPATCH_ROLES)),
 ):
     """
-    Смена статуса вызова.
+    Отмена вызова — единственный статус, который ставит диспетчер.
 
-    Закрытие вызова продвигает очередь исполнителя: следующий вызов
-    становится текущим, а если очереди нет — сотрудник освобождается.
-    Раньше закрытие освобождало сотрудника безусловно, и его остальные
-    вызовы оставались назначенными без исполнителя.
+    Остальное — следствие действий: «назначен» ставит назначение, «принят»,
+    «у борта» и «выполнен» — инженер. Отменить начатые работы вправе только
+    начальник смены. Очередь исполнителей продвигается сама.
     """
     if payload.status not in CALL_STATUSES:
         raise HTTPException(
@@ -940,41 +956,20 @@ def update_call_status(
         if call.status == payload.status:
             return to_response(call, db)
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_CLOSED_CALL)
+    if payload.status != CALL_CANCELLED:
+        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_STATUS_BY_ACTION)
 
-    if payload.status == CALL_CANCELLED:
-        claims.ensure_can_change(db, call, context.user)
-        claims.clear(call)
-        root = support.root_of(call)
-        now = utc_now()
-        for item in [root, *support.support_calls(root)]:
-            was_working = item.status in WORKING_CALL_STATUSES
-            arrived = item.status == CALL_ARRIVED
-            item.status = CALL_CANCELLED
-            item.closed_at = now
-            if item.assigned_employee is not None:
-                advance_after_close(db, item.assigned_employee, item, was_working, arrived)
-        db.commit()
-        return to_response(root, db)
-
-    if call.status == CALL_QUEUED and payload.status in WORKING_CALL_STATUSES:
-        # Ручной перевод вызова из очереди в текущие дал бы инженеру
-        # два текущих вызова одновременно — ровно тот дефект, от которого
-        # очередь и защищает.
-        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_QUEUE_PROMOTES_ITSELF)
-
-    was_working = call.status in WORKING_CALL_STATUSES
-    arrived_now = payload.status == CALL_ARRIVED and call.status != CALL_ARRIVED
-    call.status = payload.status
-    if arrived_now and call.assigned_employee is not None:
-        if mark_arrived(db, call.assigned_employee, call):
-            mentor.review_arrival(db, call, call.assigned_employee)
-
-    if payload.status == CALL_CLOSED:
-        call.closed_at = utc_now()
-        if call.assigned_employee is not None:
-            advance_after_close(db, call.assigned_employee, call, was_working)
-        if call.parent_call_id is None:
-            support.close_support(db, call, call.closed_at)
-
+    root = support.root_of(call)
+    ensure_may_remove(context, root, *support.support_calls(root))
+    claims.ensure_can_change(db, call, context.user)
+    claims.clear(call)
+    now = utc_now()
+    for item in [root, *support.support_calls(root)]:
+        was_working = item.status in WORKING_CALL_STATUSES
+        arrived = item.status == CALL_ARRIVED
+        item.status = CALL_CANCELLED
+        item.closed_at = now
+        if item.assigned_employee is not None:
+            advance_after_close(db, item.assigned_employee, item, was_working, arrived)
     db.commit()
-    return to_response(call, db)
+    return to_response(root, db)

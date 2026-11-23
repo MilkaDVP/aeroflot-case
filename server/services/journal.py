@@ -496,10 +496,14 @@ def arrival(db, call, at, ts, actor):
         "контрольный_срок": to_iso_utc(deadline),
         "затрачено_мин": round(spent, 1),
         "норматив_мин": REGULATION_ARRIVAL_LIMIT_MIN,
+        "отмечено": {"auto": "автоматически", "manual": "кнопкой"}.get(call.arrival_mode),
+        "до_борта_м": call.arrival_distance_m,
+        "точность_gps_м": call.arrival_accuracy_m,
     }
+    how = {"auto": ", автоматически", "manual": ", отмечено инженером"}.get(call.arrival_mode, "")
     record(
         db, "arrival",
-        f"Прибыл к ВС в {clock(db, call, at)}: через {minutes(spent)} мин после фиксации",
+        f"Прибыл к ВС в {clock(db, call, at)}: через {minutes(spent)} мин после фиксации{how}",
         call=call, employee=employee, ts=ts, actor=actor, params=params,
     )
     if margin >= 0:

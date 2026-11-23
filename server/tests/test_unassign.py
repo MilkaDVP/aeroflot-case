@@ -119,6 +119,27 @@ class TestUnassign(ApiTestCase):
         self.assertEqual(released["status"], "free")
         self.assertIsNone(released["busy_until"])
 
+    def test_начатые_работы_снимает_только_начальник_смены(self):
+        from database import SessionLocal
+        from models.call import Call
+
+        call, _ = self.assigned_call()
+        with SessionLocal() as db:
+            db.get(Call, call["id"]).status = "arrived"
+            db.commit()
+        url = f"/api/calls/{call['id']}"
+        self.assertEqual(self.unassign(call["id"]).status_code, 403)
+        self.assertEqual(self.client.patch(f"{url}/status", json={"status": "cancelled"},
+                                           headers=auth_header(self.dispatcher)).status_code, 403)
+        self.assertEqual(self.unassign(call["id"], token=self.supervisor).status_code, 200)
+
+    def test_статусы_вручную_не_ставятся(self):
+        call, _ = self.assigned_call()
+        for status in ("new", "accepted", "arrived", "closed"):
+            response = self.client.patch(f"/api/calls/{call['id']}/status", json={"status": status},
+                                         headers=auth_header(self.supervisor))
+            self.assertEqual(response.status_code, 409, status)
+
     def test_причина_снятия_обязательна(self):
         call, _ = self.assigned_call()
 
@@ -139,7 +160,7 @@ class TestUnassign(ApiTestCase):
         call, _ = self.assigned_call()
         self.client.patch(
             f"/api/calls/{call['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.dispatcher),
         )
 

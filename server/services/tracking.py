@@ -6,25 +6,27 @@
 выбросов и привязка к графу аэропорта. Источник на логику не влияет.
 
 Идентификаторы объектов:
-  e-NN      — сотрудник ОТО с id = NN          (e-01, e-7)
-  v-NN      — машина парка с id = NN            (v-01)
-  позывной  — машина парка по позывному         (ТМ-01)
-  бортовой  — воздушное судно по номеру         (RA-73142, RA73142)
+  e-NN      — NN-й по порядку сотрудник ОТО полигона   (e-01, e-7)
+  v-NN      — NN-я по порядку машина полигона          (v-01)
+  позывной  — машина парка по позывному                (ТМ-01)
+  бортовой  — воздушное судно по номеру                (RA-73142, RA73142)
+Полигон — аэропорт TRACK_AIRPORT (по умолчанию VDNH). Объекты других
+аэропортов — с кодом впереди: «UUEE:e-01», «UUEE:ТМ-01».
 """
 
 import math
+import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func
-
 from algorithm.geo import haversine_m
 from clock import utc_now
-from constants import LOCATION_GPS, MODE_WALK
+from constants import LOCATION_GPS, MODE_WALK, VEHICLE_IN_USE
 from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.employee import Employee
+from services import journal
 from models.vehicle import Vehicle
 
 KIND_ENGINEER = "engineer"
@@ -42,15 +44,25 @@ MAX_SPEED_MS = {KIND_ENGINEER: 25, KIND_VEHICLE: 25, KIND_AIRCRAFT: 120}
 JUMP_TOLERANCE_M = 30
 # Дальше этого от ближайшей вершины графа точка — заведомо не в аэропорту.
 MAX_GRAPH_DISTANCE_M = 5000
-# Время из будущего допускаем с запасом на расхождение часов.
-MAX_FUTURE_S = 60
+# Насколько время точки может расходиться с часами сервера, чтобы ему
+# верить. Больше — у источника свои часы (сценарий имитатора): порядок его
+# точек проверяется по t, а моментом измерения считается момент приёма.
+CLOCK_TRUST_S = 60
+# Источник молчал столько и прислал более раннее время — его перезапустили.
+RESTART_AFTER_S = 60
+# Фиксация прибытия по точкам /track: имитатор шлёт их реже телефона.
+ARRIVAL_MAX_GAP_S = 60
+# Об одинаковой отбраковке объекта — в журнал не чаще.
+REJECT_LOG_EVERY_S = 60
+# Телефон инженера сообщал место недавнее этого — трекер машины его не двигает.
+PHONE_FRESH_S = 10
 # Борт ближе этого к свободной стоянке считается вставшим на неё.
 STAND_SNAP_M = 25
 
-# Последняя принятая точка машин и бортов: (момент, lat, lon). У сотрудника
-# это хранится в карточке (location_at), у машин и бортов колонок нет,
-# а для отбраковки устаревших точек и выбросов памяти процесса достаточно.
+# Последняя принятая по /track точка: (t, lat, lon, момент приёма). Для
+# отбраковки устаревших точек и выбросов памяти процесса достаточно.
 _last_points = {}
+_logged = {}
 
 
 class BadPoint(ValueError):
@@ -108,41 +120,39 @@ def _normalize(code):
     return re.sub(r"[\s\-_]", "", code).upper()
 
 
+def track_airport():
+    return os.environ.get("TRACK_AIRPORT", "VDNH").upper()
+
+
 def resolve(db, obj):
     """Объект по идентификатору из контракта: (вид, запись) или (None, None)."""
-    match = re.fullmatch(r"([evEV])-?(\d+)", obj)
+    prefix, _, rest = obj.partition(":")
+    icao, code_text = (prefix.strip().upper(), rest.strip()) if rest else (track_airport(), obj)
+    code = _normalize(code_text)
+    # Позывной важнее порядкового номера: машину могли назвать «v-01».
+    vehicles = db.query(Vehicle).filter_by(airport_icao=icao).order_by(Vehicle.id).all()
+    for vehicle in vehicles:
+        if not vehicle.archived and _normalize(vehicle.call_sign) == code:
+            return KIND_VEHICLE, vehicle
+    match = re.fullmatch(r"([EV])(\d+)", code)
     if match:
-        prefix, number = match.group(1).lower(), int(match.group(2))
-        model = Employee if prefix == "e" else Vehicle
-        record = db.get(model, number)
-        if record is not None and not record.archived:
-            return (KIND_ENGINEER if prefix == "e" else KIND_VEHICLE), record
-
-    code = _normalize(obj)
-    vehicle = next(
-        (v for v in db.query(Vehicle).filter(Vehicle.archived.is_(False)).all()
-         if _normalize(v.call_sign) == code),
-        None,
-    )
-    if vehicle is not None:
-        return KIND_VEHICLE, vehicle
-    aircraft = (
-        db.query(Aircraft)
-        .filter(func.upper(func.replace(Aircraft.board_number, "-", "")) == code)
-        .first()
-    )
-    if aircraft is not None:
-        return KIND_AIRCRAFT, aircraft
+        kind = KIND_ENGINEER if match.group(1) == "E" else KIND_VEHICLE
+        # Номер — по порядку заведения, вместе с архивными: удаление
+        # человека не должно сдвинуть номера остальных.
+        records = vehicles if kind == KIND_VEHICLE else (
+            db.query(Employee).filter_by(airport_icao=icao).order_by(Employee.id).all())
+        index = int(match.group(2)) - 1
+        if 0 <= index < len(records) and not records[index].archived:
+            return kind, records[index]
+        return None, None
+    boards = [
+        aircraft for aircraft in db.query(Aircraft).order_by(Aircraft.id)
+        if _normalize(aircraft.board_number) == code and (not rest or aircraft.airport_icao == icao)
+    ]
+    if boards:
+        # Бортовой номер единственный в мире; полигон — первым.
+        return KIND_AIRCRAFT, next((b for b in boards if b.airport_icao == icao), boards[0])
     return None, None
-
-
-def track_id(kind, record):
-    """Идентификатор объекта, под которым его ждёт POST /api/v1/track."""
-    if kind == KIND_ENGINEER:
-        return f"e-{record.id:02d}"
-    if kind == KIND_VEHICLE:
-        return f"v-{record.id:02d}"
-    return record.board_number
 
 
 def _graph(icao):
@@ -153,59 +163,88 @@ def _graph(icao):
         return None
 
 
-def _previous(kind, record):
-    if kind == KIND_ENGINEER:
-        if record.location_at is None or record.lat is None:
-            return None
-        return record.location_at, record.lat, record.lon
-    return _last_points.get((kind, record.id))
+def _moment(point, now):
+    """Момент измерения: t источника, если его часам можно верить."""
+    if abs((now - point["t"]).total_seconds()) <= CLOCK_TRUST_S:
+        return min(point["t"], now)
+    return now
 
 
 def is_outlier(kind, record, point, now):
     """Причина отбраковки точки или None."""
     if point["acc"] is not None and point["acc"] > MAX_ACCURACY_M:
         return "низкая точность"
-    if (point["t"] - now).total_seconds() > MAX_FUTURE_S:
-        return "время из будущего"
     graph = _graph(record.airport_icao)
     if graph is not None:
         _, distance = graph.nearest_node(point["lat"], point["lon"], MODE_WALK)
         if distance is not None and distance > MAX_GRAPH_DISTANCE_M:
             return "точка вне аэропорта"
-    previous = _previous(kind, record)
-    if previous is None:
+    previous = _last_points.get((kind, record.id))
+    if previous is not None:
+        moment, lat, lon, received = previous
+        seconds = (point["t"] - moment).total_seconds()
+        if seconds <= 0:
+            if (now - received).total_seconds() < RESTART_AFTER_S:
+                return "точка старее уже принятой"
+            return None
+        # Точка, стоявшая до сбоя часов, могла прийти с любым t: скорость
+        # считаем по большему из двух интервалов.
+        seconds = max(seconds, (now - received).total_seconds())
+    elif kind == KIND_ENGINEER and not _placed_by_vehicle(record) and record.location_source == LOCATION_GPS and record.location_at and record.lat is not None:
+        # Место передал телефон. Заданное вручную с точкой не сравнивают:
+        # расстановка перед испытанием — не перемещение.
+        lat, lon = record.lat, record.lon
+        seconds = (_moment(point, now) - record.location_at).total_seconds()
+        if seconds <= 0:
+            return "точка старее уже принятой"
+    else:
         return None
-    moment, lat, lon = previous
-    seconds = (point["t"] - moment).total_seconds()
-    if seconds <= 0:
-        return "точка старее уже принятой"
     jump = haversine_m(lat, lon, point["lat"], point["lon"])
     if jump > JUMP_TOLERANCE_M and jump / seconds > MAX_SPEED_MS[kind]:
         return "нереальная скорость перемещения"
     return None
 
 
-def _apply_engineer(db, employee, point, now):
-    from services.assignment import record_position, refresh_navigation
+def _placed_by_vehicle(employee):
+    """Последнее место инженера задал трекер его машины, а не он сам."""
+    return employee.location_at is not None and _from_vehicle.get(employee.id) == employee.location_at
 
-    # Возраст фиксации, а не время: record_position сам вычтет его
-    # из момента приёма — так же, как для PWA инженера.
-    age = max(0.0, (now - point["t"]).total_seconds())
-    changed = record_position(employee, point["lat"], point["lon"], LOCATION_GPS, age, now=now)
+
+def _apply_engineer(db, employee, point, now):
+    from services.assignment import check_aircraft_arrival, record_position, refresh_navigation
+
+    moment = _moment(point, now)
+    if moment == now or _placed_by_vehicle(employee):
+        # Пакет точек с чужими часами приходит в одно мгновение: каждая
+        # следующая должна остаться позже предыдущей.
+        if employee.location_source == LOCATION_GPS and employee.location_at and moment <= employee.location_at:
+            now = moment = employee.location_at + timedelta(milliseconds=1)
+    age = max(0.0, (now - moment).total_seconds())
+    # Скорость из точек не выводится: нормативные скорости положения
+    # фиксированы, а имитатор может идти в ускоренном времени.
+    changed = record_position(employee, point["lat"], point["lon"], LOCATION_GPS, age, now=now, learn_speed=False)
     if changed:
-        if point["spd"] is not None and 0.3 <= point["spd"] <= 3.5 and not employee.has_vehicle:
-            employee.speed_kmh = point["spd"] * 3.6
         refresh_navigation(db, employee)
+        check_aircraft_arrival(db, employee, point["acc"], max_gap_s=ARRIVAL_MAX_GAP_S)
     return changed
 
 
-def _apply_vehicle(vehicle, point):
-    # Пока машина едет с инженером, её место берётся из его GPS
-    # (Vehicle.position), а сохранённые координаты станут местом стоянки.
+def _apply_vehicle(db, vehicle, point, now):
     vehicle.lat, vehicle.lon = point["lat"], point["lon"]
-    if point["spd"] is not None and 1 <= point["spd"] <= MAX_SPEED_MS[KIND_VEHICLE]:
-        vehicle.speed_kmh = point["spd"] * 3.6
+    employee = vehicle.employee
+    if vehicle.status == VEHICLE_IN_USE and employee is not None:
+        # Машина едет с инженером: её место — его место. Свежий GPS его
+        # телефона точнее, иначе двигаем инженера по трекеру машины.
+        fresh = (employee.location_source == LOCATION_GPS and employee.location_at
+                 and (now - employee.location_at).total_seconds() < PHONE_FRESH_S)
+        if not fresh or _placed_by_vehicle(employee):
+            if _apply_engineer(db, employee, point, now):
+                _from_vehicle[employee.id] = employee.location_at
     return True
+
+
+# Чьё место последний раз задал трекер машины — и каким моментом.
+_from_vehicle = {}
 
 
 def _apply_aircraft(db, aircraft, point):
@@ -232,28 +271,45 @@ def _apply_aircraft(db, aircraft, point):
         default=None,
         key=lambda n: haversine_m(lat, lon, n["lat"], n["lon"]),
     )
-    if stand is not None and haversine_m(lat, lon, stand["lat"], stand["lon"]) <= STAND_SNAP_M:
-        if aircraft.lat is None and aircraft.stand_node_id == stand["id"]:
-            return True
-        aircraft.lat = aircraft.lon = None
-        target = stand
-    else:
-        target, _ = graph.nearest_node(lat, lon, MODE_WALK)
-        if target is None:
-            return False
-        aircraft.lat, aircraft.lon = lat, lon
-        if aircraft.stand_node_id == target["id"]:
-            return True
-
+    parked = stand is not None and haversine_m(lat, lon, stand["lat"], stand["lon"]) <= STAND_SNAP_M
+    target = stand if parked else graph.nearest_node(lat, lon, MODE_WALK)[0]
+    if target is None:
+        return False
+    place = (None, None) if parked else (lat, lon)
+    if aircraft.stand_node_id == target["id"] and (aircraft.lat, aircraft.lon) == place:
+        return True
+    same_target = aircraft.stand_node_id == target["id"]
+    # Точка сохранения — до изменения борта: нет маршрута до нового
+    # места — борт остаётся там, где был.
     savepoint = db.begin_nested()
     try:
-        apply_aircraft_move(db, graph, aircraft, target)
+        aircraft.lat, aircraft.lon = place
+        if not same_target:
+            apply_aircraft_move(db, graph, aircraft, target)
+        db.flush()
     except HTTPException:
-        # Нет маршрута до нового места — оставляем борт, где был.
         savepoint.rollback()
         return False
     savepoint.commit()
     return True
+
+
+def _reject(db, point, record, reason, now):
+    """Отбракованная точка — ошибка приёма данных в журнале, без повторов."""
+    key = (point["obj"], reason)
+    last = _logged.get(key)
+    if last is not None and (now - last).total_seconds() < REJECT_LOG_EVERY_S:
+        return
+    if len(_logged) > 1000:
+        _logged.clear()
+    _logged[key] = now
+    journal.record(
+        db, "data_error", f"Точка {point['obj'][:60]} не применена: {reason}",
+        airport_icao=record.airport_icao if record is not None else track_airport(),
+        actor={"id": None, "name": "Приём геопозиции", "role": "external"},
+        params={"obj": point["obj"][:60], "lat": point["lat"], "lon": point["lon"],
+                "t": format_time(point["t"]), "причина": reason},
+    )
 
 
 def ingest(db, point, now=None):
@@ -264,37 +320,49 @@ def ingest(db, point, now=None):
     now = now or utc_now()
     kind, record = resolve(db, point["obj"])
     if record is None:
+        _reject(db, point, None, "объект неизвестен", now)
         return False
-    if is_outlier(kind, record, point, now):
+    reason = is_outlier(kind, record, point, now)
+    if reason:
+        _reject(db, point, record, reason, now)
         return False
     if kind == KIND_ENGINEER:
         applied = _apply_engineer(db, record, point, now)
     elif kind == KIND_VEHICLE:
-        applied = _apply_vehicle(record, point)
+        applied = _apply_vehicle(db, record, point, now)
     else:
         applied = _apply_aircraft(db, record, point)
-    if applied and kind != KIND_ENGINEER:
-        _last_points[(kind, record.id)] = (point["t"], point["lat"], point["lon"])
+    if applied:
+        _last_points[(kind, record.id)] = (point["t"], point["lat"], point["lon"], now)
+    else:
+        _reject(db, point, record, "нет маршрута до нового места" if kind == KIND_AIRCRAFT else "точка старее уже принятой", now)
     return applied
 
 
 def known_objects(db):
     """Все объекты, координаты которых принимает /api/v1/track."""
     result = []
-    for employee in db.query(Employee).filter(Employee.archived.is_(False)).order_by(Employee.id):
-        result.append({"obj": track_id(KIND_ENGINEER, employee), "kind": KIND_ENGINEER,
-                       "name": employee.full_name, "airport_icao": employee.airport_icao})
-    for vehicle in db.query(Vehicle).filter(Vehicle.archived.is_(False)).order_by(Vehicle.id):
-        result.append({"obj": track_id(KIND_VEHICLE, vehicle), "kind": KIND_VEHICLE,
-                       "name": vehicle.call_sign, "airport_icao": vehicle.airport_icao})
+
+    def add(kind, icao, code, name):
+        obj = code if icao == track_airport() or kind == KIND_AIRCRAFT else f"{icao}:{code}"
+        result.append({"obj": obj, "kind": kind, "name": name, "airport_icao": icao})
+
+    for kind, model, letter in ((KIND_ENGINEER, Employee, "e"), (KIND_VEHICLE, Vehicle, "v")):
+        counts = {}
+        for record in db.query(model).order_by(model.id):
+            counts[record.airport_icao] = counts.get(record.airport_icao, 0) + 1
+            if not record.archived:
+                add(kind, record.airport_icao, f"{letter}-{counts[record.airport_icao]:02d}",
+                    record.full_name if kind == KIND_ENGINEER else record.call_sign)
     for aircraft in db.query(Aircraft).order_by(Aircraft.id):
-        result.append({"obj": track_id(KIND_AIRCRAFT, aircraft), "kind": KIND_AIRCRAFT,
-                       "name": f"{aircraft.board_number} ({aircraft.aircraft_type})",
-                       "airport_icao": aircraft.airport_icao})
-    return result
+        add(KIND_AIRCRAFT, aircraft.airport_icao, aircraft.board_number,
+            f"{aircraft.board_number} ({aircraft.aircraft_type})")
+    return sorted(result, key=lambda item: item["airport_icao"] != track_airport())
 
 
 def reset_memory():
-    """Для тестов: забыть последние точки машин и бортов."""
+    """Для тестов: забыть последние точки."""
     _last_points.clear()
+    _logged.clear()
+    _from_vehicle.clear()
 

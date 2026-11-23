@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from clock import utc_now
 from constants import SHIFT_WINDOW_H, STATUS_OFFLINE
-from models.call import ACTIVE_CALL_STATUSES, STATUS_QUEUED, Call
+from models.call import ACTIVE_CALL_STATUSES, STATUS_ARRIVED, STATUS_QUEUED, Call
 from models.employee import Employee
 from services.assignment import release_vehicle, unassign
 
@@ -45,6 +45,11 @@ def expire_shifts(db):
     for employee in db.query(Employee).filter(Employee.shift_ends_at <= utc_now()):
         from models.user import User, AuthSession
         online = db.query(AuthSession.token).join(User).filter(User.employee_id == employee.id).first()
+        working = db.query(Call.id).filter(
+            Call.assigned_employee_id == employee.id, Call.status == STATUS_ARRIVED).first()
+        if working:
+            # Начатые работы сами не снимаются: смена кончится после них.
+            continue
         if employee.always_on_shift or online:
             employee.shift_ends_at = None
         else:

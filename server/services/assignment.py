@@ -578,7 +578,7 @@ def parking_point(employee, graph, stand_node_id):
     return employee.lat, employee.lon
 
 
-def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
+def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_speed=True):
     """
     Новые координаты сотрудника.
 
@@ -596,7 +596,7 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
         if seconds <= 0:
             employee.seen_at = now
             return False
-        if 2 <= seconds <= 90 and employee.lat is not None:
+        if learn_speed and 2 <= seconds <= 90 and employee.lat is not None:
             speed = haversine_m(employee.lat, employee.lon, lat, lon) * 3.6 / seconds
             if employee.has_vehicle and 1 <= speed <= 80:
                 employee.vehicle.speed_kmh = speed
@@ -644,27 +644,64 @@ def route_geometry(call, graph):
     return nodes
 
 
-def check_aircraft_arrival(db, employee, accuracy_m=None):
+# Прибытие: хорошая точность — 10 секунд у борта, посредственная — 20 и
+# только если рядом нет другой стоянки ближе. Хуже — кнопкой «Я у борта».
+ARRIVAL_GOOD_M, ARRIVAL_FAIR_M = 25, 50
+ARRIVAL_GOOD_S, ARRIVAL_FAIR_S = 10, 20
+ARRIVAL_MANUAL_M = 150
+
+
+def aircraft_place(call, graph):
+    """Где борт вызова: (точка, на стоянке ли)."""
+    if call.aircraft and call.aircraft.lat is not None and call.aircraft.lon is not None:
+        return {"lat": call.aircraft.lat, "lon": call.aircraft.lon}, False
+    return graph.node(call.stand_node_id), True
+
+
+def note_arrival(call, mode, lat=None, lon=None, accuracy_m=None):
+    """Способ и место прибытия — до mark_arrived: журнал пишется вместе с ним."""
+    if call.first_arrived_at is not None:
+        return
+    point, _ = aircraft_place(call, get_graph(call.airport_icao))
+    call.arrival_mode = mode
+    call.arrival_accuracy_m = accuracy_m
+    call.arrival_distance_m = (
+        round(haversine_m(lat, lon, point["lat"], point["lon"]), 1) if point and lat is not None and lon is not None else None
+    )
+
+
+def check_aircraft_arrival(db, employee, accuracy_m=None, max_gap_s=30):
     from services import mentor
     from constants import STATUS_BUSY
     call = working_call_of(db, employee)
     if not call or call.status != "accepted":
         return
-    point = get_graph(call.airport_icao).node(call.stand_node_id)
-    if call.aircraft and call.aircraft.lat is not None and call.aircraft.lon is not None:
-        point = {"lat": call.aircraft.lat, "lon": call.aircraft.lon}
+    graph = get_graph(call.airport_icao)
+    point, on_stand = aircraft_place(call, graph)
     at = employee.location_at
-    if (not point or not at or (utc_now() - at).total_seconds() > 15 or employee.return_vehicle
-            or (accuracy_m is not None and accuracy_m > WAYPOINT_DONE_RADIUS_M)
+    # Борт на стоянке с размеченной зоной обслуживания — прибытие по её
+    # контуру; где зоны нет или борт вне стоянки — по радиусу.
+    zone = graph.zone_at(employee.lat, employee.lon) if on_stand and employee.lat is not None else None
+    inside = bool(zone and zone.get("node_id") == call.stand_node_id)
+    if (not point or not at or (utc_now() - at).total_seconds() > max_gap_s or employee.return_vehicle
+            or (accuracy_m is not None and accuracy_m > ARRIVAL_FAIR_M)
             or any(not w.get("done_at") for w in call.waypoints or [])
             or (call.vehicle and call.vehicle.status == VEHICLE_RESERVED)
-            or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"]) > WAYPOINT_DONE_RADIUS_M):
+            or not (inside or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"]) <= WAYPOINT_DONE_RADIUS_M)):
         call.near_aircraft_since = call.last_aircraft_fix = None
         return
-    if not call.last_aircraft_fix or (at - call.last_aircraft_fix).total_seconds() > 15:
+    fair = accuracy_m is not None and accuracy_m > ARRIVAL_GOOD_M
+    if fair:
+        stands = graph.nodes_of_type("stand")
+        nearest = min(stands, default=None, key=lambda n: haversine_m(employee.lat, employee.lon, n["lat"], n["lon"]))
+        if not on_stand or nearest is None or nearest["id"] != call.stand_node_id:
+            call.near_aircraft_since = call.last_aircraft_fix = None
+            return
+    if not call.last_aircraft_fix or (at - call.last_aircraft_fix).total_seconds() > max_gap_s:
         call.near_aircraft_since = at
     call.last_aircraft_fix = at
-    if (at - call.near_aircraft_since).total_seconds() >= 10:
+    if (at - call.near_aircraft_since).total_seconds() >= (ARRIVAL_FAIR_S if fair else ARRIVAL_GOOD_S):
+        note_arrival(call, "auto", employee.lat, employee.lon, accuracy_m)
         call.status = CALL_ARRIVED
         employee.status = STATUS_BUSY
         if mark_arrived(db, employee, call, at):

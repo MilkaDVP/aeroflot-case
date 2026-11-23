@@ -913,6 +913,9 @@ details[open] .detail-label::after { content: " ⌄"; }
 .route-map.has-imagery .road.road-runway { stroke: rgba(255, 255, 255, 0.45); }
 .route-map.has-imagery .stand { fill: rgba(8, 12, 17, 0.75); stroke: #9dc3e6; }
 
+.arrival-hint { padding: 2px 0 6px; font-size: 13px; color: var(--text-muted); }
+.arrival-hint[hidden] { display: none; }
+
 /* --- Кнопка и окно «Сообщить» --- */
 .report-open { position: relative; flex: 0 0 auto !important; padding: 6px 14px !important; background: transparent; }
 .report-open[hidden] { display: none; }

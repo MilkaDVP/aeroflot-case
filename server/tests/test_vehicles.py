@@ -165,7 +165,7 @@ class TestVehiclePool(ApiTestCase):
         call = self.assign(self.create_call("VP-BZQ")["id"], MOROZOV)
         self.client.patch(
             f"/api/calls/{call['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.supervisor),
         )
         after = self.vehicles()["ТМ-04"]
@@ -195,7 +195,7 @@ class TestVehiclePool(ApiTestCase):
 
         self.client.patch(
             f"/api/calls/{first['id']}/status",
-            json={"status": "closed"},
+            json={"status": "cancelled"},
             headers=auth_header(self.supervisor),
         )
         tm01 = self.vehicles()["ТМ-01"]

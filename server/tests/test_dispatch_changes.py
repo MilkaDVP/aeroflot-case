@@ -44,7 +44,7 @@ class TestDispatchChanges(SupportCase):
         past = self.register()
         response = self.client.patch(
             f"/api/calls/{past['id']}/status", headers=auth_header(self.dispatcher),
-            json={"status": "closed"},
+            json={"status": "cancelled"},
         )
         self.assertEqual(response.status_code, 200, response.text)
         active, _, _ = self.team()
