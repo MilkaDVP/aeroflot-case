@@ -86,9 +86,10 @@ class TestRealEngineerLifecycle(MentorCase):
         again = self.client.post("/api/me/status", json={"action": "accepted", "call_id": call["id"]}, headers=headers)
         self.assertEqual(again.status_code, 200, again.text)
 
-        for action in ("arrived", "closed"):
+        for action in ("arrived", "assessment", "closed"):
+            fields = {"mel_category": "B"} if action == "assessment" else {}
             done = self.client.post(
-                "/api/me/status", json={"action": action, "call_id": call["id"]}, headers=headers
+                "/api/me/status", json={**fields, "action": action, "call_id": call["id"]}, headers=headers
             )
             self.assertEqual(done.status_code, 200, done.text)
 

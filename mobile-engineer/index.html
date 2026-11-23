@@ -138,6 +138,11 @@
     где он находится, и иметь возможность поставить точку до того,
     как вызов придёт.
   -->
+  <section id="nav-guidance" aria-label="Следующий манёвр" hidden>
+    <span id="nav-icon" aria-hidden="true"></span>
+    <div><strong id="nav-distance"></strong><div id="nav-next"></div></div>
+    <button type="button" id="nav-voice" aria-label="Голосовые подсказки"></button>
+  </section>
   <div class="map-wrap">
     <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
     <button class="map-toggle" id="map-toggle">Схема</button>
@@ -151,6 +156,12 @@
   </div>
 
   <div class="error work-error" id="call-error" hidden></div>
+  <button type="button" id="decline-call" class="big" hidden>Отказаться от вызова</button>
+  <section id="repair-panel" hidden>
+    <form id="repair-form"><label>Категория MEL <select id="repair-mel" required><option value="">Выберите</option><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+    <button type="submit">Сохранить категорию</button></form>
+    <label><input type="checkbox" id="missing-tools"> Не хватает инструмента</label>
+  </section>
   <button class="big primary action" id="call-action" hidden>—</button>
 </section>
 
@@ -219,6 +230,8 @@
 
 <script src="js/offline.js?v=__BUILD__"></script>
 <script src="js/api.js?v=__BUILD__"></script>
+<script src="js/navigation.js?v=__BUILD__"></script>
+<script src="js/guidance.js?v=__BUILD__"></script>
 <script src="js/geo.js?v=__BUILD__"></script>
 <script src="js/satellite.js?v=__BUILD__"></script>
   <script src="js/routemap.js?v=__BUILD__"></script>

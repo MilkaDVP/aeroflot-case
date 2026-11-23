@@ -83,6 +83,7 @@ class LocationRequest(BaseModel):
     # а не время: часы телефона могут расходиться с сервером на минуты,
     # а разность двух моментов на одном устройстве от этого не зависит.
     fix_age_s: float | None = Field(default=None, ge=0, le=86400)
+    accuracy_m: float | None = Field(default=None, ge=0)
 
 
 class ShiftRequest(BaseModel):

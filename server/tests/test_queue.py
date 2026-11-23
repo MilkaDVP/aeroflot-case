@@ -151,9 +151,10 @@ class TestQueue(ApiTestCase):
         self.assertEqual(current["call"]["id"], first["id"])
         self.assertEqual(current["queued_count"], 1)
 
-        for action in ("accepted", "arrived", "closed"):
+        for action in ("accepted", "arrived", "assessment", "closed"):
+            fields = {"mel_category": "B"} if action == "assessment" else {}
             response = self.client.post(
-                "/api/me/status", json={"action": action}, headers=auth_header(engineer)
+                "/api/me/status", json={**fields, "action": action}, headers=auth_header(engineer)
             )
             self.assertEqual(response.status_code, 200, response.text)
 

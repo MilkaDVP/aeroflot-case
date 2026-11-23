@@ -455,6 +455,9 @@ def unassign(db, call, reason):
 
     # Через связь, а не через внешний ключ: сессия не перечитывает объекты
     # после коммита, и previous_employee остался бы пустым в ответе.
+    call.near_aircraft_since = call.last_aircraft_fix = None
+    call.mel_category = None
+    call.missing_tools = False
     call.allow_previous_employee = False
     call.previous_employee = employee
     call.unassign_reason = reason
@@ -636,6 +639,33 @@ def route_geometry(call, graph):
         if haversine_m(start["lat"], start["lon"], nodes[0]["lat"], nodes[0]["lon"]) > 0.1:
             nodes.insert(0, start)
     return nodes
+
+
+def check_aircraft_arrival(db, employee, accuracy_m=None):
+    from services import mentor
+    from constants import STATUS_BUSY
+    call = working_call_of(db, employee)
+    if not call or call.status != "accepted":
+        return
+    point = get_graph(call.airport_icao).node(call.stand_node_id)
+    if call.aircraft and call.aircraft.lat is not None and call.aircraft.lon is not None:
+        point = {"lat": call.aircraft.lat, "lon": call.aircraft.lon}
+    at = employee.location_at
+    if (not point or not at or (utc_now() - at).total_seconds() > 15 or employee.return_vehicle
+            or (accuracy_m is not None and accuracy_m > WAYPOINT_DONE_RADIUS_M)
+            or any(not w.get("done_at") for w in call.waypoints or [])
+            or (call.vehicle and call.vehicle.status == VEHICLE_RESERVED)
+            or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"]) > WAYPOINT_DONE_RADIUS_M):
+        call.near_aircraft_since = call.last_aircraft_fix = None
+        return
+    if not call.last_aircraft_fix or (at - call.last_aircraft_fix).total_seconds() > 15:
+        call.near_aircraft_since = at
+    call.last_aircraft_fix = at
+    if (at - call.near_aircraft_since).total_seconds() >= 10:
+        call.status = CALL_ARRIVED
+        employee.status = STATUS_BUSY
+        if mark_arrived(db, employee, call, at):
+            mentor.review_arrival(db, call, employee, at)
 
 
 def refresh_navigation(db, employee):

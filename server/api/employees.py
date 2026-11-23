@@ -391,6 +391,9 @@ def update_location(
     from services.assignment import refresh_navigation
     if changed:
         refresh_navigation(db, employee)
+        if context.user.role == ROLE_ENGINEER:
+            from services.assignment import check_aircraft_arrival
+            check_aircraft_arrival(db, employee, payload.accuracy_m)
     db.commit()
     return to_response(employee)
 

@@ -495,6 +495,14 @@ class RouteMap {
     this.contentLayer.append(marker);
   }
 
+  setHeading(value) {
+    this.heading = Number.isFinite(value) ? value : null;
+    if (this.arrow) {
+      this.arrow.style.display = this.heading === null ? "none" : "";
+      this.arrow.setAttribute("transform", `rotate(${this.heading || 0})`);
+    }
+  }
+
   drawSelf(point) {
     const halo = document.createElementNS(SVG_NS, "circle");
     halo.setAttribute("cx", point.x);
@@ -508,7 +516,14 @@ class RouteMap {
     marker.setAttribute("r", this.view.scaleRef * 0.028);
     marker.setAttribute("class", "route-self");
 
-    this.contentLayer.append(halo, marker);
+    const direction = group("route-direction");
+    direction.setAttribute("transform", `translate(${point.x} ${point.y}) scale(${this.view.scaleRef * 0.003})`);
+    this.arrow = document.createElementNS(SVG_NS, "path");
+    this.arrow.setAttribute("d", "M0 -16 L5 -7 L0 -9 L-5 -7 Z");
+    this.arrow.setAttribute("fill", "#00d8ff");
+    direction.append(this.arrow);
+    this.setHeading(this.heading);
+    this.contentLayer.append(halo, marker, direction);
   }
 
   /** Касание по карте — координаты для режима имитации. */

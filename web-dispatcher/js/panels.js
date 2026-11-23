@@ -582,6 +582,8 @@ function busyStageLine(busy) {
  */
 function callFlags(call) {
   return (
+    (call.missing_tools ? '<span class="flag">Не хватает инструмента</span>' : "") +
+    (call.mel_category ? `<span class="flag">MEL ${escapeHtml(call.mel_category)}</span>` : "") +
     (call.aog ? `<span class="flag flag-aog"${term("aog")}>AOG</span>` : "") +
     (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "") +
     (call.needs_tools && !call.tools_taken_at

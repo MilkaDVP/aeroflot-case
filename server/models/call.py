@@ -94,6 +94,10 @@ class Call(Base):
     # AOG (Aircraft on Ground) — борт не может лететь. Статус ставит только
     # инженер после осмотра и диагностики: ни экипаж, ни диспетчер этого
     # определить не вправе.
+    near_aircraft_since: Mapped[datetime | None] = mapped_column(DateTime)
+    last_aircraft_fix: Mapped[datetime | None] = mapped_column(DateTime)
+    mel_category: Mapped[str | None] = mapped_column(String(1))
+    missing_tools: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     aog: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Этап работ у борта (constants.WORK_STAGES); пусто до прибытия.
     work_stage: Mapped[str | None] = mapped_column(String, nullable=True)
