@@ -77,6 +77,13 @@ function nextManeuver(payload, points, pos) {
 }
 
 const voice = window.speechSynthesis;
+function navigationVoice(voices, online) {
+  const russian = voices.filter(v => /^ru(?:[-_]|$)/i.test(v.lang) && (online || v.localService));
+  const score = v => (/svetlana|светлана/i.test(v.name) ? 4 : 0) +
+    (/natural|neural|premium|enhanced/i.test(v.name) ? 8 : 0) + (v.default ? 1 : 0);
+  return russian.sort((a,b) => score(b) - score(a))[0];
+}
+voice?.getVoices?.(); // Запускает загрузку списка до первой подсказки.
 const metreForm = new Intl.PluralRules("ru");
 const voiceButton = document.getElementById("nav-voice");
 let voiceEnabled = localStorage.getItem("nav-voice") === "on";
@@ -110,6 +117,9 @@ function updateGuidance(cue) {
     const message = new SpeechSynthesisUtterance(near ? cue.action :
       "Прямо " + metres + " " + unit + ". Затем. " + cue.action);
     message.lang = "ru-RU";
+    const preferred = navigationVoice(voice.getVoices?.() || [], window.navigator?.onLine !== false);
+    if (preferred) message.voice = preferred;
+    message.rate = 0.97;
     voice.speak(message);
   }
 }

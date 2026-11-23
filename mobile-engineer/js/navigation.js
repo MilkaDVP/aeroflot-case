@@ -1,17 +1,19 @@
 /* Маршрут на телефоне: граф и разрешённые виды передвижения из того же аэропорта. */
 class LocalNavigation {
-  async load(icao) {
+  async load(icao, onGraph) {
+    onGraph(null);
     const key = CONFIG.apiBase + "/graph/" + icao;
     this.key = key;
     this.signature = null;
     this.nodes = null;
     this.path = null;
     const cached = await OfflineStore.get(key);
-    if (cached && this.key === key) this.index(cached);
+    if (cached && this.key === key) { this.index(cached); onGraph(cached); }
     try {
       const graph = await Api.airportGraph(icao);
       if (key !== this.key) return;
       this.index(graph);
+      onGraph(graph);
       await OfflineStore.set(key, graph);
     } catch { /* Сохранённая схема остаётся доступной. */ }
   }

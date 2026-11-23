@@ -228,7 +228,7 @@ el("shift-logout").addEventListener("click", logout);
  * на карте как доступного.
  */
 function enterWork() {
-  localNavigation.load(state.user.airport_icao);
+  localNavigation.load(state.user.airport_icao, graph => routeMap.setGraph(graph));
   showScreen("work");
   // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
   window.addEventListener("online", refresh);
@@ -1089,9 +1089,9 @@ function bindEvents() {
 
   // Переключатель подложки: снимок требует сети, схема работает всегда.
   el("map-toggle").addEventListener("click", () => {
-    const toImagery = el("map-toggle").textContent === "Спутник";
+    const toImagery = !routeMap.showImagery;
     routeMap.setImagery(toImagery);
-    el("map-toggle").textContent = toImagery ? "Схема" : "Спутник";
+    el("map-toggle").setAttribute("aria-pressed", String(toImagery));
     drawRoute();
   });
 

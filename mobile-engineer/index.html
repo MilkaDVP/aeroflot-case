@@ -98,8 +98,13 @@
     <button type="button" id="nav-voice" aria-label="Голосовые подсказки"></button>
   </section>
   <div class="map-wrap">
-    <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
-    <button class="map-toggle" id="map-toggle">Схема</button>
+    <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet">
+      <defs><pattern id="map-grid-pattern" width="50" height="50" patternUnits="userSpaceOnUse">
+        <path d="M 0 50 V 0 H 50" fill="none" stroke="#a0becf" stroke-opacity=".48" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      </pattern></defs>
+      <rect id="map-grid" width="100%" height="100%" fill="url(#map-grid-pattern)" pointer-events="none"/>
+    </svg>
+    <button class="map-toggle" id="map-toggle" aria-pressed="false">Спутник</button>
     <!-- Масштаб: ещё щипок двумя пальцами и перетаскивание -->
     <div class="map-zoom">
       <button type="button" id="map-zoom-in" aria-label="Приблизить">+</button>

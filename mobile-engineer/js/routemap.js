@@ -55,11 +55,14 @@ class RouteMap {
     this.onTap = onTap;
     this.reference = null;
     this.view = null;
-    this.showImagery = true;
+    this.showImagery = false;
 
     this.tileLayer = group("layer-tiles");
     this.contentLayer = group("layer-content");
-    this.svg.append(this.tileLayer, this.contentLayer);
+    this.grid = this.svg.querySelector("#map-grid");
+    this.graphLayer = group("airport-network");
+    this.svg.insertBefore(this.tileLayer, this.grid);
+    this.svg.append(this.graphLayer, this.contentLayer);
 
     // Свой вид инженера переживает обновления данных: карта больше не
     // возвращается к автоматическому охвату на каждом опросе.
@@ -216,6 +219,13 @@ class RouteMap {
       scaleRef: Math.min(width, height),
     };
     this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
+    const spacing = 50 * 2 ** Math.round(Math.log2(this.view.scaleRef / 600));
+    const pattern = this.svg.querySelector("#map-grid-pattern");
+    pattern.setAttribute("width", spacing);
+    pattern.setAttribute("height", spacing);
+    pattern.firstElementChild.setAttribute("d", `M 0 ${spacing} V 0 H ${spacing}`);
+    for (const [attr, value] of Object.entries({x:this.view.minX, y:this.view.minY, width, height}))
+      this.grid.setAttribute(attr, value);
     if (this.onViewChange) this.onViewChange(this.isUserView());
   }
 
@@ -227,6 +237,28 @@ class RouteMap {
   scheduleRerender() {
     clearTimeout(this.rerenderTimer);
     this.rerenderTimer = setTimeout(() => this.rerender(), 120);
+  }
+
+  setGraph(graph) {
+    this.graphOrigin = graph?.ref_point || graph?.nodes[0];
+    this.graphLayer.replaceChildren();
+    if (this.graphOrigin) {
+      this.reference = this.graphOrigin;
+      const nodes = new Map(graph.nodes.map(n => [n.id, this.project(n)]));
+      const segments = [];
+      for (const edge of graph.edges) {
+        const a = nodes.get(edge.from_id), b = nodes.get(edge.to_id);
+        if (a && b) segments.push(`M${a.x} ${a.y}L${b.x} ${b.y}`);
+      }
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", segments.join(" "));
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#80a4b5");
+      path.setAttribute("stroke-width", "1.4");
+      path.setAttribute("vector-effect", "non-scaling-stroke");
+      this.graphLayer.append(path);
+    }
+    this.rerender();
   }
 
   setImagery(enabled) {
@@ -257,6 +289,7 @@ class RouteMap {
     if (pickupVehicle) {
       all.push(pickupVehicle);
     }
+    fallback ||= this.graphOrigin;
     const usingFallback = all.length === 0 && Boolean(fallback);
     if (usingFallback) {
       all.push(fallback);
@@ -270,7 +303,7 @@ class RouteMap {
       return;
     }
 
-    this.reference = centre || all[0];
+    this.reference = this.graphOrigin || centre || all[0];
     const extent = centre ? [centre] : all;
     this.fit(extent.map((point) => this.project(point)), !centre && points.length > 0, centre || usingFallback);
     this.drawTiles();
