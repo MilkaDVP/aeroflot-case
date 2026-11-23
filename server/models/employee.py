@@ -43,6 +43,7 @@ class RouteParticipant(Base):
     waiting_lat: Mapped[float | None] = mapped_column(Float)
     waiting_lon: Mapped[float | None] = mapped_column(Float)
     return_to_waiting: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    drill_return_path: Mapped[list | None] = mapped_column(JSON, nullable=True)
     return_vehicle: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     shift_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shift: Mapped[str] = mapped_column(String)

@@ -7,7 +7,8 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from models.airport import Airport
 from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, check_same_airport, require_airport, require_roles
@@ -26,6 +27,7 @@ class DrillState(BaseModel):
     """Идут ли учения в аэропорту сессии."""
 
     enabled: bool
+    speed: int | None = Field(default=None, ge=1, le=32)
 
 
 class HoldRequest(BaseModel):
@@ -42,7 +44,8 @@ class HoldResponse(BaseModel):
 @router.get("", response_model=DrillState, summary="Идут ли учения")
 def drill_state(context: Context = Depends(require_airport), db: Session = Depends(get_db)):
     """Состояние режима учений — рабочее место показывает его в шапке."""
-    return DrillState(enabled=drill.is_enabled(db, context.airport_icao))
+    airport = db.get(Airport, context.airport_icao)
+    return DrillState(enabled=airport.drill_enabled, speed=airport.drill_speed)
 
 
 @router.post("", response_model=DrillState, summary="Включить или выключить учения")
@@ -53,9 +56,11 @@ def set_drill(
     db: Session = Depends(get_dispatch_db),
 ):
     """Администратор аэропорта и старше. При выключении все задержки снимаются."""
-    drill.set_enabled(db, context.airport_icao, payload.enabled)
+    settings = drill.set_enabled(db, context.airport_icao, payload.enabled)
+    if payload.speed is not None:
+        settings.drill_speed = payload.speed
     db.commit()
-    return DrillState(enabled=payload.enabled)
+    return DrillState(enabled=payload.enabled, speed=settings.drill_speed)
 
 
 @router.post("/hold/{employee_id}", response_model=HoldResponse, summary="Задержать сотрудника")

@@ -16,6 +16,7 @@ def end_shift(db, employee, reason):
                                   Call.status.in_(ACTIVE_CALL_STATUSES)).all()
     for call in sorted(calls, key=lambda c: c.status != STATUS_QUEUED):
         unassign(db, call, reason)
+        call.allow_previous_employee = True
         db.flush()
     release_vehicle(employee)
     employee.status = STATUS_OFFLINE

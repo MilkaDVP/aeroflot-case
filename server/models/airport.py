@@ -18,7 +18,7 @@
 не нужны.
 """
 
-from sqlalchemy import JSON, Boolean, String, text
+from sqlalchemy import JSON, Integer, Boolean, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -52,6 +52,7 @@ class Airport(Base):
     # Режим учений: сотрудники без телефона сами движутся по назначенному
     # маршруту. Нужен для демонстрации и тренировки диспетчеров; включает
     # его только администратор, по умолчанию выключен.
+    drill_speed: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     drill_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("0")
     )

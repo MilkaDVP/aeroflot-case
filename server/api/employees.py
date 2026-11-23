@@ -425,8 +425,7 @@ def toggle_shift(
     working = working_call_of(db, employee)
     if not payload.on_shift and employee.always_on_shift:
         raise HTTPException(409, "Администратор закрепил сотрудника на смене")
-    if not payload.on_shift and working is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, ERROR_LEAVE_WITH_CALL)
+
 
     if payload.shift is not None:
         if payload.shift not in (SHIFT_DAY, SHIFT_NIGHT):
@@ -438,11 +437,7 @@ def toggle_shift(
     if payload.on_shift and (not employee.shift_ends_at or payload.extend):
         start_clock(employee)
     if not payload.on_shift:
-        employee.shift_ends_at = None
-        # Уходя со смены, инженер оставляет машину там, где стоит: иначе
-        # она числилась бы за человеком, которого на перроне нет.
-        release_vehicle(employee)
-        employee.status = STATUS_OFFLINE
+        end_shift(db, employee, "Инженер завершил смену")
     elif working is None:
         employee.status = STATUS_FREE
     # Иначе статус не трогаем. Повторный выход на смену — обычное дело

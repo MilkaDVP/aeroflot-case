@@ -85,11 +85,15 @@ class TestRealEngineerLifecycle(DrillCase):
         self.assertEqual(accepted.status_code, 200, accepted.text)
         self.assertEqual(accepted.json()["status"], "accepted")
 
-        # Уйти со смены с незакрытым вызовом нельзя.
+        # Возвращаем вызов в подбор, затем назначаем того же сотрудника.
         leave = self.client.post(
             f"/api/employees/{employee['id']}/shift", json={"on_shift": False}, headers=headers
         )
-        self.assertEqual(leave.status_code, 409, leave.text)
+        self.assertEqual(leave.status_code, 200, leave.text)
+        self.client.post(f"/api/employees/{employee['id']}/shift", json={"on_shift": True}, headers=headers)
+        self.assign(call["id"], employee["id"], reason="повторное назначение", token=self.supervisor)
+        again = self.client.post("/api/me/status", json={"action": "accepted", "call_id": call["id"]}, headers=headers)
+        self.assertEqual(again.status_code, 200, again.text)
 
         for action in ("arrived", "closed"):
             done = self.client.post(

@@ -160,6 +160,7 @@ async function refresh() {
     appliedRefresh = version;
     const previous = state.selectedCall;
     state.drill = drill.enabled;
+    document.getElementById("drill-speed").value = drill.speed;
     state.reports = reports;
 
     state.employees = employees;
@@ -522,7 +523,7 @@ function executorNodes() {
   if (ctx.adding) {
     nodes.push(linkButton("Снять исполнителя", unassignSelected, "is-danger"), ...holdButton(call));
     const person = state.employees.find(e => e.id === call.assigned_employee_id);
-    if (person && !person.is_training && ["assigned", "accepted"].includes(call.status)) {
+    if (person && ["assigned", "accepted"].includes(call.status)) {
       const select = document.createElement("select");
       select.setAttribute("aria-label", "Транспорт исполнителя");
       select.add(new Option("Пешком", ""));
@@ -1132,8 +1133,15 @@ function renderDrill() {
   document.getElementById("drill-badge").hidden = !state.drill;
   const toggle = document.getElementById("drill-toggle");
   toggle.hidden = !roleAtLeast(Session.user.role, "local_admin");
+  document.getElementById("drill-speed-box").hidden = toggle.hidden || !state.drill;
   toggle.textContent = state.drill ? "Завершить учения" : "Начать учения";
 }
+
+document.getElementById("drill-speed").addEventListener("change", async event => {
+  try { await Api.setDrill(true, Number(event.target.value)); }
+  catch (error) { showToast(error.detail, true); }
+  await refresh();
+});
 
 async function toggleDrill() {
   try {

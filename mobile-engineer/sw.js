@@ -32,6 +32,7 @@ const SHELL = [
   "js/api.js",
   "js/geo.js",
   "js/routemap.js",
+  "js/satellite.js",
   "js/app.js",
   "icons/icon.svg",
 ];

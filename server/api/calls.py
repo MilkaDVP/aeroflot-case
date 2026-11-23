@@ -243,7 +243,7 @@ def candidates_for(db, context, call):
     с причиной снятия, чтобы решение можно было пересмотреть.
     """
     employees = shift_employees(db, context)
-    if call.previous_employee_id is None:
+    if call.previous_employee_id is None or call.allow_previous_employee:
         return employees, None
 
     removed = None
@@ -590,7 +590,7 @@ def change_transport(call_id: int, vehicle_id: int | None = None,
     call = load_call(db, context, call_id)
     claims.ensure_can_change(db, call, context.user)
     employee = call.assigned_employee
-    if not employee or call.status not in ("assigned", "accepted") or employee.is_training:
+    if not employee or call.status not in ("assigned", "accepted"):
         raise HTTPException(409, "Транспорт меняют у инженера в пути")
     if call.vehicle_id == vehicle_id:
         return to_response(call, db)
@@ -604,6 +604,7 @@ def change_transport(call_id: int, vehicle_id: int | None = None,
     employee.return_vehicle = bool(old and old != target and old.status == VEHICLE_IN_USE)
     if old and old != target and not employee.return_vehicle:
         release_vehicle(employee)
+    employee.drill_return_path = None
     call.vehicle = target
     call.require_vehicle_pickup = target is not None and target.status != VEHICLE_IN_USE
     if target and target != old:

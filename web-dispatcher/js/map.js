@@ -33,7 +33,7 @@ const VIEW_PADDING_M = 120;
 const EMPTY_VIEW_HALF_M = 1500;
 
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 30;
+const MAX_ZOOM = 128;
 
 // След хранит точки за это время и не короче этого шага между точками.
 const TRAIL_WINDOW_MS = 3 * 60 * 1000;

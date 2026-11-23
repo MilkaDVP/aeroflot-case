@@ -123,11 +123,20 @@ class TestMovement(DrillCase):
         call = self.register()
         best = self.assign_best(call["id"])
 
-        self.step(best["minutes"] * 60 + 30)
+        for _ in range(2000):
+            self.step(2)
+            if self.call(call["id"])["status"] == "arrived":
+                break
 
         self.assertEqual(self.call(call["id"])["status"], "arrived")
         self.assertEqual(self.employee(best["employee_id"])["status"], "busy")
         self.assertEqual(self.last("arrival", call["id"])["verdict"], "good")
+        speed = self.client.post("/api/drill", json={"enabled": True, "speed": 4}, headers=auth_header(self.admin))
+        self.assertEqual(speed.status_code, 200)
+        self.step(1)
+        self.assertEqual(self.call(call["id"])["status"], "arrived")
+        self.step(2)
+        self.assertEqual(self.call(call["id"])["status"], "closed")
 
     def test_пеший_забирает_машину_по_пути(self):
         # Учебный механик идёт до ТМ-04 пешком, дальше едет: 9,5 мин на весь путь.
@@ -142,8 +151,15 @@ class TestMovement(DrillCase):
         self.assertEqual(tm04["status"], "in_use")
         self.assertEqual(self.call(call["id"])["status"], "accepted")
 
-        self.step(5 * 60)
-        self.assertEqual(self.call(call["id"])["status"], "arrived")
+        self.step(5 * 60 + 20)
+        self.assertEqual(self.call(call["id"])["status"], "closed")
+        self.step(4000)
+        self.step(4000)
+        with SessionLocal() as db:
+            from models.employee import TrainingEngineer
+            person = db.get(TrainingEngineer, mechanic)
+            self.assertIsNone(person.vehicle)
+            self.assertFalse(person.return_to_waiting)
 
     def test_перенос_между_узлами_меняет_начало_пути(self):
         from algorithm.geo import haversine_m

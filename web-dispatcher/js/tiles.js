@@ -196,13 +196,7 @@ class TileLayer {
   }
 
   createTile(template, zoom, column, row, box) {
-    const image = document.createElementNS("http://www.w3.org/2000/svg", "image");
-    const url = template
-      .replace("{z}", zoom)
-      .replace("{x}", column)
-      .replace("{y}", row);
-
-    image.setAttribute("href", url);
+    const image = satelliteTile(template, zoom, column, row, () => this.registerFailure());
     image.setAttribute("x", box.x);
     image.setAttribute("y", box.y);
     // Доля процента перекрытия: без неё между тайлами видны светлые
@@ -214,9 +208,6 @@ class TileLayer {
     image.setAttribute("class", "basemap-tile");
 
     this.requested += 1;
-    image.addEventListener("error", () => this.registerFailure());
-    image.addEventListener("load", () => image.classList.add("loaded"));
-
     this.group.append(image);
     return image;
   }

@@ -236,7 +236,7 @@ const Api = {
 
   // Режим учений: состояние, переключение (администратор), задержка сотрудника.
   drillState: () => request("GET", "/api/drill"),
-  setDrill: (enabled) => request("POST", "/api/drill", { enabled }),
+  setDrill: (enabled, speed) => request("POST", "/api/drill", { enabled, speed }),
   holdEmployee: (employeeId, held) =>
     request("POST", `/api/drill/hold/${employeeId}`, { held }),
 

@@ -127,6 +127,7 @@ class Call(Base):
     # оказались другого объёма. Запись о снятии остаётся в вызове —
     # без неё в разборе не отличить «долго искали исполнителя» от
     # «назначили и передумали».
+    allow_previous_employee: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     previous_employee_id: Mapped[int | None] = mapped_column(
         ForeignKey("route_participants.id"), nullable=True
     )
@@ -143,6 +144,7 @@ class Call(Base):
     pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Сколько метров маршрута пройдено в режиме учений. Пусто, пока
     # исполнитель не начал движение или идёт не по учебному сценарию.
+    drill_work_s: Mapped[float] = mapped_column(Float, default=0, server_default=text("0"))
     sim_progress_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Вызов поддержки: ещё один инженер на тот же борт по тому же вызову.

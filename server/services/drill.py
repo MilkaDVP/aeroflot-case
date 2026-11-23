@@ -9,9 +9,7 @@
 «задержать» останавливает выбранного — так переход «успевает → впритык →
 не успевает» разыгрывается на глазах у экспертов, в реальном времени.
 
-Время не ускоряется намеренно: контрольный срок идёт по настоящим часам,
-и ускоренное движение при настоящем сроке дало бы картину, в которой
-успевают все.
+Множитель аэропорта ускоряет движение и выполнение работ учебной команды.
 
 Двигаются только учебные инженеры без учётных записей.
 """
@@ -41,7 +39,7 @@ from models.shift_event import ShiftEvent
 from models.engineer_action import EngineerAction
 from services.shifts import end_shift
 from services import mentor, support
-from services.assignment import assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
+from services.assignment import advance_after_close, navigation_leg, refresh_navigation, return_destination, assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
 
 MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
@@ -115,16 +113,61 @@ def step(db, airport_icao, dt_s, now=None):
     Возвращает число сдвинутых сотрудников. Коммит — за вызывающим.
     """
     now = now or utc_now()
-    calls = (
-        db.query(Call)
-        .filter(Call.airport_icao == airport_icao, Call.status.in_(MOVING_STATUSES))
-        .all()
-    )
+    airport = db.get(Airport, airport_icao)
+    if not airport or not airport.drill_enabled:
+        return 0
+    dt_s *= airport.drill_speed
+    team = db.query(TrainingEngineer).filter_by(airport_icao=airport_icao, archived=False).all()
     moved = 0
-    for call in calls:
-        if advance(db, call, dt_s, now):
+    for person in team:
+        if person.held:
+            continue
+        if return_destination(person):
+            walk_return_leg(db, person, dt_s, now)
+            continue
+        call = working_call_of(db, person)
+        if not call:
+            continue
+        if call.status == STATUS_ARRIVED:
+            finish_work(db, call, dt_s, now)
+        elif call.status in MOVING_STATUSES and advance(db, call, dt_s, now):
             moved += 1
     return moved
+
+
+def finish_work(db, call, seconds, now):
+    call.drill_work_s = (call.drill_work_s or 0) + seconds
+    if call.drill_work_s >= 10:
+        call.status = "closed"
+        call.closed_at = now
+        advance_after_close(db, call.assigned_employee, call, True)
+        if call.parent_call_id is None:
+            support.close_support(db, call, now)
+
+
+def walk_return_leg(db, person, seconds, now):
+    target = return_destination(person)
+    if person.drill_return_path is None:
+        leg = navigation_leg(person)
+        if not leg or not leg["route_points"]:
+            return
+        points = [[p["lat"], p["lon"]] for p in leg["route_points"][1:]]
+    else:
+        points = list(person.drill_return_path)
+    distance = seconds * speed_mps(person)
+    lat, lon = person.lat, person.lon
+    while points:
+        end_lat, end_lon = points[0]
+        span = haversine_m(lat, lon, end_lat, end_lon)
+        if span > distance:
+            lat += (end_lat - lat) * distance / span
+            lon += (end_lon - lon) * distance / span
+            break
+        lat, lon = points.pop(0)
+        distance -= span
+    record_position(person, lat, lon, LOCATION_MANUAL, now=now)
+    refresh_navigation(db, person)
+    person.drill_return_path = points if points and target == return_destination(person) else None
 
 
 def reroute_after_move(db, employee):
@@ -180,6 +223,8 @@ def advance(db, call, dt_s, now):
     marks = route_marks(graph, call.route_node_ids)
     if not marks:
         return False
+    if call.sim_progress_m is None:
+        call.sim_progress_m = -haversine_m(employee.lat, employee.lon, marks[0][2], marks[0][3])
     if (call.sim_progress_m or 0) < 0:
         marks.insert(0, (call.sim_progress_m, None, employee.lat, employee.lon))
     total = marks[-1][0]
@@ -190,6 +235,15 @@ def advance(db, call, dt_s, now):
         call.status = STATUS_ACCEPTED
         employee.status = STATUS_EN_ROUTE
 
+    start = call.sim_progress_m or 0.0
+    pickup = pickup_distance(call, marks)
+    car = employee.vehicle or call.vehicle
+    if pickup is not None and car and not employee.has_vehicle:
+        walk = (employee.speed_kmh or WALK_SPEED_KMH) / 3.6
+        drive = (car.speed_kmh or VEHICLE_SPEED_KMH) / 3.6
+        travel_s = max(0, pickup - start) / walk + max(0, total - max(start, pickup)) / drive
+    else:
+        travel_s = max(0, total - start) / speed_mps(employee)
     progress = min(next_progress(call, employee, marks, dt_s), total)
     call.sim_progress_m = progress
     lat, lon = point_at(marks, progress)
@@ -200,6 +254,7 @@ def advance(db, call, dt_s, now):
         employee.status = STATUS_BUSY
         if mark_arrived(db, employee, call):
             mentor.review_arrival(db, call, employee, now)
+        finish_work(db, call, max(0, dt_s - travel_s), now)
     return True
 
 

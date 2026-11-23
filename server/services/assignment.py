@@ -214,6 +214,7 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     # исполнителя и машину как None, хотя в базе они записаны.
     if employee.waiting_lat is None:
         employee.waiting_lat, employee.waiting_lon = employee.lat, employee.lon
+    employee.drill_return_path = None
     employee.return_to_waiting = False
     employee.return_vehicle = False
     call.assigned_employee = employee
@@ -324,13 +325,10 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
     graph = get_graph(employee.airport_icao)
     queue = queued_calls_of(db, employee)
     if not queue:
-        if employee.is_training:
-            release_vehicle(employee, graph, closed_call.stand_node_id if park_at_stand else None)
-        else:
-            employee.return_vehicle = bool(employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE)
-            if not employee.return_vehicle:
-                release_vehicle(employee)
-            employee.return_to_waiting = employee.waiting_lat is not None
+        employee.return_vehicle = bool(employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE)
+        if not employee.return_vehicle:
+            release_vehicle(employee)
+        employee.return_to_waiting = employee.waiting_lat is not None
         employee.status = STATUS_FREE
         employee.busy_until = None
         return
@@ -374,6 +372,7 @@ def unassign(db, call, reason):
 
     # Через связь, а не через внешний ключ: сессия не перечитывает объекты
     # после коммита, и previous_employee остался бы пустым в ответе.
+    call.allow_previous_employee = False
     call.previous_employee = employee
     call.unassign_reason = reason
     call.unassigned_at = utc_now()
