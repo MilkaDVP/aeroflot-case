@@ -548,7 +548,7 @@ function clearGraph() {
 // Роли учётных записей в порядке старшинства — для выбора в форме.
 const ACCOUNT_ROLES = ["admin", "local_admin", "shift_supervisor", "dispatcher"];
 const ENGINEER = "engineer";
-const ENGINEER_CARD_FIELDS = ["user-name", "user-mark", "user-types", "user-valid"];
+const ENGINEER_CARD_FIELDS = ["user-name", "user-mark", "user-types", "user-valid", "user-speed", "user-extra-marks"];
 
 /** Роли, которые текущий пользователь вправе назначать: ниже своей. */
 function assignableRoles() {
@@ -849,6 +849,9 @@ function startEngineerEdit(employee, account) {
   el("user-role").value = ENGINEER;
   el("user-role").disabled = true;
   el("user-shift").value = employee.shift;
+  el("user-speed").value = employee.speed_kmh ?? "";
+  el("user-extra-marks").value = employee.qualifications.slice(1).map(mark =>
+    [mark.category, mark.aircraft_types.join(", "), mark.valid_until].join(" | ")).join("\n");
   const mark = employee.qualifications[0] || null;
   if (mark) {
     el("user-mark").value = mark.category;
@@ -901,13 +904,19 @@ function engineerCard() {
     .value.split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
-  if (!types.length) return { error: "Укажите хотя бы один тип ВС" };
+  const qualifications = types.length ? [
+    { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
+  ] : [];
+  for (const row of el("user-extra-marks").value.split("\n").filter(line => line.trim())) {
+    const [category, aircraft, valid_until] = row.split("|").map(part => part.trim());
+    if (!category || !aircraft || !valid_until) return { error: "Проверьте строку дополнительного допуска" };
+    qualifications.push({ category, aircraft_types: aircraft.split(",").map(type => type.trim()), valid_until });
+  }
   return {
     full_name: el("user-name").value.trim(),
     shift: el("user-shift").value,
-    qualifications: [
-      { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
-    ],
+    qualifications,
+    speed_kmh: el("user-speed").value ? Number(el("user-speed").value) : null,
     lat: place.lat,
     lon: place.lon,
     on_shift: el("user-on-shift").checked,
@@ -999,7 +1008,7 @@ async function saveEngineer({ employee, account }) {
   }
   // Начальнику смены сервер разрешает только смену и статус.
   const changes = canManageAccounts()
-    ? { full_name: card.full_name, shift: card.shift, qualifications: [...card.qualifications, ...employee.qualifications.slice(1)] }
+    ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications, speed_kmh: card.speed_kmh }
     : { shift: card.shift };
   // Снятие со смены передаётся и для занятого (его вызов вернётся к
   // подбору); «на смене» для занятого не шлём — он и так на смене.

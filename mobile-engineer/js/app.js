@@ -812,7 +812,7 @@ function onPosition(position) {
     renderIdle();
   }
 
-  if (Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+  if (position.source === "simulation" || Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
     sendPosition(position);
   }
 }

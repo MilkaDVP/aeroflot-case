@@ -111,8 +111,11 @@ def load_employee(db, context, employee_id, model=Employee):
     employee = db.get(model, employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
-    if context.airport_icao and context.user.role != ROLE_ADMIN:
-        check_same_airport(context, employee.airport_icao)
+    if context.user.role != ROLE_ADMIN:
+        if employee.airport_icao not in context.user.airport_icaos:
+            raise HTTPException(403, ERROR_FOREIGN_AIRPORT.format(icao=employee.airport_icao))
+        if context.airport_icao:
+            check_same_airport(context, employee.airport_icao)
     return employee
 
 
