@@ -135,7 +135,7 @@ class AircraftCreateRequest(BaseModel):
 
 
 class AircraftResponse(BaseModel):
-    """Борт на стоянке."""
+    """Борт на стоянке и его последняя живая позиция, если она есть."""
 
     id: int
     board_number: str
@@ -143,3 +143,11 @@ class AircraftResponse(BaseModel):
     airport_icao: str
     stand_node_id: str
     stand_ref: str | None
+    lat: float | None = None
+    lon: float | None = None
+    location_at: str | None = None
+    location_source: str | None = None
+    seen_at: str | None = None
+    location_accuracy_m: float | None = None
+    location_speed_mps: float | None = None
+    track_id: str | None = Field(default=None, description="Внешний ID для /api/v1/track")

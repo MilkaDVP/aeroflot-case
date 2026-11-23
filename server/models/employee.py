@@ -50,6 +50,8 @@ class Employee(Base):
     location_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     location_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    location_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_speed_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Задержан в режиме учений: стоит на месте, хотя назначен на вызов.
     # Так на тренировке разыгрывается «исполнитель не успевает».

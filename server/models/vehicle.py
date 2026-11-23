@@ -5,10 +5,10 @@
 на машине» было флагом в его карточке: система не знала, где стоят
 свободные машины, и не могла предложить пешему инженеру дойти до
 ближайшей. Требование §10 — «учёт наличия поблизости спецтранспорта
-и его влияния на маршрут» — без этого не выполнялось.
+и его влияние на маршрут» — без этого не выполнялось.
 
 Факт «у инженера машина» выводится отсюда, по employee_id, а не хранится
-у инженера: один источник правды вместо двух, которые рано или поздно
+у машины: один источник правды вместо двух, которые рано или поздно
 разойдутся.
 """
 
@@ -44,6 +44,15 @@ class Vehicle(Base):
     employee_id: Mapped[int | None] = mapped_column(
         ForeignKey("employees.id"), nullable=True, index=True
     )
+
+    # Собственный GPS трекера машины. Если машина едет с инженером, на карте
+    # используется более свежая из двух позиций — его телефона или трекера.
+    location_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    location_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    location_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_speed_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # Скорость именно этой машины; None — нормативная скорость спецтранспорта.
     speed_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -52,20 +61,34 @@ class Vehicle(Base):
 
     employee = relationship("Employee", back_populates="vehicle", lazy="selectin")
 
+    def uses_employee_position(self):
+        """Позиция инженера свежее собственной фиксации машины."""
+        if (
+            self.status != VEHICLE_IN_USE
+            or self.employee is None
+            or self.employee.lat is None
+        ):
+            return False
+        if self.employee.location_at is None:
+            return self.location_at is None
+        return self.location_at is None or self.employee.location_at >= self.location_at
+
     def position(self):
         """
         Где машина сейчас.
 
-        Едет с инженером — там же, где он: отдельные координаты машины
-        отставали бы от его GPS. Свободна или ждёт инженера — там, где стоит.
+        Едет с инженером — используется более свежая из позиций его телефона
+        и собственного трекера машины. Свободна или ждёт инженера — там, где стоит.
         """
-        if (
-            self.status == VEHICLE_IN_USE
-            and self.employee is not None
-            and self.employee.lat is not None
-        ):
+        if self.uses_employee_position():
             return self.employee.lat, self.employee.lon
         return self.lat, self.lon
+
+    def location_metadata(self):
+        """Время и источник той позиции, которую вернул position()."""
+        if self.uses_employee_position():
+            return self.employee
+        return self
 
     def as_algorithm_dict(self):
         """Представление для алгоритма подбора — обычный словарь, без ORM."""

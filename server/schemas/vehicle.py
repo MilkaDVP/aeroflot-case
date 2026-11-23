@@ -30,3 +30,10 @@ class VehicleResponse(BaseModel):
     lon: float
     employee_id: int | None
     employee_name: str | None
+    location_at: str | None = None
+    location_source: str | None = None
+    seen_at: str | None = None
+    location_accuracy_m: float | None = None
+    location_speed_mps: float | None = None
+    track_id: str | None = Field(default=None, description="Внешний ID для /api/v1/track")
+    has_own_position: bool = False
