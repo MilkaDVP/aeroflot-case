@@ -6,6 +6,8 @@
 и основания к нему до того, как кого-то назначит.
 """
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -47,7 +49,7 @@ from schemas.call import (
     UrgencyRequest,
 )
 from services import claim as claims
-from services import mentor
+from services import journal, mentor
 from services.assignment import (
     advance_after_close,
     assign_now,
@@ -256,13 +258,18 @@ def candidates_for(db, context, call):
     return remaining, removed
 
 
-def run_suggestion(db, context, call):
+def run_suggestion(db, context, call, purpose=None):
     """
     Запускает подбор по вызову и возвращает результат алгоритма.
 
     В подбор уходят только свободные машины парка: зарезервированную
     за другим вызовом или едущую с другим инженером предложить нельзя.
+
+    purpose — зачем подбор; с ним список кандидатов попадает в журнал
+    событий вместе с затраченным временем. Без него (план ИИ-диспетчера,
+    который опрашивается каждые несколько секунд) — не попадает.
     """
+    started = time.perf_counter()
     graph = get_graph(call.airport_icao)
     aircraft = call.aircraft
     payload = {
@@ -289,6 +296,10 @@ def run_suggestion(db, context, call):
         )
     for entry in result.busy:
         describe_busy(db, entry)
+    if purpose:
+        journal.candidates(
+            db, call, result, (time.perf_counter() - started) * 1000, len(employees), purpose
+        )
     return result
 
 
@@ -437,11 +448,12 @@ def suggest_employee(
     будет отличить согласие диспетчера с системой от переопределения.
     """
     call = load_call(db, context, call_id)
-    result = run_suggestion(db, context, call)
+    result = run_suggestion(db, context, call, purpose="подбор исполнителя по заявке")
 
     # Вызов разбирает другой диспетчер: подбор можно посмотреть, но
-    # записывать предложение в чужой вызов нельзя.
+    # записывать предложение в чужой вызов нельзя. Журнал — пишется.
     if claims.held_by_other(call, context.user):
+        db.commit()
         return SuggestResponse(**result.as_dict())
 
     # Предложение фиксируется только пока вызов не назначен. После
@@ -454,7 +466,7 @@ def suggest_employee(
         call.suggested_employee_id = result.best.employee["id"] if result.best else None
         if call.status == CALL_NEW:
             call.status = CALL_SUGGESTED
-        db.commit()
+    db.commit()
 
     return SuggestResponse(**result.as_dict())
 
@@ -521,7 +533,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
     # должно существовать — иначе переопределение не отличить от обычного
     # назначения, — а свежий результат нужен Наставнику: по нему видно,
     # кого система предлагала в эту минуту и сколько стоит отступление.
-    result = run_suggestion(db, context, call)
+    result = run_suggestion(db, context, call, purpose="проверка перед назначением")
     if free_choice:
         call.suggested_employee_id = employee.id
     elif call.suggested_employee_id is None:

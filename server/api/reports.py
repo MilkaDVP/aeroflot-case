@@ -33,6 +33,7 @@ from models.airport import Airport
 from models.report import REPORT_ACCEPTED, REPORT_NEW, REPORT_REJECTED, Report
 from models.user import DISPATCH_ROLES
 from schemas.call import CallResponse
+from services import journal
 from services.defects import find as find_defect
 
 router = APIRouter(prefix="/api", tags=["Сообщения о неисправностях"])
@@ -213,6 +214,18 @@ def create_report(
         received_at=now,
     )
     db.add(report)
+    journal.record(
+        db, "report_received",
+        f"Принято сообщение о неисправности: «{report.description[:120]}»",
+        airport_icao=icao, board=board,
+        actor={"id": None, "name": report.reporter or "Внешняя система", "role": "external"},
+        params={
+            "источник": source,
+            "борт_известен": aircraft is not None,
+            "сообщено": to_iso_utc(report.reported_at),
+            "получено": to_iso_utc(now),
+        },
+    )
     db.commit()
     return to_response(report)
 

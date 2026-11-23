@@ -688,3 +688,223 @@
 }
 
 .admin-note.is-warn[hidden] { display: none; }
+
+/* --- Журнал событий --- */
+
+.journal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+  min-height: 0;
+}
+
+.journal-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
+  flex-wrap: wrap;
+}
+
+.journal-title h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.journal-integrity {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.journal-integrity.is-ok {
+  border-color: rgba(53, 196, 106, 0.45);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.journal-integrity.is-broken {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.journal-export {
+  margin-left: auto;
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.journal-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--gap-sm) var(--gap);
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.journal-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.journal-filters label[hidden] {
+  display: none;
+}
+
+.journal-search {
+  flex: 1;
+  min-width: 180px;
+}
+
+.journal-call {
+  width: 90px;
+}
+
+.journal-table-wrap {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: auto;
+}
+
+.journal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.journal-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.journal-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.journal-table .num {
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.journal-row {
+  cursor: pointer;
+}
+
+.journal-row:hover,
+.journal-row.is-open {
+  background: var(--bg-hover);
+}
+
+.journal-row td:first-child {
+  border-left: 3px solid transparent;
+}
+
+.journal-row.is-bad td:first-child { border-left-color: var(--danger); }
+.journal-row.is-warn td:first-child { border-left-color: var(--warn); }
+.journal-row.is-good td:first-child { border-left-color: var(--ok); }
+.journal-row.is-bad .journal-type { color: var(--danger-text); }
+.journal-row.is-warn .journal-type { color: var(--warn); }
+.journal-row.is-good .journal-type { color: var(--ok); }
+
+.journal-time {
+  display: block;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.journal-date,
+.journal-role,
+.journal-board {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.journal-cat {
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.journal-type {
+  font-weight: 600;
+}
+
+.journal-text {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.journal-details td {
+  background: var(--bg-deep);
+  padding: 10px 14px 12px;
+}
+
+.journal-params-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-lg);
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.journal-params dl {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.journal-params dt {
+  color: var(--text-muted);
+}
+
+.journal-params dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.journal-empty {
+  padding: 24px;
+  text-align: center;
+}
+
+.journal-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+@media (max-width: 760px) {
+  .journal-export { margin-left: 0; }
+  .journal-table th:nth-child(2),
+  .journal-table td:nth-child(2),
+  .journal-table th:nth-child(7),
+  .journal-table td:nth-child(7) { display: none; }
+}

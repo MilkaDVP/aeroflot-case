@@ -22,6 +22,7 @@ from api import (
     calls,
     drill,
     employees,
+    events,
     me,
     reference,
     reports,
@@ -35,6 +36,11 @@ from constants import DRILL_MAX_STEP_S, DRILL_TICK_S
 from services.shifts import expire_shifts, initialize_shift_clocks
 from services import drill as drill_service
 from services.defects import ensure_builtin_defects
+from services import journal
+from services.journal_http import JournalMiddleware
+
+# Такт контроля норматива для журнала: прогноз прибытия, риск, нарушение.
+JOURNAL_TICK_S = 5
 
 # Веб-диспетчер и PWA раздаются отдельными статическими сервисами, поэтому
 # обращения к API идут с другого источника. Для конкурсного стенда список
@@ -67,6 +73,26 @@ def drill_tick(dt_s):
     except Exception as error:  # такт не должен ронять сервер
         db.rollback()
         print(f"Учения: такт пропущен — {error}")
+    finally:
+        db.close()
+
+
+async def journal_loop():
+    """Раз в несколько секунд пишет в журнал прогнозы, риски и нарушения норматива."""
+    while True:
+        await asyncio.sleep(JOURNAL_TICK_S)
+        await asyncio.to_thread(journal_tick)
+
+
+def journal_tick():
+    db = SessionLocal()
+    try:
+        begin_dispatch_write(db)
+        journal.watch(db)
+        db.commit()
+    except Exception as error:  # такт не должен ронять сервер
+        db.rollback()
+        print(f"Журнал: такт пропущен — {error}")
     finally:
         db.close()
 
@@ -117,9 +143,14 @@ async def lifespan(app: FastAPI):
     ticker = None
     if os.environ.get("DRILL_LOOP", "1") == "1":
         ticker = asyncio.create_task(drill_loop())
+    watcher = None
+    if os.environ.get("JOURNAL_LOOP", "1") == "1":
+        watcher = asyncio.create_task(journal_loop())
     yield
     if ticker is not None:
         ticker.cancel()
+    if watcher is not None:
+        watcher.cancel()
 
 
 app = FastAPI(
@@ -132,12 +163,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Журнал действий и ошибок приёма данных — внутри CORS, чтобы ответы
+# об ошибках, которые он видит, были уже окончательными.
+app.add_middleware(JournalMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Имя файла выгрузки журнала браузер читает из этого заголовка.
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(auth.router)
@@ -152,6 +188,7 @@ app.include_router(reports.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
 app.include_router(ai.router)
+app.include_router(events.router)
 app.include_router(users.router)
 
 

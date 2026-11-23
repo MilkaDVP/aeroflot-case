@@ -12,6 +12,7 @@ from models.call_message import CallMessage
 from models.defect_type import DefectType
 from models.employee import Employee
 from models.engineer_action import EngineerAction
+from models.event_log import EventLog
 from models.report import Report
 from models.shift_event import ShiftEvent
 from models.user import AuthSession, User
@@ -26,6 +27,7 @@ __all__ = [
     "DefectType",
     "Employee",
     "EngineerAction",
+    "EventLog",
     "Report",
     "ShiftEvent",
     "User",

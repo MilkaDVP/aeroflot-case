@@ -50,6 +50,10 @@ def get_context(token=Depends(get_token), db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_TOKEN)
 
+    # Журнал событий записывает изменения от имени этого пользователя.
+    from services import journal
+
+    journal.set_actor(db, session.user)
     return Context(session, session.user)
 
 

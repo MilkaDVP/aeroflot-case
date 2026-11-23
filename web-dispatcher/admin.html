@@ -32,6 +32,7 @@
       <button type="button" data-tab="shifts">Смены</button>
       <button type="button" data-tab="vehicles">Спецтранспорт</button>
       <button type="button" data-tab="aircraft">Борта</button>
+      <button type="button" data-tab="journal">Журнал</button>
     </nav>
 
     <!-- ======================= Аэропорты ======================= -->
@@ -331,6 +332,63 @@
     </section>
 
     <!-- ======================= Борта ======================= -->
+    <section class="admin-page" id="page-journal" hidden>
+      <div class="journal">
+        <div class="journal-bar">
+          <div class="journal-title">
+            <h2>Журнал событий</h2>
+            <span class="muted small" id="journal-scope">—</span>
+          </div>
+          <div class="journal-integrity" id="journal-integrity" title="Каждая запись хранит хэш SHA-256 своего содержимого и предыдущей записи. Правка и удаление запрещены базой.">проверка…</div>
+          <div class="journal-export">
+            <button type="button" id="journal-csv">Выгрузить CSV</button>
+            <button type="button" class="primary" id="journal-xlsx">Выгрузить Excel</button>
+          </div>
+        </div>
+
+        <form class="journal-filters" id="journal-filters">
+          <label>С <input type="datetime-local" step="1" id="journal-from"></label>
+          <label>По <input type="datetime-local" step="1" id="journal-to"></label>
+          <label>Раздел
+            <select id="journal-category"><option value="">все</option></select>
+          </label>
+          <label id="journal-airport-box" hidden>Аэропорт
+            <select id="journal-airport"><option value="">все</option></select>
+          </label>
+          <label class="journal-search">Поиск
+            <input type="search" id="journal-q" placeholder="борт, сотрудник, текст">
+          </label>
+          <label>Заявка №
+            <input type="number" min="1" id="journal-call" class="journal-call">
+          </label>
+          <button type="button" id="journal-reset">Сбросить</button>
+        </form>
+
+        <div class="journal-table-wrap">
+          <table class="journal-table">
+            <thead>
+              <tr>
+                <th>Время (местное)</th>
+                <th>Аэропорт</th>
+                <th>Раздел</th>
+                <th>Событие</th>
+                <th>Заявка</th>
+                <th>Инициатор</th>
+                <th>Исполнитель</th>
+                <th class="num">мс</th>
+              </tr>
+            </thead>
+            <tbody id="journal-rows"></tbody>
+          </table>
+          <p class="muted journal-empty" id="journal-empty" hidden>Событий по фильтру нет</p>
+        </div>
+        <div class="journal-foot">
+          <span class="muted small" id="journal-count">—</span>
+          <button type="button" id="journal-more" hidden>Показать ещё</button>
+        </div>
+      </div>
+    </section>
+
     <section class="admin-page" id="page-aircraft" hidden>
       <div class="admin-columns">
 
@@ -371,6 +429,7 @@
   <script src="js/tiles.js?v=__BUILD__"></script>
   <script src="js/map.js?v=__BUILD__"></script>
   <script src="js/editor.js?v=__BUILD__"></script>
+  <script src="js/journal.js?v=__BUILD__"></script>
   <script src="js/admin.js?v=__BUILD__"></script>
 </body>
 </html>

@@ -7,22 +7,12 @@
 то есть проверяется ровно та конфигурация, которую увидит жюри.
 """
 
-import os
-import tempfile
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
 
-# Переменные окружения выставляются до импорта модулей сервера: адрес базы
-# читается при импорте database.py и позже уже не меняется.
-_TEMP_DIR = tempfile.mkdtemp(prefix="aeroflot-test-")
-_DB_PATH = Path(_TEMP_DIR) / "test.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
-# Фоновые такты учений в тестах выключены: движение проверяется прямым
-# вызовом шага с заданным временем, иначе результат зависел бы от часов.
-os.environ["DRILL_LOOP"] = "0"
-# Тесты не обращаются к внешнему GigaChat, даже если ключ лежит в server/.env.
-os.environ["GIGACHAT_ENABLED"] = "0"
+# Временная база и выключенные фоновые такты выставлены в tests/__init__.py —
+# он импортируется раньше любого тестового модуля.
+import tests  # noqa: F401,E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
