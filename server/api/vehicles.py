@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, require_airport, require_roles_in_airport
-from constants import VEHICLE_FREE
+from clock import to_iso_utc, utc_now
+from constants import LOCATION_MANUAL, VEHICLE_FREE
 from database import get_db, get_dispatch_db
 from models.call import ACTIVE_CALL_STATUSES, Call
 from schemas.employee import LocationRequest
@@ -33,6 +34,7 @@ ERROR_IN_WORK = (
 def to_response(vehicle):
     """Модель машины в схему ответа с её текущим местом."""
     lat, lon = vehicle.position()
+    location = vehicle.location_metadata()
     return VehicleResponse(
         id=vehicle.id,
         call_sign=vehicle.call_sign,
@@ -42,6 +44,13 @@ def to_response(vehicle):
         lon=lon,
         employee_id=vehicle.employee_id,
         employee_name=vehicle.employee.full_name if vehicle.employee else None,
+        location_at=to_iso_utc(location.location_at),
+        location_source=location.location_source,
+        seen_at=to_iso_utc(location.seen_at),
+        location_accuracy_m=location.location_accuracy_m,
+        location_speed_mps=location.location_speed_mps,
+        track_id=f"v-{vehicle.id:02d}",
+        has_own_position=not vehicle.uses_employee_position(),
     )
 
 
@@ -93,6 +102,7 @@ def create_vehicle(
             status.HTTP_409_CONFLICT, ERROR_DUPLICATE.format(call_sign=call_sign)
         )
 
+    now = utc_now()
     vehicle = Vehicle(
         airport_icao=context.airport_icao,
         call_sign=call_sign,
@@ -100,6 +110,9 @@ def create_vehicle(
         status=VEHICLE_FREE,
         lat=payload.lat,
         lon=payload.lon,
+        location_at=now,
+        seen_at=now,
+        location_source=LOCATION_MANUAL,
     )
     db.add(vehicle)
     db.commit()
@@ -153,5 +166,10 @@ def move_vehicle(
 ):
     vehicle = available_vehicle(db, context, vehicle_id)
     vehicle.lat, vehicle.lon = payload.lat, payload.lon
+    vehicle.location_at = utc_now()
+    vehicle.seen_at = vehicle.location_at
+    vehicle.location_source = LOCATION_MANUAL
+    vehicle.location_accuracy_m = None
+    vehicle.location_speed_mps = None
     db.commit()
     return to_response(vehicle)

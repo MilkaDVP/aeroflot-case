@@ -74,6 +74,9 @@ def to_response(employee):
         location_at=to_iso_utc(employee.location_at),
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
+        location_accuracy_m=employee.location_accuracy_m,
+        location_speed_mps=employee.location_speed_mps,
+        track_id=f"e-{employee.id:02d}",
         held=bool(employee.held),
     )
 

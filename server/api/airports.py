@@ -11,7 +11,8 @@ from auth.dependencies import (
     require_airport,
     require_roles_in_airport,
 )
-from constants import AIRCRAFT_GROUP_BY_TYPE
+from clock import to_iso_utc, utc_now
+from constants import AIRCRAFT_GROUP_BY_TYPE, LOCATION_MANUAL
 from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.aircraft import Aircraft
@@ -98,6 +99,14 @@ def aircraft_response(graph, item):
         airport_icao=item.airport_icao,
         stand_node_id=item.stand_node_id,
         stand_ref=stand_ref(graph, item.stand_node_id),
+        lat=item.lat,
+        lon=item.lon,
+        location_at=to_iso_utc(item.location_at),
+        location_source=item.location_source,
+        seen_at=to_iso_utc(item.seen_at),
+        location_accuracy_m=item.location_accuracy_m,
+        location_speed_mps=item.location_speed_mps,
+        track_id=item.board_number,
     )
 
 
@@ -193,7 +202,14 @@ def move_aircraft(
     if stand is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "В аэропорту нет стоянок")
     check_stand_available(db, context.airport_icao, stand, aircraft.id)
+    aircraft.lat, aircraft.lon = payload.lat, payload.lon
+    aircraft.location_at = utc_now()
+    aircraft.seen_at = aircraft.location_at
+    aircraft.location_source = LOCATION_MANUAL
+    aircraft.location_accuracy_m = None
+    aircraft.location_speed_mps = None
     if aircraft.stand_node_id == stand["id"]:
+        db.commit()
         return aircraft_response(graph, aircraft)
 
     aircraft.stand_node_id = stand["id"]
