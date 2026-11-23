@@ -20,6 +20,7 @@ class FlightradarSyncResponse(BaseModel):
     """Итог синхронизации без сохранения сырого ответа API."""
 
     airport_icao: str
+    provider: str = Field(description="Источник позиций: adsblol или flightradar24")
     fetched_at: datetime
     received: int
     created: int

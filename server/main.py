@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api import (
     admin_airports,
+    adsblol,
     airports,
     auth,
     calls,
@@ -134,6 +135,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(airports.router)
+app.include_router(adsblol.router)
 app.include_router(flightradar.router)
 app.include_router(employees.router)
 app.include_router(calls.router)

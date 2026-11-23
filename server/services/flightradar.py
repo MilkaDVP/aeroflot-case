@@ -166,7 +166,9 @@ def fetch_flightradar_positions(graph):
         raise FlightradarError("Flightradar24 вернул ошибку запроса", 502) from error
 
 
-def sync_flightradar_aircraft(db, graph, positions, started=None):
+def sync_flightradar_aircraft(
+    db, graph, positions, started=None, provider="flightradar24"
+):
     """Создаёт новые борта по live-позициям и возвращает построчный результат.
 
     Существующие борта не перемещаются: у них могут быть активные вызовы и
@@ -255,6 +257,7 @@ def sync_flightradar_aircraft(db, graph, positions, started=None):
     db.commit()
     return FlightradarSyncResponse(
         airport_icao=icao,
+        provider=provider,
         fetched_at=datetime.now(timezone.utc),
         received=len(positions),
         created=created,
