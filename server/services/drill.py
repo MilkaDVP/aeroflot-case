@@ -37,6 +37,9 @@ from graph_registry import get_graph
 from models.airport import Airport
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, Call
 from models.employee import TrainingEngineer
+from models.shift_event import ShiftEvent
+from models.engineer_action import EngineerAction
+from services.shifts import end_shift
 from services import mentor, support
 from services.assignment import assigned_route, mark_arrived, record_position, release_vehicle, working_call_of
 
@@ -44,7 +47,7 @@ MOVING_STATUSES = (STATUS_ASSIGNED, STATUS_ACCEPTED)
 
 
 def ensure_training_team(db, icao):
-    if db.query(TrainingEngineer.id).filter_by(airport_icao=icao).first():
+    if db.query(TrainingEngineer.id).filter_by(airport_icao=icao, archived=False).first():
         return
     graph = get_graph(icao)
     bases = graph.nodes_of_type("tech_center") or graph.nodes_of_type("stand")
@@ -80,11 +83,20 @@ def set_enabled(db, airport_icao, enabled):
     if enabled:
         ensure_training_team(db, airport_icao)
     else:
-        held = db.query(TrainingEngineer).filter(
-            TrainingEngineer.airport_icao == airport_icao, TrainingEngineer.held.is_(True)
-        )
-        for employee in held:
+        team = db.query(TrainingEngineer).filter_by(airport_icao=airport_icao, archived=False).all()
+        for employee in team:
+            end_shift(db, employee, "Учения завершены")
             employee.held = False
+            db.flush()
+            key = employee.id
+            referenced = (db.query(Call.id).filter((Call.assigned_employee_id == key)
+                          | (Call.previous_employee_id == key) | (Call.suggested_employee_id == key)).first()
+                          or db.query(ShiftEvent.id).filter_by(employee_id=key).first()
+                          or db.query(EngineerAction.employee_id).filter_by(employee_id=key).first())
+            if referenced:
+                employee.archived = True
+            else:
+                db.delete(employee)
     return airport
 
 
