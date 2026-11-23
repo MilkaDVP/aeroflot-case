@@ -95,27 +95,21 @@ function buildCallFormMarkup(options) {
 
       ${options.report ? defectTypeField(options) + wordsField(options) : wordsField(options) + defectTypeField(options)}
 
-      <div class="defect-new" id="form-defect-new" hidden>
-        <div class="defect-new-title">Новый тип неисправности</div>
-        <div class="modal-field">
-          <label for="form-new-name">Название</label>
-          <input id="form-new-name" maxlength="120">
+      <div class="nt" id="form-defect-new" hidden>
+        <div class="nt-head">
+          <span class="nt-title">Новый тип неисправности</span>
+          <button type="button" class="nt-close" id="form-new-cancel" title="Не заводить — вернуться к «Авто»">✕</button>
         </div>
-        <div class="defect-new-row">
-          <div class="modal-field">
-            <label for="form-new-ata">Глава ATA</label>
-            <select id="form-new-ata"></select>
-          </div>
-          <div class="modal-field">
-            <label for="form-new-category">Допуск</label>
-            <select id="form-new-category">
-              <option value="A">A — простые</option>
-              <option value="B1">B1 — механика</option>
-              <option value="B2">B2 — авионика</option>
-            </select>
-          </div>
+        <input id="form-new-name" class="cf-input nt-name" maxlength="120"
+               placeholder="Название, например «Заклинило клапан ПОС»" aria-label="Название типа">
+        <select id="form-new-ata" class="cf-input nt-ata" aria-label="Глава ATA"></select>
+        <div class="nt-cat" role="radiogroup" aria-label="Допуск">
+          <button type="button" class="nt-seg" data-cat="A" role="radio"><b>A</b><span>простые работы</span></button>
+          <button type="button" class="nt-seg" data-cat="B1" role="radio"><b>B1</b><span>механика</span></button>
+          <button type="button" class="nt-seg" data-cat="B2" role="radio"><b>B2</b><span>авионика</span></button>
         </div>
-        <div class="defect-new-hint" id="form-new-hint"></div>
+        <input type="hidden" id="form-new-category" value="B1">
+        <div class="nt-hint" id="form-new-hint"></div>
       </div>
 
       <div class="cf-options">
@@ -277,7 +271,11 @@ function bindCallForm(form, options) {
   query.addEventListener("input", () => scheduleDefectSearch(form));
   query.addEventListener("keydown", (event) => onDefectKeydown(form, event));
   field(form, "#form-new-ata").addEventListener("change", () => onChapterChange(form));
-  field(form, "#form-new-category").addEventListener("change", () => updateSubmitState(form));
+  for (const button of form.root.querySelectorAll(".nt-seg")) {
+    button.addEventListener("click", () => setCategory(form, button.dataset.cat));
+  }
+  setCategory(form, field(form, "#form-new-category").value);
+  field(form, "#form-new-cancel").addEventListener("click", () => resetDefect(form));
   field(form, "#form-new-name").addEventListener("input", () => updateSubmitState(form));
 
   field(form, "#form-cancel").addEventListener("click", () => closeCallForm(form));
@@ -322,6 +320,7 @@ async function runDefectSearch(form) {
     form.results = [];
     form.active = -1;
     renderDefectResults(form, "");
+    updateSubmitState(form);
     return;
   }
 
@@ -337,6 +336,8 @@ async function runDefectSearch(form) {
     // иначе первый вариант выглядел бы уже выбранным.
     form.active = -1;
     renderDefectResults(form, text);
+    // Появился «Авто» с типом — кнопка доступна сразу, без лишних щелчков.
+    updateSubmitState(form);
   } catch (error) {
     showFormError(form, error.detail);
   }
@@ -572,13 +573,24 @@ async function fillChapters(form) {
  * предлагает и почему, и может её сменить — например, для посадочных фар,
  * которые по главе «Освещение», но работа уровня B1.
  */
+/** Допуск нового типа — сегментами A / B1 / B2. */
+function setCategory(form, category) {
+  field(form, "#form-new-category").value = category;
+  for (const button of form.root.querySelectorAll(".nt-seg")) {
+    const on = button.dataset.cat === category;
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-checked", String(on));
+  }
+  updateSubmitState(form);
+}
+
 function onChapterChange(form) {
   const ata = field(form, "#form-new-ata").value;
   const chapter = (ataChaptersCache || []).find((item) => item.ata === ata);
   const hint = field(form, "#form-new-hint");
 
   if (chapter) {
-    field(form, "#form-new-category").value = chapter.default_category;
+    setCategory(form, chapter.default_category);
     hint.textContent =
       `По главе «${chapter.title}» обычно требуется ${chapter.default_category}. ` +
       "Смените, если работа другого уровня.";
@@ -592,7 +604,8 @@ function onChapterChange(form) {
 
 function updateSubmitState(form) {
   // Тип не обязателен: хватает описания — тип определит сервер.
-  const described = searchText(form).length >= 3;
+  // «Авто» с найденным типом — уже выбор: уйдёт ровно то, что на чипе.
+  const described = searchText(form).length >= 3 || Boolean(form.results[0]);
   const ready =
     form.mode === "new"
       ? field(form, "#form-new-name").value.trim().length >= 3 &&
@@ -620,7 +633,9 @@ async function submitCallForm(form, options) {
   updateSubmitState(form);
 
   try {
-    let code = form.selected ? form.selected.code : null;
+    // «Авто» отправляет тот тип, что показан на чипе, — сервер не должен
+    // угадывать заново и поставить другое. Без совпадений — определит сам.
+    let code = form.selected ? form.selected.code : form.results[0]?.code || null;
 
     if (form.mode === "new") {
       const created = await Api.createDefectType({
