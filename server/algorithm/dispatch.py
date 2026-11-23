@@ -160,7 +160,7 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
     # (если нужен инструмент) и проходы Дейкстры от стоянки и складов —
     # один раз на подбор (см. transport.py).
     depots = (warehouses(graph) or None) if call.get("needs_tools") else None
-    net = Network(graph, stand_id, vehicles or [], depots)
+    net = Network(graph, stand_id, vehicles or [], depots, call.get("waypoints"))
 
     candidates = []
     rejected = []

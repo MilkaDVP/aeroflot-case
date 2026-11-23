@@ -103,7 +103,7 @@ CHAIN_KEY = "journal_chain"
 
 # Поля заявки, изменения которых становятся событиями.
 TRACKED = ("status", "route_node_ids", "eta_at", "first_arrived_at", "urgent", "aog", "work_stage",
-           "needs_tools", "tools_taken_at")
+           "needs_tools", "tools_taken_at", "waypoints")
 _MISSING = object()
 
 
@@ -368,11 +368,12 @@ def changed(db, call, changes, ts, actor):
         arrival(db, call, changes["first_arrived_at"][1], ts, actor)
     elif "eta_at" in changes and changes["eta_at"][1] is not None and call.first_arrived_at is None:
         forecast(db, call, changes["eta_at"][1], ts, actor, "расчёт маршрута")
-    flags = {key: changes[key] for key in ("urgent", "aog", "work_stage", "needs_tools", "tools_taken_at")
-             if key in changes}
+    flags = {key: changes[key] for key in ("urgent", "aog", "work_stage", "needs_tools", "tools_taken_at",
+                                           "waypoints") if key in changes}
     if flags:
         names = {"urgent": "срочность", "aog": "AOG", "work_stage": "этап работ",
-                 "needs_tools": "нужен инструмент", "tools_taken_at": "инструмент получен"}
+                 "needs_tools": "нужен инструмент", "tools_taken_at": "инструмент получен",
+                 "waypoints": "промежуточные точки"}
         record(
             db, "call_flags",
             "Изменено: " + ", ".join(f"{names[k]} {v[0]} → {v[1]}" for k, v in flags.items()),

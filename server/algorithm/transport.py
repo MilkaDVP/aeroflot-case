@@ -8,8 +8,11 @@
 - своя машина (инженер уже в ней);
 - пешком до свободной машины парка, пересадка, дальше на ней.
 
-Если вызову нужен инструмент со склада, в маршрут входит склад
-(промежуточная точка), и варианты становятся многоточечными:
+Диспетчер может задать промежуточные точки — по порядку: склад (30 с
+на инструмент), стоянку спецтехники (пересадка на машину), любую другую
+точку (маршрут проходит через неё). Если вызову нужен инструмент, а
+склад не выбран — система сама выберет самый быстрый склад. Варианты
+становятся многоточечными, например:
 
 - пешком на склад → пешком к борту;
 - пешком на склад → пешком к машине → на машине к борту
@@ -42,11 +45,16 @@ from constants import (
 STOP_WAREHOUSE = "warehouse"
 STOP_BOARD = "board"
 STOP_ALIGHT = "alight"
+# Промежуточная точка, через которую маршрут просто проходит.
+STOP_PASS = "pass"
+# Стоянка спецтехники: здесь пересадка на машину.
+STOP_PARKING = "parking"
 
 STOP_TITLES = {
     STOP_WAREHOUSE: "получить инструмент",
     STOP_BOARD: "посадка в спецтранспорт",
     STOP_ALIGHT: "высадка",
+    STOP_PASS: "через точку",
 }
 
 
@@ -127,12 +135,21 @@ class Plan:
         }
 
 
+def place_name(node):
+    """Как назвать точку человеку: «Склад №1», «стоянка 4»; перекрёсток — без имени."""
+    if not node or node.get("type") == "junction":
+        return None
+    if node.get("type") == "stand":
+        return f"стоянка {node.get('ref')}"
+    return node.get("ref")
+
+
 def stop(graph, kind, node_id, dwell_s, final=False):
     node = graph.node(node_id) or {}
     return {
         "kind": kind,
         "node_id": node_id,
-        "name": node.get("ref") if kind == STOP_WAREHOUSE else None,
+        "name": place_name(node),
         "title": STOP_TITLES[kind],
         "dwell_s": dwell_s,
         "final": final,
@@ -163,18 +180,43 @@ def warehouses(graph):
     return [node["id"] for node in graph.nodes_of_type("warehouse")]
 
 
+def waypoint_kind(graph, node_id):
+    """Что делать в промежуточной точке — по виду объекта."""
+    node_type = (graph.node(node_id) or {}).get("type")
+    if node_type == "warehouse":
+        return STOP_WAREHOUSE
+    if node_type == "vehicle_parking":
+        return STOP_PARKING
+    return STOP_PASS
+
+
+def normalize_waypoints(graph, waypoints):
+    """Список узлов промежуточных точек — только существующие вершины."""
+    result = []
+    for item in waypoints or []:
+        node_id = item["node_id"] if isinstance(item, dict) else item
+        if graph.node(node_id) is not None:
+            result.append(node_id)
+    return result
+
+
 class Network:
     """
-    Всё, что общее для кандидатов одного вызова: цель, машины, склады
-    и кэш проходов Дейкстры по (точка, способ, скорость).
+    Всё, что общее для кандидатов одного вызова: цель, машины, точки
+    маршрута и кэш проходов Дейкстры по (точка, способ, скорость).
+
+    waypoints — промежуточные точки, выбранные диспетчером, по порядку.
+    depots — склады, один из которых обязан войти в маршрут (если склада
+    среди точек нет): система сама выберет, какой быстрее.
     """
 
-    def __init__(self, graph, goal_id, vehicles=None, depots=None):
+    def __init__(self, graph, goal_id, vehicles=None, depots=None, waypoints=None):
         self.graph = graph
         self.goal = goal_id
         self.prepared = prepare_vehicles(graph, vehicles or [])
-        # Склады, через которые обязан пройти маршрут; None — склад не нужен.
-        self.depots = depots
+        self.waypoints = normalize_waypoints(graph, waypoints)
+        has_warehouse = any(waypoint_kind(graph, n) == STOP_WAREHOUSE for n in self.waypoints)
+        self.depots = None if has_warehouse else (depots or None)
         self._maps = {}
 
     def times(self, start_id, mode, speed_kmh=None):
@@ -183,138 +225,153 @@ class Network:
             self._maps[key] = shortest_paths_from(self.graph, start_id, mode, speed_kmh)
         return self._maps[key]
 
+    def chains(self):
+        """Варианты цепочки точек: выбранные диспетчером, и склад — если нужен."""
+        if not self.depots:
+            return [self.waypoints]
+        return [[depot] + self.waypoints for depot in self.depots]
+
 
 def seconds(distance_m, mode, speed_kmh=None):
     return distance_m / (agent_speed(mode, speed_kmh) / 3.6)
 
 
-# --- Варианты ----------------------------------------------------------------
+# --- Поиск варианта ------------------------------------------------------------
 
-def options(net, employee):
+FOOT = "foot"
+PARKING_WALK_LIMIT_S = 300
+
+
+def best_chain(net, employee, chain, allow_fleet=True, fleet_only=False):
     """
-    Все варианты добраться для сотрудника: (секунды, рецепт).
+    Самый быстрый проход по цепочке точек: (секунды, рецепт) или None.
 
-    Рецепт — список шагов: ("walk"|"drive", от, до, подход в метрах)
-    и ("stop", вид, узел, задержка, финальная?), плюс машина и признак
-    пересадки на неё.
+    Пошаговый перебор по участкам «точка → следующая точка». Состояние
+    после участка — пешком или в машине (в какой). На каждом участке
+    пешеход может идти пешком или дойти до свободной машины, сесть
+    и доехать; в машине — едет дальше. В точке-складе — 30 с (в машине:
+    высадка, склад, посадка), на стоянке спецтехники — пересадка на машину,
+    через остальные точки маршрут просто проходит. У борта — высадка.
     """
     graph, goal = net.graph, net.goal
-    found = []
+    points = chain + [goal]
     own = employee.get("vehicle")
-    tools = net.depots
+    walk_speed = employee.get("speed_kmh")
 
+    # Состояние: ключ (FOOT или идентификатор машины) → (секунды, шаги, машина, пересадка?).
     if own is not None:
-        # Машина уже при нём: едет от своих координат.
         speed = own.get("speed_kmh")
         entry, offset = graph.nearest_node(employee["lat"], employee["lon"], MODE_VEHICLE)
         if entry is None:
-            return found
-        start_s = seconds(offset, MODE_VEHICLE, speed)
-        to_goal = net.times(goal, MODE_VEHICLE, speed)
-        if not tools and entry["id"] in to_goal:
-            found.append((
-                start_s + to_goal[entry["id"]] + VEHICLE_BOARDING_S,
-                {"vehicle": own, "pickup": False, "steps": [
-                    ("drive", entry["id"], goal, offset, speed),
-                    ("stop", STOP_ALIGHT, goal, VEHICLE_BOARDING_S, True),
-                ]},
-            ))
-        for depot in tools or []:
-            to_depot = net.times(depot, MODE_VEHICLE, speed)
-            if entry["id"] in to_depot and depot in to_goal:
-                found.append((
-                    start_s + to_depot[entry["id"]] + VEHICLE_BOARDING_S + TOOL_PICKUP_S
-                    + VEHICLE_BOARDING_S + to_goal[depot] + VEHICLE_BOARDING_S,
-                    {"vehicle": own, "pickup": False, "steps": [
-                        ("drive", entry["id"], depot, offset, speed),
-                        ("stop", STOP_ALIGHT, depot, VEHICLE_BOARDING_S, False),
-                        ("stop", STOP_WAREHOUSE, depot, TOOL_PICKUP_S, False),
-                        ("stop", STOP_BOARD, depot, VEHICLE_BOARDING_S, False),
-                        ("drive", depot, goal, 0.0, speed),
-                        ("stop", STOP_ALIGHT, goal, VEHICLE_BOARDING_S, True),
-                    ]},
-                ))
-        return found
+            return None
+        states = {("own",): (seconds(offset, MODE_VEHICLE, speed), [], own, False, entry["id"], offset)}
+    else:
+        entry, approach = graph.nearest_node(employee["lat"], employee["lon"], MODE_WALK)
+        if entry is None:
+            return None
+        states = {FOOT: (seconds(approach, MODE_WALK, walk_speed), [], None, False, entry["id"], approach)}
 
-    walk_speed = employee.get("speed_kmh")
-    entry, approach = graph.nearest_node(employee["lat"], employee["lon"], MODE_WALK)
-    if entry is None:
-        return found
-    start = entry["id"]
-    approach_s = seconds(approach, MODE_WALK, walk_speed)
-    walk_from_me = net.times(start, MODE_WALK, walk_speed)
+    for index, target in enumerate(points):
+        final = index == len(points) - 1
+        moved = {}
 
-    def ride(item, origin_s, origin, origin_approach, destination, to_destination, tail_steps, tail_s):
-        """Дойти от origin до машины item, сесть и доехать до destination."""
-        node = item["node_id"]
-        vehicle = item["vehicle"]
-        speed = vehicle.get("speed_kmh")
-        offset = item["offset_m"]
-        if node not in origin_s or node not in to_destination:
-            return
-        total = (
-            origin_s[node] + seconds(offset, MODE_WALK, walk_speed) + VEHICLE_BOARDING_S
-            + seconds(offset, MODE_VEHICLE, speed) + to_destination[node] + tail_s
-        )
-        steps = [
-            ("walk", origin, node, origin_approach + offset, walk_speed),
-            ("stop", STOP_BOARD, node, VEHICLE_BOARDING_S, False),
-            ("drive", node, destination, offset, speed),
-        ] + tail_steps
-        return total, {"vehicle": vehicle, "pickup": True, "steps": steps}
+        def keep(key, value):
+            if value is not None and (key not in moved or value[0] < moved[key][0]):
+                moved[key] = value
 
-    if not tools:
-        if goal in walk_from_me:
-            found.append((approach_s + walk_from_me[goal], {"vehicle": None, "pickup": False, "steps": [
-                ("walk", start, goal, approach, walk_speed),
-            ]}))
-        for item in net.prepared:
-            to_goal = net.times(goal, MODE_VEHICLE, item["vehicle"].get("speed_kmh"))
-            option = ride(item, walk_from_me, start, approach, goal, to_goal,
-                          [("stop", STOP_ALIGHT, goal, VEHICLE_BOARDING_S, True)], VEHICLE_BOARDING_S)
-            if option:
-                found.append((approach_s + option[0], option[1]))
-        return found
+        for key, (cost, steps, vehicle, pickup, origin, extra) in states.items():
+            if key == FOOT:
+                walk = net.times(origin, MODE_WALK, walk_speed)
+                if target in walk:
+                    keep(FOOT, (cost + walk[target], steps + [("walk", origin, target, extra, walk_speed)],
+                                None, False, target, 0.0))
+                if allow_fleet:
+                    for item in net.prepared:
+                        node, fleet = item["node_id"], item["vehicle"]
+                        speed = fleet.get("speed_kmh")
+                        drive = net.times(target, MODE_VEHICLE, speed)
+                        if node not in walk or node not in drive:
+                            continue
+                        offset = item["offset_m"]
+                        keep(fleet["id"], (
+                            cost + walk[node] + seconds(offset, MODE_WALK, walk_speed) + VEHICLE_BOARDING_S
+                            + seconds(offset, MODE_VEHICLE, speed) + drive[node],
+                            steps + [
+                                ("walk", origin, node, extra + offset, walk_speed),
+                                ("stop", STOP_BOARD, node, VEHICLE_BOARDING_S, False),
+                                ("drive", node, target, offset, speed),
+                            ],
+                            fleet, True, target, 0.0,
+                        ))
+            else:
+                speed = vehicle.get("speed_kmh")
+                drive = net.times(origin, MODE_VEHICLE, speed)
+                if target in drive:
+                    keep(key, (cost + drive[target], steps + [("drive", origin, target, extra, speed)],
+                               vehicle, pickup, target, 0.0))
+        if not moved:
+            return None
 
-    for depot in tools:
-        if depot not in walk_from_me:
-            continue
-        reach = approach_s + walk_from_me[depot] + TOOL_PICKUP_S
-        walk_from_depot = net.times(depot, MODE_WALK, walk_speed)
-        warehouse = ("stop", STOP_WAREHOUSE, depot, TOOL_PICKUP_S, False)
+        # Что делать в точке.
+        states = {}
+        for key, (cost, steps, vehicle, pickup, origin, extra) in moved.items():
+            if final:
+                if key != FOOT:
+                    cost += VEHICLE_BOARDING_S
+                    steps = steps + [("stop", STOP_ALIGHT, target, VEHICLE_BOARDING_S, True)]
+                states[key] = (cost, steps, vehicle, pickup, origin, extra)
+                continue
+            kind = waypoint_kind(graph, target)
+            if kind == STOP_WAREHOUSE:
+                if key == FOOT:
+                    cost += TOOL_PICKUP_S
+                    steps = steps + [("stop", STOP_WAREHOUSE, target, TOOL_PICKUP_S, False)]
+                else:
+                    cost += 2 * VEHICLE_BOARDING_S + TOOL_PICKUP_S
+                    steps = steps + [
+                        ("stop", STOP_ALIGHT, target, VEHICLE_BOARDING_S, False),
+                        ("stop", STOP_WAREHOUSE, target, TOOL_PICKUP_S, False),
+                        ("stop", STOP_BOARD, target, VEHICLE_BOARDING_S, False),
+                    ]
+            elif kind == STOP_PASS:
+                steps = steps + [("stop", STOP_PASS, target, 0, False)]
+            elif kind == STOP_PARKING and key == FOOT and allow_fleet:
+                # Стоянка спецтехники — пересадка: здесь берётся машина,
+                # стоящая ближе всех к этой точке.
+                if net.prepared:
+                    walk = net.times(target, MODE_WALK, walk_speed)
+                    # Машина должна стоять здесь же, на стоянке, а не где-то
+                    # на другом конце поля: до 5 минут пешком.
+                    reachable = [item for item in net.prepared
+                                 if item["node_id"] in walk and walk[item["node_id"]] <= PARKING_WALK_LIMIT_S]
+                    if reachable:
+                        item = min(reachable, key=lambda it: walk[it["node_id"]] + it["offset_m"])
+                        fleet = item["vehicle"]
+                        offset = item["offset_m"]
+                        cost += walk[item["node_id"]] + seconds(offset, MODE_WALK, walk_speed) + VEHICLE_BOARDING_S
+                        steps = steps + [
+                            ("walk", target, item["node_id"], offset, walk_speed),
+                            ("stop", STOP_BOARD, item["node_id"], VEHICLE_BOARDING_S, False),
+                        ]
+                        candidate = (cost, steps, fleet, True, item["node_id"], offset)
+                        if fleet["id"] not in states or candidate[0] < states[fleet["id"]][0]:
+                            states[fleet["id"]] = candidate
+                        continue
+            elif kind == STOP_PARKING:
+                steps = steps + [("stop", STOP_PASS, target, 0, False)]
+            if key not in states or cost < states[key][0]:
+                states[key] = (cost, steps, vehicle, pickup, origin, extra)
 
-        # Склад пешком → пешком к борту.
-        if goal in walk_from_depot:
-            found.append((reach + walk_from_depot[goal], {"vehicle": None, "pickup": False, "steps": [
-                ("walk", start, depot, approach, walk_speed), warehouse,
-                ("walk", depot, goal, 0.0, walk_speed),
-            ]}))
-
-        for item in net.prepared:
-            speed = item["vehicle"].get("speed_kmh")
-            to_goal = net.times(goal, MODE_VEHICLE, speed)
-            # Склад пешком → пешком к машине → на машине к борту.
-            option = ride(item, walk_from_depot, depot, 0.0, goal, to_goal,
-                          [("stop", STOP_ALIGHT, goal, VEHICLE_BOARDING_S, True)], VEHICLE_BOARDING_S)
-            if option:
-                total, recipe = option
-                recipe["steps"] = [("walk", start, depot, approach, walk_speed), warehouse] + recipe["steps"]
-                found.append((reach + total, recipe))
-
-            # Пешком к машине → на машине к складу → на машине к борту.
-            to_depot = net.times(depot, MODE_VEHICLE, speed)
-            if depot in to_goal:
-                tail = [
-                    ("stop", STOP_ALIGHT, depot, VEHICLE_BOARDING_S, False), warehouse,
-                    ("stop", STOP_BOARD, depot, VEHICLE_BOARDING_S, False),
-                    ("drive", depot, goal, 0.0, speed),
-                    ("stop", STOP_ALIGHT, goal, VEHICLE_BOARDING_S, True),
-                ]
-                tail_s = VEHICLE_BOARDING_S * 3 + TOOL_PICKUP_S + to_goal[depot]
-                option = ride(item, walk_from_me, start, approach, depot, to_depot, tail, tail_s)
-                if option:
-                    found.append((approach_s + option[0], option[1]))
-    return found
+    options = list(states.items())
+    if fleet_only:
+        options = [item for item in options if item[1][3]]
+    if not options:
+        return None
+    # При равенстве честнее идти пешком, чем занимать машину.
+    _, (cost, steps, vehicle, pickup, _, _) = min(
+        options, key=lambda item: (item[1][0], item[0] != FOOT)
+    )
+    return cost, {"vehicle": vehicle, "pickup": pickup, "steps": steps}
 
 
 def build(net, recipe):
@@ -336,44 +393,42 @@ def build(net, recipe):
     return Plan(legs, vehicle=recipe["vehicle"], pickup=recipe["pickup"], stops=stops)
 
 
-def best_plan(net, employee):
-    """
-    Самый быстрый способ добраться для одного сотрудника.
-
-    При равенстве честнее идти пешком, чем занимать машину, которая может
-    понадобиться другому: варианты сравниваются строго, пеший — первым.
-    """
+def search(net, employee, allow_fleet=True, fleet_only=False):
     best = None
-    for total, recipe in options(net, employee):
-        if best is None or total < best[0]:
-            best = (total, recipe)
-    return build(net, best[1]) if best else None
+    for chain in net.chains():
+        found = best_chain(net, employee, chain, allow_fleet, fleet_only)
+        if found and (best is None or found[0] < best[0]):
+            best = found
+    return best
+
+
+def best_plan(net, employee):
+    """Самый быстрый способ добраться для одного сотрудника."""
+    found = search(net, employee)
+    return build(net, found[1]) if found else None
 
 
 # --- Точки входа -------------------------------------------------------------
 
-def plan_for(graph, employee, goal_id, vehicles, depots=None):
+def plan_for(graph, employee, goal_id, vehicles, depots=None, waypoints=None):
     """
     Способ добраться для одного сотрудника — при назначении.
 
     Тот же расчёт, что в подборе, чтобы время, которое увидел диспетчер,
     совпало с временем, записанным в вызов.
     """
-    return best_plan(Network(graph, goal_id, vehicles, depots), employee)
+    return best_plan(Network(graph, goal_id, vehicles, depots, waypoints), employee)
 
 
-def plan_walk(graph, employee, goal_id, depots=None):
+def plan_walk(graph, employee, goal_id, depots=None, waypoints=None):
     """Весь путь пешком, даже если рядом есть машина: так решил диспетчер."""
-    if depots:
-        walker = {**employee, "vehicle": None}
-        return best_plan(Network(graph, goal_id, [], depots), walker)
-    route = route_from_point(
-        graph, employee["lat"], employee["lon"], goal_id, MODE_WALK, employee.get("speed_kmh")
-    )
-    return Plan([route]) if route is not None else None
+    walker = {**employee, "vehicle": None}
+    net = Network(graph, goal_id, [], depots, waypoints)
+    found = search(net, walker, allow_fleet=False)
+    return build(net, found[1]) if found else None
 
 
-def plan_via(graph, employee, goal_id, vehicle):
+def plan_via(graph, employee, goal_id, vehicle, waypoints=None):
     """
     Дойти до указанной машины и ехать на ней — вторым в машине ответственного.
 
@@ -382,8 +437,6 @@ def plan_via(graph, employee, goal_id, vehicle):
     машине, без сравнения с остальными.
     """
     walker = {**employee, "vehicle": None}
-    net = Network(graph, goal_id, [vehicle])
-    rides = [(total, recipe) for total, recipe in options(net, walker) if recipe["pickup"]]
-    if not rides:
-        return None
-    return build(net, min(rides, key=lambda option: option[0])[1])
+    net = Network(graph, goal_id, [vehicle], None, waypoints)
+    found = search(net, walker, fleet_only=True)
+    return build(net, found[1]) if found else None

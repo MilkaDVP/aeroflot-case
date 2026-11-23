@@ -53,6 +53,15 @@ function showCallForm(options) {
   };
 
   document.body.append(form.root);
+  // Точки маршрута: список мест аэропорта и выбор на карте. На время
+  // выбора на карте форма уходит в сторону, чтобы карта была видна.
+  form.waypoints = options.graph ? new WaypointPicker({
+    graph: options.graph,
+    map: options.map,
+    onPickStart: () => form.root.classList.add("is-picking"),
+    onPickEnd: () => form.root.classList.remove("is-picking"),
+  }) : null;
+  if (form.waypoints) field(form, "#form-waypoints").append(form.waypoints.root);
   bindAircraftSearch(form, options);
   bindCallForm(form, options);
   if (form.report) {
@@ -108,10 +117,11 @@ function buildCallFormMarkup(options) {
         <input type="checkbox" id="form-urgent">
         <span>Срочный вызов <span class="dim">— встанет первым в списке</span></span>
       </label>
-      <label class="form-check">
-        <input type="checkbox" id="form-tools">
-        <span>Нужен инструмент со склада <span class="dim">— маршрут пройдёт через склад (+30 с)</span></span>
-      </label>
+      <div class="form-waypoints" id="form-waypoints-box"${options.graph ? "" : " hidden"}>
+        <div class="form-label">Промежуточные точки маршрута
+          <span class="dim">— склад (инструмент 30 с), стоянка спецтехники (пересадка), любая точка</span></div>
+        <div id="form-waypoints"></div>
+      </div>
 
       <div id="form-error" class="error" hidden></div>
       <div class="modal-actions">
@@ -599,16 +609,16 @@ async function submitCallForm(form, options) {
     // время сообщения экипажа — от него идёт отсчёт регламента.
     const aircraftId = form.aircraftId;
     const urgent = field(form, "#form-urgent").checked;
-    const needsTools = field(form, "#form-tools").checked;
+    const waypoints = form.waypoints ? form.waypoints.value : [];
     const call = options.report
-      ? await Api.acceptReport(options.report.id, code, aircraftId, urgent, needsTools)
+      ? await Api.acceptReport(options.report.id, code, aircraftId, urgent, waypoints)
       : await Api.createCall(
           aircraftId,
           code,
           // Слова экипажа из единственного поля — они же описание для инженера.
           field(form, "#form-defect-query").value.trim() || null,
           urgent,
-          needsTools
+          waypoints
         );
     closeCallForm(form);
     options.onRegistered(call);

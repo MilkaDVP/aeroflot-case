@@ -15,6 +15,15 @@ class CallCreateRequest(BaseModel):
     urgent: bool = False
     # Нужен инструмент со склада: маршрут исполнителя пройдёт через склад.
     needs_tools: bool = False
+    # Промежуточные точки маршрута по порядку — узлы графа (склад, стоянка
+    # спецтехники, любая точка). Пусто — маршрут прямо к борту.
+    waypoints: list[str] = Field(default_factory=list, max_length=10)
+
+
+class WaypointsRequest(BaseModel):
+    """Промежуточные точки маршрута по вызову — узлы графа по порядку."""
+
+    node_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 class CallControl(BaseModel):
@@ -91,6 +100,7 @@ class CallResponse(BaseModel):
     needs_tools: bool = False
     tools_taken_at: str | None = None
     route_stops: list[dict] = []
+    waypoints: list[dict] = []
     # С кого сняли назначение, когда и почему. Остаётся в вызове после
     # переназначения: диспетчеру видно, что борт уже ждал другого.
     previous_employee_name: str | None = None

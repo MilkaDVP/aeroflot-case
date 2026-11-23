@@ -583,6 +583,53 @@ function refreshExecutorMenu() {
   if (box.classList.contains("is-open")) {
     fillExecutorDrawer(box);
   }
+  refreshWaypointsDrawer(box);
+}
+
+/**
+ * «Маршрут через точки» — промежуточные точки выбранного вызова.
+ *
+ * Склад, стоянка спецтехники, любая точка по порядку. До назначения точки
+ * учитывает подбор; если исполнитель уже в пути, маршрут и прогноз
+ * пересчитываются сразу. У борта и после закрытия блока нет.
+ */
+function refreshWaypointsDrawer(after) {
+  const body = elements.suggestBody;
+  const call = state.selectedCall;
+  let box = body.querySelector('[data-drawer="route"]');
+  const editable = call && state.graph && !["arrived", "closed", "cancelled"].includes(call.status);
+  if (!editable) {
+    box?.remove();
+    return;
+  }
+  const remaining = (call.waypoints || []).filter((item) => !item.done_at).map((item) => item.node_id);
+  const key = `${call.id}:${remaining.join(",")}`;
+  if (box && box.dataset.key === key) return;
+  const picker = new WaypointPicker({
+    graph: state.graph,
+    map: airportMap,
+    value: remaining,
+    onChange: async (nodeIds) => {
+      try {
+        await Api.setWaypoints(call.id, nodeIds);
+        await refresh();
+        const fresh = state.calls.find((item) => item.id === call.id);
+        // Подбор и маршрут пересчитываются с новыми точками.
+        if (fresh && state.selectedCall?.id === call.id) await selectCall(fresh, { keepView: true });
+      } catch (error) {
+        showToast(error.detail, true);
+        picker.set(remaining);
+      }
+    },
+  });
+  const done = (call.waypoints || []).filter((item) => item.done_at).length;
+  const note = document.createElement("div");
+  note.className = "dim waypoint-note";
+  note.textContent = done ? `Пройдено точек: ${done}` : "";
+  const fresh = drawer("route", "Маршрут через точки", [picker.root, done ? note : null], remaining.length || null);
+  fresh.dataset.key = key;
+  if (box) box.replaceWith(fresh);
+  else after.after(fresh);
 }
 
 function fillExecutorDrawer(box) {
@@ -1071,6 +1118,8 @@ function openCallForm(preselectedAircraftId) {
     aircraft: state.aircraft,
     preselectedAircraftId,
     onRegistered: openRegisteredCall,
+    graph: state.graph,
+    map: airportMap,
   });
 }
 
@@ -1097,6 +1146,8 @@ function processReport(report) {
     preselectedAircraftId: report.aircraft_id,
     report,
     onRegistered: openRegisteredCall,
+    graph: state.graph,
+    map: airportMap,
   });
 }
 

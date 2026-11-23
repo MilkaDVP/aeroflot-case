@@ -34,7 +34,14 @@ from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
 from models.employee import Employee
 from models.vehicle import Vehicle
 from constants import VEHICLE_FREE, VEHICLE_RESERVED, VEHICLE_IN_USE
-from services.assignment import assigned_route, depots_for, update_assigned_route, release_vehicle
+from services.assignment import (
+    assigned_route,
+    depots_for,
+    release_vehicle,
+    remaining_waypoints,
+    update_assigned_route,
+    waypoint_records,
+)
 from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
@@ -46,6 +53,7 @@ from schemas.call import (
     UnassignRequest,
     MessageRequest,
     UrgencyRequest,
+    WaypointsRequest,
 )
 from services import claim as claims
 from services import journal, mentor
@@ -194,6 +202,7 @@ def to_response(call, db=None, now=None):
         needs_tools=bool(call.needs_tools),
         tools_taken_at=to_iso_utc(call.tools_taken_at),
         route_stops=call.route_stops or [],
+        waypoints=call.waypoints or [],
         previous_employee_name=previous.full_name if previous else None,
         unassign_reason=call.unassign_reason,
         unassigned_at=to_iso_utc(call.unassigned_at),
@@ -282,6 +291,8 @@ def run_suggestion(db, context, call, purpose=None):
         "required_mark": call.required_mark,
         # Инструмент со склада — маршрут через склад, пока не получен.
         "needs_tools": bool(call.needs_tools) and call.tools_taken_at is None,
+        # Промежуточные точки, ещё не пройденные.
+        "waypoints": remaining_waypoints(call),
     }
     vehicles = [vehicle.as_algorithm_dict() for vehicle in free_vehicles(db, call.airport_icao)]
     employees, removed = candidates_for(db, context, call)
@@ -406,6 +417,7 @@ def create_call(
     call = new_call(db, aircraft, defect, payload.description)
     call.urgent = payload.urgent
     call.needs_tools = payload.needs_tools
+    call.waypoints = waypoint_records(get_graph(call.airport_icao), payload.waypoints)
     # Кто зарегистрировал вызов, тот его и разбирает: он открывается у него
     # сразу, и второй диспетчер не должен перехватить его на полпути.
     claims.take(db, call, context.user)
@@ -578,6 +590,7 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         payload.travel,
         ride_vehicle,
         depots_for(call, graph),
+        remaining_waypoints(call),
     )
     if plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)
@@ -737,6 +750,34 @@ def set_urgency(
     call = load_call(db, context, call_id)
     claims.ensure_can_change(db, call, context.user)
     call.urgent = payload.urgent
+    db.commit()
+    return to_response(call, db)
+
+
+@router.post("/{call_id}/waypoints", response_model=CallResponse, summary="Промежуточные точки")
+def set_waypoints(
+    call_id: int,
+    payload: WaypointsRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    """
+    Диспетчер задаёт промежуточные точки маршрута — по порядку.
+
+    Склад — получить инструмент (30 с), стоянка спецтехники — пересадка
+    на машину, любая другая точка — маршрут проходит через неё. Если
+    исполнитель уже в пути, маршрут и прогноз пересчитываются сразу.
+    """
+    call = load_call(db, context, call_id)
+    claims.ensure_can_change(db, call, context.user)
+    if call.status in (CALL_CLOSED, CALL_CANCELLED, "arrived"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Исполнитель уже у борта — точки маршрута не нужны")
+    graph = get_graph(call.airport_icao)
+    call.waypoints = waypoint_records(graph, payload.node_ids)
+    if call.assigned_employee is not None and call.status in ("assigned", "accepted"):
+        plan = assigned_route(call, graph)
+        if plan is not None:
+            update_assigned_route(call, plan)
     db.commit()
     return to_response(call, db)
 

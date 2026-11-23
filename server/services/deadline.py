@@ -409,7 +409,8 @@ def live_minutes(call, employee):
     except HTTPException:
         return None
 
-    if call.needs_tools and call.tools_taken_at is None:
+    pending = any(not item.get("done_at") for item in (call.waypoints or []))
+    if pending or (call.needs_tools and call.tools_taken_at is None):
         # Инструмент ещё не получен: впереди склад (30 с) и, возможно,
         # пересадка. Прогноз — по тому же плану, что строится инженеру.
         from services.assignment import assigned_route

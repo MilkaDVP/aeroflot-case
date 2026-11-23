@@ -1000,6 +1000,9 @@ class AirportMap {
       if (stop.kind === "warehouse") {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "С",
           `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
+      } else if (stop.kind === "pass") {
+        this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "Т",
+          `Промежуточная точка${stop.name ? `: ${stop.name}` : ""}`);
       }
     }
     this.appendRouteEnd(first, "start", "А", "Начало маршрута");
@@ -1219,6 +1222,45 @@ class AirportMap {
     const point = this.toMapCoords(clientX, clientY);
     const { x, y, scale } = this.transform;
     return { x: (point.x - x) / scale, y: (point.y - y) / scale };
+  }
+
+  /**
+   * Выбор точки щелчком по карте: ближайшая к щелчку вершина дорог,
+   * доступных инженеру или машине (рулёжки и ВПП не годятся). Escape
+   * отменяет выбор — onPick(null).
+   */
+  pickPoint(onPick) {
+    const walkable = new Set();
+    for (const edge of this.graph.edges) {
+      if (edge.walk_allowed !== false || edge.vehicle_allowed) {
+        walkable.add(edge.from_id);
+        walkable.add(edge.to_id);
+      }
+    }
+    this.svg.classList.add("is-picking");
+    const finish = (node) => {
+      this.svg.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKey);
+      this.svg.classList.remove("is-picking");
+      onPick(node);
+    };
+    const onClick = (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      const point = this.toGraphCoords(event.clientX, event.clientY);
+      let best = null;
+      for (const node of this.graph.nodes) {
+        if (!walkable.has(node.id)) continue;
+        const distance = Math.hypot(node.x - point.x, node.y - point.y);
+        if (!best || distance < best.distance) best = { node, distance };
+      }
+      finish(best ? best.node : null);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") finish(null);
+    };
+    this.svg.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKey);
   }
 
   /** Центр экрана в координатах карты. При вписанном viewBox он постоянен. */

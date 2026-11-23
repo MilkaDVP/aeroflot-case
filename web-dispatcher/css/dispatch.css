@@ -2181,3 +2181,35 @@
   color: var(--busy);
   border: 1px solid var(--busy);
 }
+
+/* --- Промежуточные точки маршрута --- */
+.waypoints { display: flex; flex-direction: column; gap: 6px; }
+.waypoint-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.waypoint {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); font-size: var(--fs-sm);
+}
+.waypoint-num {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; font-weight: 600;
+  background: var(--route-soft); color: var(--route);
+}
+.waypoint-name { flex: 1; min-width: 0; }
+.waypoint-btn {
+  flex: none; min-width: 26px; height: 24px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.waypoint-btn:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+.waypoint-btn:disabled { opacity: 0.35; cursor: default; }
+.waypoint-add { display: flex; gap: 6px; }
+.waypoint-select { flex: 1; min-width: 0; }
+.waypoint-empty { font-size: var(--fs-sm); }
+.waypoint-note { margin-top: 6px; font-size: var(--fs-sm); }
+.form-waypoints { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.form-waypoints[hidden] { display: none; }
+.form-label { font-size: var(--fs-sm); color: var(--text-muted); }
+/* Выбор точки на карте: форма уходит, карта ловит щелчок. */
+.is-picking { opacity: 0.15; pointer-events: none; }
+svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }

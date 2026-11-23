@@ -26,7 +26,8 @@ from datetime import timedelta
 from algorithm.geo import haversine_m
 from algorithm.routing import route_from_point, shortest_path
 from algorithm.transport import STOP_WAREHOUSE, plan_for, plan_via, plan_walk, warehouses
-from clock import utc_now
+from clock import to_iso_utc, utc_now
+from fastapi import HTTPException
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
     LOCATION_GPS,
@@ -118,6 +119,63 @@ def free_vehicles(db, airport_icao):
     )
 
 
+WAYPOINT_DONE_RADIUS_M = 25
+
+
+def waypoint_records(graph, node_ids):
+    """Промежуточные точки вызова по узлам графа; несуществующие отбрасываются."""
+    from algorithm.transport import place_name, waypoint_kind
+
+    records = []
+    for node_id in node_ids or []:
+        node = graph.node(node_id)
+        if node is None:
+            raise HTTPException(422, f"Точки {node_id} нет на карте аэропорта")
+        records.append({
+            "node_id": node_id,
+            "name": place_name(node),
+            "type": node.get("type"),
+            "kind": waypoint_kind(graph, node_id),
+            "done_at": None,
+        })
+    return records or None
+
+
+def remaining_waypoints(call):
+    """Ещё не пройденные промежуточные точки — узлы по порядку."""
+    return [item["node_id"] for item in (getattr(call, "waypoints", None) or []) if not item.get("done_at")]
+
+
+def mark_waypoint_done(call, node_id=None, at=None):
+    """
+    Отмечает пройденной точку (по узлу или ближайшую по порядку).
+
+    Склад пройден — значит, инструмент получен. Возвращает True, если что-то
+    отмечено.
+    """
+    items = [dict(item) for item in (call.waypoints or [])]
+    for item in items:
+        if item.get("done_at") or (node_id is not None and item["node_id"] != node_id):
+            continue
+        item["done_at"] = to_iso_utc(at or utc_now())
+        call.waypoints = items
+        if item.get("kind") == "warehouse" and call.needs_tools and call.tools_taken_at is None:
+            call.tools_taken_at = at or utc_now()
+        return True
+    return False
+
+
+def check_waypoints_reached(call, employee, graph):
+    """Инженер подошёл к следующей точке ближе 25 м — она пройдена."""
+    remaining = remaining_waypoints(call)
+    if not remaining or employee.lat is None:
+        return False
+    node = graph.node(remaining[0])
+    if node and haversine_m(employee.lat, employee.lon, node["lat"], node["lon"]) <= WAYPOINT_DONE_RADIUS_M:
+        return mark_waypoint_done(call, remaining[0])
+    return False
+
+
 def depots_for(call, graph):
     """
     Склады, через которые должен пройти маршрут исполнителя.
@@ -135,7 +193,8 @@ def depots_for(call, graph):
     return planned[:1] or warehouses(graph) or None
 
 
-def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=None, depots=None):
+def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=None, depots=None,
+               waypoints=None):
     """
     Как сотрудник доберётся до стоянки.
 
@@ -149,11 +208,12 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
     if employee.lat is None or employee.lon is None:
         return None, None
     if travel == TRAVEL_WALK:
-        return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id, depots), None
+        return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id, depots, waypoints), None
     if travel == TRAVEL_WITH_LEAD:
         if ride_vehicle is None:
             return None, None
-        return plan_via(graph, employee.as_algorithm_dict(), stand_node_id, ride_vehicle.as_algorithm_dict()), None
+        return plan_via(graph, employee.as_algorithm_dict(), stand_node_id,
+                        ride_vehicle.as_algorithm_dict(), waypoints), None
 
     pool = free_vehicles(db, employee.airport_icao)
     plan = plan_for(
@@ -162,6 +222,7 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
         stand_node_id,
         [vehicle.as_algorithm_dict() for vehicle in pool],
         depots,
+        waypoints,
     )
     if plan is None or not plan.pickup:
         return plan, None
@@ -178,18 +239,19 @@ def assigned_route(call, graph):
     person = employee.as_algorithm_dict()
     vehicle = call.vehicle
     depots = depots_for(call, graph)
+    waypoints = remaining_waypoints(call)
     if vehicle is None:
-        return plan_walk(graph, person, call.stand_node_id, depots)
+        return plan_walk(graph, person, call.stand_node_id, depots, waypoints)
     if vehicle.status == VEHICLE_RESERVED or vehicle.employee_id != employee.id:
-        if depots:
-            # Машина ждёт, а инструмента ещё нет: выбор пути между складом
-            # и этой машиной — как при назначении, но только с ней.
+        if depots or waypoints:
+            # Машина ждёт, а впереди ещё точки маршрута: выбор пути между
+            # ними и этой машиной — как при назначении, но только с ней.
             plan = plan_for(graph, {**person, "vehicle": None}, call.stand_node_id,
-                            [vehicle.as_algorithm_dict()], depots)
+                            [vehicle.as_algorithm_dict()], depots, waypoints)
             if plan is not None:
                 return plan
-        return plan_via(graph, person, call.stand_node_id, vehicle.as_algorithm_dict())
-    return plan_for(graph, person, call.stand_node_id, [], depots)
+        return plan_via(graph, person, call.stand_node_id, vehicle.as_algorithm_dict(), waypoints)
+    return plan_for(graph, person, call.stand_node_id, [], depots, waypoints)
 
 
 def update_assigned_route(call, plan, *, reset_eta=True):
@@ -595,6 +657,12 @@ def refresh_navigation(db, employee):
     if not call or call.status == CALL_ARRIVED:
         return
     graph = get_graph(employee.airport_icao)
+    # Дошёл до промежуточной точки — она пройдена, маршрут дальше без неё.
+    if check_waypoints_reached(call, employee, graph):
+        plan = assigned_route(call, graph)
+        if plan:
+            update_assigned_route(call, plan, reset_eta=False)
+        return
     nodes = route_geometry(call, graph)
     segments = zip(nodes, nodes[1:] or nodes)
     if target or not any(distance_to_segment(employee.lat, employee.lon, a, b) <= ROUTE_DEVIATION_M

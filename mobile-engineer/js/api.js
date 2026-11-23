@@ -133,6 +133,7 @@ const Api = {
   sendMessage: (text) => request("POST", "/api/me/message", { text }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
   setTools: (taken) => request("POST", "/api/me/tools", { taken }),
+  waypointDone: (node_id = null) => request("POST", "/api/me/waypoint", { node_id }),
 
   setShift: (employeeId, onShift, extend = false) =>
     request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift, extend }),

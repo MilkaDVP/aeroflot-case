@@ -194,6 +194,55 @@ class TestWaypoints(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_POLYGON, "нет графа полигона")
+class TestChosenWaypoints(unittest.TestCase):
+    """Точки, выбранные диспетчером: порядок, вид точки, пересадка."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.graph = load_airport("VDNH")
+        hangar = cls.graph.nodes_of_type("tech_center")[0]
+        parking = cls.graph.nodes_of_type("vehicle_parking")[0]
+        cls.engineer = {"id": 1, "lat": hangar["lat"], "lon": hangar["lon"], "vehicle": None}
+        cls.vehicles = [{"id": 7, "call_sign": "ТМ-01", "lat": parking["lat"], "lon": parking["lon"],
+                         "speed_kmh": None}]
+        cls.parking = parking["id"]
+        cls.w1, cls.w2 = sorted(warehouses(cls.graph))
+
+    def test_точки_проходятся_по_порядку(self):
+        goal = self.graph.find_stand("1")["id"]
+        through = self.graph.find_stand("4")["id"]
+        plan = plan_for(self.graph, self.engineer, goal, self.vehicles, waypoints=[through, self.w1])
+        nodes = plan.node_ids
+        self.assertLess(nodes.index(through), nodes.index(self.w1))
+        kinds = [stop["kind"] for stop in plan.waypoints if stop["kind"] in ("pass", "warehouse")]
+        self.assertEqual(kinds, ["pass", "warehouse"])
+
+    def test_выбранный_склад_а_не_ближайший(self):
+        goal = self.graph.find_stand("9")["id"]
+        for depot in (self.w1, self.w2):
+            plan = plan_for(self.graph, self.engineer, goal, self.vehicles, waypoints=[depot])
+            self.assertEqual(plan.warehouse_node_id, depot)
+
+    def test_стоянка_спецтехники_это_пересадка(self):
+        goal = self.graph.find_stand("8")["id"]
+        # К стоянке 8 из ангара быстрее пешком, но точка «стоянка спецтехники»
+        # выбрана — значит, там садятся в машину.
+        direct = plan_for(self.graph, self.engineer, goal, self.vehicles)
+        self.assertFalse(direct.pickup)
+        plan = plan_for(self.graph, self.engineer, goal, self.vehicles, waypoints=[self.parking])
+        self.assertTrue(plan.pickup)
+        self.assertIn("board", [stop["kind"] for stop in plan.stops])
+
+    def test_три_точки(self):
+        goal = self.graph.find_stand("10")["id"]
+        plan = plan_for(self.graph, self.engineer, goal, self.vehicles,
+                        waypoints=[self.w2, self.parking, self.graph.find_stand("7")["id"]])
+        nodes = plan.node_ids
+        self.assertLess(nodes.index(self.w2), nodes.index(plan.pickup_node_id))
+        self.assertEqual(nodes[-1], goal)
+
+
+@unittest.skipUnless(HAS_POLYGON, "нет графа полигона")
 class TestPolygonApi(ApiTestCase):
     """Полигон в работающей системе: карта, вызов с инструментом, назначение."""
 
@@ -246,6 +295,90 @@ class TestPolygonApi(ApiTestCase):
         after = response.json()
         self.assertIsNotNone(after["tools_taken_at"])
         self.assertNotIn("warehouse", [stop["kind"] for stop in after["route_stops"]])
+
+
+    def board(self, number):
+        return next(item for item in self.client.get(
+            "/api/aircraft", headers=auth_header(self.dispatcher)).json() if item["board_number"] == number)
+
+    def test_точки_при_регистрации_и_после_назначения(self):
+        graph = load_airport("VDNH")
+        depot = sorted(warehouses(graph))[0]
+        call = self.client.post(
+            "/api/calls",
+            json={"aircraft_id": self.board("RA-73004")["id"], "defect_code": "hydraulic_leak",
+                  "waypoints": [depot]},
+            headers=auth_header(self.dispatcher),
+        ).json()
+        self.assertEqual([item["node_id"] for item in call["waypoints"]], [depot])
+        best = self.client.post(f"/api/calls/{call['id']}/suggest",
+                                headers=auth_header(self.dispatcher)).json()["best"]
+        self.assertEqual([s["node_id"] for s in best["route"]["stops"] if s["kind"] == "warehouse"], [depot])
+        assigned = self.client.post(
+            f"/api/calls/{call['id']}/assign",
+            json={"employee_id": best["employee_id"], "override_reason": None},
+            headers=auth_header(self.dispatcher),
+        ).json()
+        self.assertIn(depot, assigned["route_node_ids"])
+
+        # Добавили точку после назначения — маршрут пересчитан сразу.
+        through = graph.find_stand("4")["id"]
+        changed = self.client.post(f"/api/calls/{call['id']}/waypoints",
+                                   json={"node_ids": [depot, through]}, headers=auth_header(self.dispatcher))
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertIn(through, changed.json()["route_node_ids"])
+
+        # Инженер отмечает точки пройденными — по одной, по порядку.
+        from database import SessionLocal
+        from models.user import User
+
+        with SessionLocal() as db:
+            login = db.query(User).filter(User.employee_id == best["employee_id"]).one().login
+        engineer = self.login(login, "engineer", airport="VDNH")
+        first = self.client.post("/api/me/waypoint", json={}, headers=auth_header(engineer)).json()
+        done = [item for item in first["waypoints"] if item["done_at"]]
+        self.assertEqual([item["node_id"] for item in done], [depot])
+        self.assertNotIn("warehouse", [s["kind"] for s in first["route_stops"]])
+
+    def test_точка_вне_карты_отклоняется(self):
+        response = self.client.post(
+            "/api/calls",
+            json={"aircraft_id": self.board("RA-73001")["id"], "defect_code": "hydraulic_leak",
+                  "waypoints": ["нет-такой"]},
+            headers=auth_header(self.dispatcher),
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_точка_засчитывается_при_подходе(self):
+        graph = load_airport("VDNH")
+        depot = sorted(warehouses(graph))[0]
+        call = self.client.post(
+            "/api/calls",
+            json={"aircraft_id": self.board("RA-73001")["id"], "defect_code": "hydraulic_leak",
+                  "waypoints": [depot]},
+            headers=auth_header(self.dispatcher),
+        ).json()
+        best = self.client.post(f"/api/calls/{call['id']}/suggest",
+                                headers=auth_header(self.dispatcher)).json()["best"]
+        self.client.post(f"/api/calls/{call['id']}/assign",
+                         json={"employee_id": best["employee_id"], "override_reason": None},
+                         headers=auth_header(self.dispatcher))
+        from database import SessionLocal
+        from models.user import User
+
+        with SessionLocal() as db:
+            login = db.query(User).filter(User.employee_id == best["employee_id"]).one().login
+        engineer = self.login(login, "engineer", airport="VDNH")
+        node = graph.node(depot)
+        response = self.client.post(
+            f"/api/employees/{best['employee_id']}/location",
+            json={"lat": node["lat"], "lon": node["lon"], "source": "gps"},
+            headers=auth_header(engineer),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        calls = self.client.get("/api/calls", headers=auth_header(self.dispatcher)).json()
+        current = next(item for item in calls if item["id"] == call["id"])
+        self.assertTrue(current["waypoints"][0]["done_at"])
 
 
 if __name__ == "__main__":

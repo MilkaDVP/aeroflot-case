@@ -334,6 +334,46 @@ def set_tools(
     if not call.needs_tools:
         raise HTTPException(status.HTTP_409_CONFLICT, "По этому вызову инструмент со склада не нужен")
     call.tools_taken_at = utc_now() if payload.taken else None
+    if payload.taken:
+        from services.assignment import mark_waypoint_done
+
+        for item in call.waypoints or []:
+            if item.get("kind") == "warehouse" and not item.get("done_at"):
+                mark_waypoint_done(call, item["node_id"])
+                break
+    if call.status != CALL_ARRIVED and employee.lat is not None:
+        plan = assigned_route(call, get_graph(call.airport_icao))
+        if plan is not None:
+            update_assigned_route(call, plan)
+    db.commit()
+    return call_to_response(call)
+
+
+class WaypointDoneRequest(BaseModel):
+    """Пройденная промежуточная точка; пусто — следующая по порядку."""
+
+    node_id: str | None = None
+
+
+@router.post("/waypoint", response_model=CallResponse, summary="Точка маршрута пройдена")
+def waypoint_done(
+    payload: WaypointDoneRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(get_context),
+):
+    """
+    Инженер отмечает промежуточную точку пройденной (склад — инструмент
+    получен). Маршрут дальше строится уже без неё. Обычно отметка ставится
+    сама, когда инженер подходит к точке ближе 25 м.
+    """
+    from services.assignment import assigned_route, mark_waypoint_done, update_assigned_route
+
+    employee = load_own_employee(context, db)
+    call = working_call_of(db, employee)
+    if call is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    if not mark_waypoint_done(call, payload.node_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Непройденных точек маршрута нет")
     if call.status != CALL_ARRIVED and employee.lat is not None:
         plan = assigned_route(call, get_graph(call.airport_icao))
         if plan is not None:

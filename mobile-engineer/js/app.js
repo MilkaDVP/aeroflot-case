@@ -589,11 +589,35 @@ async function toggleAog() {
  * получение). Получил — отметка, и маршрут перестраивается к борту.
  */
 function renderTools(call) {
+  // Сначала — промежуточные точки, выбранные диспетчером, по порядку.
+  const points = call.waypoints || [];
+  const next = points.find((point) => !point.done_at);
+  if (points.length) {
+    el("call-tools").hidden = false;
+    el("call-tools").classList.toggle("is-done", !next);
+    el("call-tools").dataset.mode = "waypoint";
+    if (!next) {
+      el("call-tools-text").textContent = "Все точки маршрута пройдены";
+      el("call-tools-toggle").hidden = true;
+      return;
+    }
+    const number = points.indexOf(next) + 1;
+    const name = next.name || "точка на карте";
+    const what = next.kind === "warehouse" ? `${name}: получить инструмент`
+      : next.kind === "parking" ? `${name}: пересесть на машину` : `через ${name}`;
+    el("call-tools-text").textContent = `Точка ${number} из ${points.length} — ${what}`;
+    el("call-tools-toggle").hidden = false;
+    el("call-tools-toggle").textContent = next.kind === "warehouse" ? "Инструмент получен" : "Пройдено";
+    return;
+  }
+  // Без точек — только отметка «нужен инструмент» (склад выбрала система).
+  el("call-tools").dataset.mode = "tools";
   el("call-tools").hidden = !call.needs_tools;
   if (!call.needs_tools) return;
   const warehouse = (call.route_stops || []).find((stop) => stop.kind === "warehouse");
   const taken = Boolean(call.tools_taken_at);
   el("call-tools").classList.toggle("is-done", taken);
+  el("call-tools-toggle").hidden = false;
   el("call-tools-text").textContent = taken
     ? "Инструмент получен"
     : `Сначала на ${warehouse?.name || "склад"}: получить инструмент`;
@@ -604,7 +628,11 @@ el("call-tools-toggle").addEventListener("click", async () => {
   const call = state.call && state.call.call;
   if (!call) return;
   try {
-    await Api.setTools(!call.tools_taken_at);
+    if (el("call-tools").dataset.mode === "waypoint") {
+      await Api.waypointDone();
+    } else {
+      await Api.setTools(!call.tools_taken_at);
+    }
     await refresh();
   } catch (error) {
     showToast(error.detail, true);
@@ -776,7 +804,8 @@ function drawRoute() {
     state.call ? state.call.call.pickup_node_id : null,
     choosing ? state.airportPoint : null,
     state.call && !state.call.call.tools_taken_at
-      ? (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id
+      ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
+        || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id)
       : null
   );
   el("map-hint").hidden = locator.mode !== "simulation";

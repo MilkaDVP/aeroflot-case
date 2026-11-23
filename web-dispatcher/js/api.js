@@ -190,8 +190,9 @@ const Api = {
   vehicles: () => request("GET", "/api/vehicles"),
 
   calls: (includeClosed = false) => request("GET", includeClosed ? "/api/calls?include_closed=true" : "/api/calls"),
-  createCall: (aircraft_id, defect_code, description, urgent, needs_tools = false) =>
-    request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, needs_tools }),
+  createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
+    request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
+  setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   // План ИИ-диспетчера; explain=false — без пояснения GigaChat (быстрее).
   aiPlan: (explain = true) => request("GET", `/api/ai/plan?explain=${explain}`),
@@ -245,8 +246,8 @@ const Api = {
 
   // Входящие сообщения экипажа и внешних систем: ящик диспетчера.
   reports: () => request("GET", "/api/reports"),
-  acceptReport: (reportId, defect_code, aircraft_id, urgent, needs_tools = false) =>
-    request("POST", `/api/reports/${reportId}/accept`, { defect_code, aircraft_id, urgent, needs_tools }),
+  acceptReport: (reportId, defect_code, aircraft_id, urgent, waypoints = []) =>
+    request("POST", `/api/reports/${reportId}/accept`, { defect_code, aircraft_id, urgent, waypoints }),
   rejectReport: (reportId, reason) =>
     request("POST", `/api/reports/${reportId}/reject`, { reason }),
 

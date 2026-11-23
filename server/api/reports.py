@@ -86,6 +86,8 @@ class ReportAcceptRequest(BaseModel):
     urgent: bool = False
     # Нужен инструмент со склада: маршрут исполнителя пройдёт через склад.
     needs_tools: bool = False
+    # Промежуточные точки маршрута — узлы графа по порядку.
+    waypoints: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ReportRejectRequest(BaseModel):
@@ -317,6 +319,10 @@ def accept_report(
     call = new_call(db, aircraft, defect, report.description, report.reported_at, report.source)
     call.urgent = payload.urgent
     call.needs_tools = payload.needs_tools
+    from graph_registry import get_graph
+    from services.assignment import waypoint_records
+
+    call.waypoints = waypoint_records(get_graph(call.airport_icao), payload.waypoints)
     report.status = REPORT_ACCEPTED
     report.call_id = call.id
     report.aircraft = aircraft

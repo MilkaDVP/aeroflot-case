@@ -44,6 +44,8 @@ function routeChain(stops, vehicleCallSign) {
       parts.push(`${escapeHtml(stop.name || "склад")} · инструмент ${stop.dwell_s} с`);
     } else if (stop.kind === "board") {
       parts.push(`${escapeHtml(vehicleCallSign || "машина")} · посадка ${stop.dwell_s} с`);
+    } else if (stop.kind === "pass") {
+      parts.push(`через ${escapeHtml(stop.name || "точку")}`);
     } else if (stop.kind === "alight") {
       parts.push(`высадка ${stop.dwell_s} с`);
     }
