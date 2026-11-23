@@ -81,7 +81,8 @@ class ReportResponse(BaseModel):
 class ReportAcceptRequest(BaseModel):
     """Разбор сообщения: какой это борт и какая неисправность."""
 
-    defect_code: str
+    # Тип не выбран — определится по словам экипажа из сообщения.
+    defect_code: str | None = None
     aircraft_id: int | None = None
     urgent: bool = False
     # Нужен инструмент со склада: маршрут исполнителя пройдёт через склад.
@@ -310,7 +311,12 @@ def accept_report(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_NO_AIRCRAFT)
     check_same_airport(context, aircraft.airport_icao)
 
-    defect = find_defect(db, payload.defect_code)
+    if not payload.defect_code:
+        from services.defects import classify
+
+        defect = classify(db, report.description)
+    else:
+        defect = find_defect(db, payload.defect_code)
     if defect is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_NO_DEFECT.format(code=payload.defect_code)

@@ -140,7 +140,7 @@ def score(defect, words, chapters):
 
 def search(db, query, limit=SEARCH_LIMIT):
     """Типы неисправностей под запрос, лучшие первыми; пустой запрос — все."""
-    defects = db.query(DefectType).all()
+    defects = db.query(DefectType).filter(DefectType.code != UNCLASSIFIED_CODE).all()
     words, chapters = query_tokens(query)
 
     if not words and not chapters:
@@ -153,6 +153,59 @@ def search(db, query, limit=SEARCH_LIMIT):
             ranked.append((-value, list_order(defect), defect))
     ranked.sort(key=ranking_key)
     return [item[2] for item in ranked[:limit]]
+
+
+UNCLASSIFIED_CODE = "unclassified"
+CLASSIFY_WORD_MIN = 3
+
+
+def classify(db, text):
+    """
+    Тип неисправности по свободному тексту экипажа.
+
+    Поиск по справочнику требует всех слов запроса, а фраза «течь у левой
+    основной стойки» так не найдёт ничего. Здесь каждое значимое слово
+    голосует за типы, где оно встречается (в названии — весомее), номер
+    главы ATA сужает выбор. Не подошло ничего — «без классификации»:
+    вызов регистрируется, слова экипажа сохраняются в описании.
+    """
+    words, chapters = query_tokens(text)
+    words = [word for word in words if len(word) >= CLASSIFY_WORD_MIN]
+    best = None
+    for defect in db.query(DefectType).all():
+        if defect.code == UNCLASSIFIED_CODE:
+            continue
+        if chapters and not any(chapter_matches(defect.ata, number) for number in chapters):
+            continue
+        name = normalize(defect.name)
+        rest = searchable_text(defect)
+        total = sum(3 if word in name else 1 if word in rest else 0 for word in words)
+        if chapters:
+            total += 2
+        if total > 0 and (best is None or (total, -list_order(defect)[0]) > (best[0], -list_order(best[1])[0])):
+            best = (total, defect)
+    if best is not None:
+        return best[1]
+    return unclassified(db)
+
+
+def unclassified(db):
+    """
+    Служебный тип «без классификации» — создаётся при первой надобности.
+
+    В справочник и поиск не выводится: выбрать его руками незачем, он
+    только принимает вызовы, которые не подошли ни к одному типу. Допуск —
+    B1: широкий механический, инженер разберётся на месте.
+    """
+    defect = find(db, UNCLASSIFIED_CODE)
+    if defect is None:
+        defect = DefectType(
+            code=UNCLASSIFIED_CODE, name="Неисправность без классификации", ata="",
+            category="B1", keywords="", is_builtin=True,
+        )
+        db.add(defect)
+        db.flush()
+    return defect
 
 
 def list_order(defect):

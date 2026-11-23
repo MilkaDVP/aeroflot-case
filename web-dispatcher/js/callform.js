@@ -19,6 +19,7 @@
  */
 
 const CALL_FORM_SEARCH_DELAY_MS = 200;
+const CALL_FORM_CHIPS = 4;
 const CALL_FORM_RESULTS = 7;
 // Фраза экипажа разбирается по словам; короче трёх букв — предлоги и союзы.
 const CALL_FORM_WORD_MIN = 3;
@@ -60,6 +61,7 @@ function showCallForm(options) {
     map: options.map,
     onPickStart: () => form.root.classList.add("is-picking"),
     onPickEnd: () => form.root.classList.remove("is-picking"),
+    onChange: () => updateSubmitState(form),
   }) : null;
   if (form.waypoints) field(form, "#form-waypoints").append(form.waypoints.root);
   bindAircraftSearch(form, options);
@@ -78,13 +80,16 @@ function buildCallFormMarkup(options) {
 
   backdrop.innerHTML = `
     <div class="modal call-form">
-      <h2>${options.report ? "Разбор сообщения экипажа" : "Регистрация вызова"}</h2>
+      <div class="cf-head">
+        <h2>${options.report ? "Разбор сообщения" : "Новый вызов"}</h2>
+        <button type="button" class="cf-close" id="form-close" aria-label="Закрыть">✕</button>
+      </div>
       ${reportBanner(options.report)}
 
-      <div class="modal-field">
-        <label for="form-aircraft">Воздушное судно</label>
-        <input id="form-aircraft" role="combobox" aria-autocomplete="list" aria-expanded="false"
-               aria-controls="aircraft-results" autocomplete="off" placeholder="Бортовой номер">
+      <div class="cf-field">
+        <input id="form-aircraft" class="cf-input cf-board" role="combobox" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="aircraft-results" autocomplete="off"
+               placeholder="Борт, например RA-73001" aria-label="Воздушное судно">
         <div id="aircraft-results" class="aircraft-results" role="listbox" hidden></div>
       </div>
 
@@ -113,19 +118,22 @@ function buildCallFormMarkup(options) {
         <div class="defect-new-hint" id="form-new-hint"></div>
       </div>
 
-      <label class="form-check">
-        <input type="checkbox" id="form-urgent">
-        <span>Срочный вызов <span class="dim">— встанет первым в списке</span></span>
-      </label>
-      <div class="form-waypoints" id="form-waypoints-box"${options.graph ? "" : " hidden"}>
-        <div class="form-label">Промежуточные точки маршрута
-          <span class="dim">— склад (инструмент 30 с), стоянка спецтехники (пересадка), любая точка</span></div>
+      <div class="cf-options">
+        <label class="cf-toggle">
+          <input type="checkbox" id="form-urgent">
+          <span>Срочный</span>
+        </label>
+        <button type="button" class="cf-toggle-btn" id="form-route-toggle"${options.graph ? "" : " hidden"}>
+          Маршрут через точки<span class="cf-count" id="form-route-count" hidden></span>
+        </button>
+      </div>
+      <div class="form-waypoints" id="form-waypoints-box" hidden>
         <div id="form-waypoints"></div>
       </div>
 
       <div id="form-error" class="error" hidden></div>
       <div class="modal-actions">
-        <button id="form-cancel">Отмена</button>
+        <button id="form-cancel" class="cf-ghost">Отмена</button>
         <button class="primary" id="form-submit" disabled>${
           options.report ? "Создать вызов" : "Зарегистрировать"
         }</button>
@@ -141,32 +149,32 @@ function buildCallFormMarkup(options) {
  */
 function wordsField(options) {
   return `
-      <div class="modal-field">
-        <label for="form-defect-query">${
-          options.report
-            ? "Тип не подошёл? Найдите по слову или главе ATA"
-            : "Что сообщил экипаж"
-        }</label>
-        <textarea id="form-defect-query" rows="${options.report ? 1 : 2}" maxlength="500"
-                  autocomplete="off" placeholder="${
+      <div class="cf-field">
+        <textarea id="form-defect-query" class="cf-input cf-text" rows="${options.report ? 1 : 3}" maxlength="500"
+                  autocomplete="off" aria-label="Что случилось" placeholder="${
                     options.report
-                      ? "«шасси», «ATA 32»"
-                      : "Например: «течь у левой стойки шасси». Инженер прочтёт это в вызове"
+                      ? "Уточнить: «шасси», «ATA 32»"
+                      : "Что случилось — своими словами, например «течь у левой стойки шасси»"
                   }"></textarea>
       </div>`;
 }
 
+/**
+ * Тип неисправности — необязателен. Не выбран — сервер определит его
+ * по словам экипажа, а если не подойдёт ничего, вызов уйдёт «без
+ * классификации»: текст сохраняется целиком, инженер прочтёт его у борта.
+ */
 function defectTypeField(options) {
   return `
-      <div class="modal-field">
-        <label>Тип неисправности</label>
-        <div class="defect-picked" id="form-defect-picked" hidden></div>
-        <div class="defect-results" id="form-defect-results" hidden></div>
-        <div class="defect-hint" id="form-defect-hint">${
-          options.report
-            ? "Подбираем по словам экипажа…"
-            : "Появится здесь по словам экипажа — останется выбрать"
-        }</div>
+      <div class="cf-field cf-type">
+        <div class="cf-type-head">
+          <span class="cf-label">Тип</span>
+          <span class="cf-auto" id="form-defect-auto">${
+            options.report ? "подбираем по словам экипажа…" : "определится по описанию"
+          }</span>
+        </div>
+        <div class="defect-results cf-chips" id="form-defect-results" hidden></div>
+        <div class="defect-hint" id="form-defect-hint" hidden></div>
       </div>`;
 }
 
@@ -273,6 +281,13 @@ function bindCallForm(form, options) {
   field(form, "#form-new-name").addEventListener("input", () => updateSubmitState(form));
 
   field(form, "#form-cancel").addEventListener("click", () => closeCallForm(form));
+  field(form, "#form-close").addEventListener("click", () => closeCallForm(form));
+  query.addEventListener("input", () => updateSubmitState(form));
+  field(form, "#form-route-toggle").addEventListener("click", () => {
+    const box = field(form, "#form-waypoints-box");
+    box.hidden = !box.hidden;
+    field(form, "#form-route-toggle").classList.toggle("is-on", !box.hidden);
+  });
   form.root.addEventListener("click", (event) => {
     if (event.target === form.root) {
       closeCallForm(form);
@@ -318,7 +333,9 @@ async function runDefectSearch(form) {
       return;
     }
     form.results = results;
-    form.active = results.length ? 0 : -1;
+    // Ничего не выделено, пока диспетчер сам не выбрал стрелками:
+    // иначе первый вариант выглядел бы уже выбранным.
+    form.active = -1;
     renderDefectResults(form, text);
   } catch (error) {
     showFormError(form, error.detail);
@@ -390,68 +407,84 @@ function compareHits(left, right) {
 }
 
 /**
- * Подсказки под полем поиска.
+ * Тип неисправности — ряд чипов.
  *
- * Последняя строка всегда «завести новый тип»: даже если что-то нашлось,
- * найденное может не подходить, и диспетчер не должен подгонять дефект
- * под ближайший пункт справочника.
+ * Первый — «Авто»: что поставит система по словам экипажа, если ничего
+ * не выбирать (лучшее совпадение, а без совпадений — «без классификации»).
+ * Дальше — другие подходящие типы с допуском. Выбранный подсвечен;
+ * повторный щелчок по нему возвращает «Авто». Последний — «＋ новый тип».
  */
 function renderDefectResults(form, text) {
   const box = field(form, "#form-defect-results");
   const hint = field(form, "#form-defect-hint");
   box.replaceChildren();
-
-  if (!text) {
-    box.hidden = true;
-    hint.hidden = false;
-    return;
-  }
   hint.hidden = true;
 
-  form.results.forEach((defect, index) => {
-    box.append(buildDefectOption(form, defect, index));
-  });
+  if (!text && !form.selected) {
+    box.hidden = true;
+    field(form, "#form-defect-auto").textContent = "определится по описанию";
+    return;
+  }
+
+  const guess = form.results[0] || null;
+  const auto = document.createElement("button");
+  auto.type = "button";
+  auto.className = "type-chip type-chip-auto";
+  auto.classList.toggle("is-on", !form.selected && form.mode !== "new");
+  auto.innerHTML = `<span class="type-chip-tag">Авто</span>
+    <span class="type-chip-name">${escapeHtml(guess ? guess.name : "без классификации")}</span>
+    ${guess ? `<span class="type-chip-mark">${escapeHtml(guess.category)}</span>` : ""}`;
+  auto.title = guess
+    ? "Система поставит этот тип по словам экипажа"
+    : "Ни один тип не подошёл: вызов уйдёт без классификации, текст сохранится";
+  auto.addEventListener("click", () => resetDefect(form, false));
+  box.append(auto);
+
+  const alternatives = form.results.slice(guess ? 1 : 0, CALL_FORM_CHIPS);
+  // Выбранный тип виден всегда, даже если по новым словам его нет в списке.
+  if (form.selected && !alternatives.some((item) => item.code === form.selected.code)
+      && guess?.code !== form.selected.code) {
+    alternatives.unshift(form.selected);
+  }
+  if (form.selected && guess?.code === form.selected.code) {
+    alternatives.unshift(guess);
+  }
+  alternatives.forEach((defect, index) => box.append(buildDefectOption(form, defect, index)));
 
   const create = document.createElement("button");
   create.type = "button";
-  create.className = "defect-option defect-option-new";
-  create.textContent = "＋ Подходящего нет — завести новый тип";
+  create.className = "type-chip type-chip-new";
+  create.classList.toggle("is-on", form.mode === "new");
+  create.textContent = "＋ новый тип";
+  create.title = "Завести новый тип неисправности в справочнике";
   create.addEventListener("click", () => startNewDefect(form, text));
   box.append(create);
 
-  if (!form.results.length) {
-    const empty = document.createElement("div");
-    empty.className = "defect-empty";
-    empty.textContent = "По этим словам в справочнике ничего нет";
-    box.prepend(empty);
-  }
-
+  field(form, "#form-defect-auto").textContent = form.selected
+    ? "выбран вручную"
+    : form.mode === "new" ? "новый тип" : "можно оставить «Авто»";
   box.hidden = false;
 }
 
 function buildDefectOption(form, defect, index) {
   const option = document.createElement("button");
   option.type = "button";
-  option.className = "defect-option";
-  if (index === form.active) {
-    option.classList.add("active");
-  }
-  option.innerHTML = `
-    <span class="defect-option-main">
-      <span class="defect-option-name">${escapeHtml(defect.name)}</span>
-      <span class="defect-option-ata">ATA ${escapeHtml(defect.ata)}${
-        defect.ata_title ? ` · ${escapeHtml(defect.ata_title)}` : ""
-      }${defect.is_builtin ? "" : " · заведён вручную"}</span>
-    </span>
-    <span class="mark">${escapeHtml(defect.category)}</span>
-  `;
-  option.addEventListener("click", () => pickDefect(form, defect));
+  option.className = "type-chip";
+  option.classList.toggle("is-on", form.selected?.code === defect.code);
+  option.classList.toggle("active", index === form.active);
+  option.title = `ATA ${defect.ata || "—"}${defect.ata_title ? ` · ${defect.ata_title}` : ""} · допуск ${defect.category}`;
+  option.innerHTML = `<span class="type-chip-name">${escapeHtml(defect.name)}</span>
+    <span class="type-chip-mark">${escapeHtml(defect.category)}</span>`;
+  option.addEventListener("click", () => {
+    if (form.selected?.code === defect.code) resetDefect(form, false);
+    else pickDefect(form, defect);
+  });
   return option;
 }
 
 /** Стрелки и Enter: диспетчер с телефонной гарнитурой работает с клавиатуры. */
 function onDefectKeydown(form, event) {
-  const total = form.results.length;
+  const total = Math.min(form.results.length, CALL_FORM_CHIPS);
   if (event.key === "ArrowDown" && total) {
     event.preventDefault();
     form.active = (form.active + 1) % total;
@@ -460,51 +493,36 @@ function onDefectKeydown(form, event) {
     event.preventDefault();
     form.active = (form.active - 1 + total) % total;
     renderDefectResults(form, searchText(form));
-  } else if (event.key === "Enter") {
+  } else if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     if (form.active >= 0 && form.results[form.active]) {
       pickDefect(form, form.results[form.active]);
+    } else if (!field(form, "#form-submit").disabled) {
+      field(form, "#form-submit").click();
     }
   } else if (event.key === "Escape") {
     closeCallForm(form);
   }
 }
 
-/** Выбран существующий тип: подсказки сворачиваются в плашку с кнопкой «изменить». */
+/** Выбран тип вручную: чип подсвечен, «Авто» гаснет. */
 function pickDefect(form, defect) {
   form.selected = defect;
   form.mode = "search";
   field(form, "#form-defect-new").hidden = true;
-  field(form, "#form-defect-results").hidden = true;
-  field(form, "#form-defect-hint").hidden = true;
-
-  const picked = field(form, "#form-defect-picked");
-  picked.hidden = false;
-  picked.innerHTML = `
-    <span class="defect-option-main">
-      <span class="defect-option-name">${escapeHtml(defect.name)}</span>
-      <span class="defect-option-ata">ATA ${escapeHtml(defect.ata)}${
-        defect.ata_title ? ` · ${escapeHtml(defect.ata_title)}` : ""
-      }</span>
-    </span>
-    <span class="mark">${escapeHtml(defect.category)}</span>
-    <button type="button" class="defect-change">изменить</button>
-  `;
-  picked.querySelector(".defect-change").addEventListener("click", () => resetDefect(form));
-
   hideFormError(form);
+  renderDefectResults(form, searchText(form));
   updateSubmitState(form);
-  // Тип выбран — следующим действием остаётся только отправка.
-  field(form, "#form-submit").focus();
 }
 
-function resetDefect(form) {
+/** Вернуть «Авто» — тип определит система по описанию. */
+function resetDefect(form, focus = true) {
   form.selected = null;
   form.mode = "search";
-  field(form, "#form-defect-picked").hidden = true;
+  form.active = -1;
   field(form, "#form-defect-new").hidden = true;
-  field(form, "#form-defect-query").focus();
-  runDefectSearch(form);
+  if (focus) field(form, "#form-defect-query").focus();
+  renderDefectResults(form, searchText(form));
   updateSubmitState(form);
 }
 
@@ -513,7 +531,7 @@ function resetDefect(form) {
 async function startNewDefect(form, text) {
   form.selected = null;
   form.mode = "new";
-  field(form, "#form-defect-results").hidden = true;
+  renderDefectResults(form, text);
   field(form, "#form-defect-new").hidden = false;
   // Короткий запрос («обледенение датчика») годится в название как есть,
   // а целая фраза экипажа — нет: название диспетчер сформулирует сам.
@@ -573,12 +591,20 @@ function onChapterChange(form) {
 /* --- Отправка --- */
 
 function updateSubmitState(form) {
+  // Тип не обязателен: хватает описания — тип определит сервер.
+  const described = searchText(form).length >= 3;
   const ready =
     form.mode === "new"
       ? field(form, "#form-new-name").value.trim().length >= 3 &&
         Boolean(field(form, "#form-new-ata").value)
-      : Boolean(form.selected);
+      : Boolean(form.selected) || described;
   field(form, "#form-submit").disabled = !ready || !form.aircraftId || form.busy;
+  const count = form.waypoints ? form.waypoints.value.length : 0;
+  const badge = field(form, "#form-route-count");
+  if (badge) {
+    badge.hidden = !count;
+    badge.textContent = count ? String(count) : "";
+  }
 }
 
 /**

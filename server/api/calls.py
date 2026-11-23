@@ -73,6 +73,7 @@ from services.assignment import (
 from models.call_message import AUTHOR_DISPATCHER
 from services import support
 from services.deadline import assess
+from services.defects import classify as classify_defect
 from services.defects import find as find_defect
 
 router = APIRouter(prefix="/api/calls", tags=["Вызовы"])
@@ -402,12 +403,22 @@ def create_call(
     Тип ищется в открытом справочнике. Если подходящего нет, клиент сначала
     заводит его (POST /api/defect-types), а затем регистрирует вызов.
     """
-    defect = find_defect(db, payload.defect_code)
-    if defect is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            ERROR_UNKNOWN_DEFECT.format(code=payload.defect_code),
-        )
+    if payload.defect_code:
+        defect = find_defect(db, payload.defect_code)
+        if defect is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                ERROR_UNKNOWN_DEFECT.format(code=payload.defect_code),
+            )
+    else:
+        # Тип не выбран — по словам экипажа. Описание обязательно: без него
+        # инженеру нечего читать, а системе не по чему подбирать допуск.
+        if not (payload.description or "").strip():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Опишите неисправность или выберите её тип",
+            )
+        defect = classify_defect(db, payload.description)
 
     aircraft = db.get(Aircraft, payload.aircraft_id)
     if aircraft is None:

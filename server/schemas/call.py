@@ -7,7 +7,8 @@ class CallCreateRequest(BaseModel):
     """Регистрация вызова диспетчером: борт, тип неисправности и описание."""
 
     aircraft_id: int
-    defect_code: str
+    # Тип из справочника. Не выбран — определится по описанию экипажа.
+    defect_code: str | None = None
     # Сообщение экипажа своими словами. Необязательно: тип неисправности
     # уже даёт подбору всё нужное, описание — подробности для инженера.
     description: str | None = Field(default=None, max_length=500)

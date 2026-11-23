@@ -247,3 +247,39 @@ class TestBuiltins(DefectApiCase):
         calls = self.client.get("/api/calls", headers=auth_header(self.dispatcher)).json()
         listed = next(item for item in calls if item["id"] == call["id"])
         self.assertEqual(listed["defect_name"], "Утечка гидрожидкости")
+
+
+class TestFreeTextCall(ApiTestCase):
+    """Вызов можно зарегистрировать текстом — тип определится сам."""
+
+    def setUp(self):
+        self.reset_database()
+        self.token = self.login("dispatcher", "dispatcher")
+
+    def create(self, description, code=None):
+        return self.client.post(
+            "/api/calls",
+            json={"aircraft_id": self.board_id(self.token, "VP-BZQ"), "defect_code": code,
+                  "description": description},
+            headers=auth_header(self.token),
+        )
+
+    def test_тип_по_словам_экипажа(self):
+        response = self.create("течь у левой основной стойки шасси")
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["defect_name"], "Неисправность шасси")
+        self.assertEqual(body["defect_description"], "течь у левой основной стойки шасси")
+
+    def test_непонятное_уходит_без_классификации(self):
+        response = self.create("что-то стучит при рулении")
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["defect_name"], "Неисправность без классификации")
+        self.assertEqual(body["required_mark"][:2], "B1")
+        # Служебный тип не попадает в справочник.
+        listed = self.client.get("/api/defect-types", headers=auth_header(self.token)).json()
+        self.assertNotIn("unclassified", [item["code"] for item in listed])
+
+    def test_без_типа_и_без_описания_нельзя(self):
+        self.assertEqual(self.create("").status_code, 422)
