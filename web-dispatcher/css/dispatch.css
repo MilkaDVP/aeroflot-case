@@ -2213,3 +2213,9 @@
 /* Выбор точки на карте: форма уходит, карта ловит щелчок. */
 .is-picking { opacity: 0.15; pointer-events: none; }
 svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
+
+.call-badges { display: grid; justify-items: start; gap: 2px; }
+.call-badges:empty { display: none; }
+.call-badges .flag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.call .call-top { flex-wrap: wrap; }
+.call .call-board, .call .call-deadline { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }

@@ -411,7 +411,7 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
         employee.return_vehicle = bool(employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE)
         if not employee.return_vehicle:
             release_vehicle(employee)
-        employee.return_to_waiting = employee.waiting_lat is not None
+        employee.return_to_waiting = False
         employee.status = STATUS_FREE
         employee.busy_until = None
         return
@@ -611,8 +611,6 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
 def return_destination(employee):
     if employee.return_vehicle and employee.vehicle:
         return employee.vehicle.lat, employee.vehicle.lon, MODE_VEHICLE, "Верните спецтранспорт на исходную стоянку"
-    if employee.return_to_waiting and employee.waiting_lat is not None:
-        return employee.waiting_lat, employee.waiting_lon, MODE_WALK, "Вернитесь на место ожидания"
     return None
 
 
@@ -682,8 +680,6 @@ def refresh_navigation(db, employee):
             employee.return_vehicle = False
             if call and call.vehicle and call.vehicle.status == VEHICLE_RESERVED and not call.vehicle.employee:
                 call.vehicle.employee = employee
-        else:
-            employee.return_to_waiting = False
     if not call or call.status == CALL_ARRIVED:
         return
     graph = get_graph(employee.airport_icao)

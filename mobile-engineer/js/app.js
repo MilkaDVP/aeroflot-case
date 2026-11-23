@@ -316,7 +316,9 @@ async function goOffline() {
     const snapshot = await OfflineStore.get(KEY_SNAPSHOT);
     if (snapshot && snapshot.employeeId === state.user.employee_id && state.call === null) {
       state.call = snapshot.payload;
-      state.returnLeg = snapshot.returnLeg || null;
+      // На телефоне может оставаться снимок от версии с возвратом пешком.
+      state.returnLeg = snapshot.returnLeg?.instruction?.startsWith("Вернитесь на место ожидания")
+        ? null : snapshot.returnLeg || null;
       state.snapshotAt = snapshot.at;
     }
     state.offline = true;
@@ -433,6 +435,11 @@ function renderWork() {
 
   const call = state.call.call;
   el("call-stand").textContent = call.stand_ref || "—";
+  const details = el("call-details");
+  if (details.dataset.call !== String(call.id)) details.open = false;
+  details.dataset.call = call.id;
+  el("dock-board").textContent = call.board_number;
+  el("dock-stand").textContent = call.stand_ref ? "Ст. " + call.stand_ref : "Вне стоянки";
   el("call-board").textContent = call.board_number;
   el("call-type").textContent = call.aircraft_type;
   el("call-defect").textContent = call.defect_name;
@@ -709,6 +716,8 @@ function updateCountdown() {
     ? new Date(call.control.deadline_at).getTime()
     : new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
   const leftMin = (deadline - Date.now()) / 60000;
+  el("dock-deadline").textContent = call.status === "arrived" ? "У борта" :
+    leftMin < 0 ? `+${Math.ceil(-leftMin)} мин` : `Осталось ${Math.floor(leftMin)} мин`;
 
   const block = el("deadline-block");
   const value = el("deadline-minutes");

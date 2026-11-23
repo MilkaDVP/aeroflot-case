@@ -219,11 +219,11 @@ class TestCustomAirportFlow(ApiTestCase):
         post(engineer, "me/status", action="arrived")
         post(engineer, "me/status", action="assessment", mel_category="A")
         post(engineer, "me/status", action="closed")
-        self.assertIn("ожидания", current()["instruction"])
+        self.assertNotIn("instruction", current())
         location(0)
         self.assertNotIn("instruction", current())
 
-    def test_close_with_car_returns_it_before_walk_to_waiting_place(self):
+    def test_close_returns_car_and_finishes_navigation_at_parking(self):
         admin = self.build_airport()
         person = self.register_engineer(admin)
         aircraft = self.put_aircraft(admin)
@@ -258,7 +258,7 @@ class TestCustomAirportFlow(ApiTestCase):
         location(NODES[0])  # Приехать на место ожидания первым недостаточно.
         self.assertIn("Верните спецтранспорт", leg()["instruction"])
         location(parking)
-        self.assertIn("место ожидания", leg()["instruction"])
+        self.assertNotIn("instruction", leg())
         fleet = self.client.get("/api/vehicles", headers=auth_header(admin)).json()
         self.assertEqual(fleet[0]["status"], "free")
         self.assertEqual(fleet[0]["lon"], parking["lon"])

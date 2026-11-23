@@ -40,7 +40,7 @@ test("transport and tool stops take priority over turns, returns have their own 
     const payload = {call:{...job.call, route_stops:[{node_id:"b",kind}]}, vehicle:{pickup:true}};
     assert.equal(context.nextManeuver(payload, [a,b,c], a).action, action);
   }
-  assert.equal(context.nextManeuver({instruction:"Вернитесь на место ожидания"}, [a,b], a).action, "Вернитесь на место ожидания");
+  assert.equal(context.nextManeuver({instruction:"Верните спецтранспорт на исходную стоянку"}, [a,b], a).action, "Верните спецтранспорт на исходную стоянку");
   assert.equal(context.nextManeuver({call:{status:"arrived"}}, [a,b], a), null);
 });
 

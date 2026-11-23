@@ -183,10 +183,9 @@ function buildCallCard(call, selectedId, onSelect) {
   item.innerHTML = `
     <div class="call-top">
       <span class="call-board">${escapeHtml(call.board_number)}</span>
-      ${callFlags(call)}
-      ${messageFlag(call)}
       ${deadlineLabel(call)}
     </div>
+    <div class="call-badges">${callFlags(call)}${messageFlag(call)}</div>
     <div class="call-where">
       ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
       <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span>
