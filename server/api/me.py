@@ -33,7 +33,7 @@ from models.call_message import AUTHOR_ENGINEER
 from models.employee import Employee
 from models.engineer_action import EngineerAction
 from schemas.auth import MessageResponse
-from schemas.call import CallResponse, MessageRequest
+from schemas.call import CallResponse, EngineerMessageRequest
 from services import mentor, support
 from services.assignment import (
     advance_after_close,
@@ -466,7 +466,7 @@ def set_aog(
 
 @router.post("/message", response_model=CallResponse, summary="Написать диспетчеру")
 def send_message(
-    payload: MessageRequest,
+    payload: EngineerMessageRequest,
     db: Session = Depends(get_dispatch_db),
     context: Context = Depends(get_context),
 ):
@@ -481,6 +481,7 @@ def send_message(
     call = working_call_of(db, employee)
     if call is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
-    support.add_message(db, call, AUTHOR_ENGINEER, employee.full_name, payload.text)
+    support.add_message(db, call, AUTHOR_ENGINEER, employee.full_name, payload.text,
+                        is_problem=payload.is_problem)
     db.commit()
     return call_to_response(call)

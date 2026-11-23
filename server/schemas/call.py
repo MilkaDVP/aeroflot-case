@@ -239,6 +239,12 @@ class MessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class EngineerMessageRequest(MessageRequest):
+    """Сообщение инженера: обычное или о проблеме."""
+
+    is_problem: bool = False
+
+
 class ClaimRequest(BaseModel):
     """Взять вызов в работу. takeover — забрать у другого (начальник смены)."""
 

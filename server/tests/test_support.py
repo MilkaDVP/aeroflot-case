@@ -174,6 +174,22 @@ class TestMessages(SupportCase):
         self.assertEqual(messages[0]["author_role"], "engineer")
         self.assertEqual(messages[0]["author_name"], "Соколов А. В.")
 
+    def test_проблема_отличается_от_обычного_сообщения(self):
+        call, engineer = self.sokolov_at_aircraft()
+        self.me(engineer, "message", {"text": "Приступил"})
+        self.me(engineer, "message", {"text": "Течь стойки", "is_problem": True})
+        messages = self.call(call["id"])["messages"]
+        self.assertEqual([item["is_problem"] for item in messages], [False, True])
+
+    def test_проблема_без_ответа_не_теряется_в_длинной_переписке(self):
+        from services.support import MESSAGES_SHOWN
+
+        call, engineer = self.sokolov_at_aircraft()
+        self.me(engineer, "message", {"text": "Течь стойки", "is_problem": True})
+        for number in range(MESSAGES_SHOWN + 1):
+            self.me(engineer, "message", {"text": f"Сообщение {number}"})
+        self.assertTrue(any(item["is_problem"] for item in self.call(call["id"])["messages"]))
+
     def test_диспетчер_отвечает_и_инженер_видит(self):
         call, engineer = self.sokolov_at_aircraft()
         self.me(engineer, "message", {"text": "Нужен подъёмник"})

@@ -409,6 +409,7 @@ function renderWork() {
   el("chat-open").hidden = !hasCall;
   if (!hasCall) {
     closeSheet("chat-sheet");
+    closeSheet("problem-sheet");
   }
 
   // Карта рисуется в любом случае: без вызова она показывает, где стоит
@@ -468,23 +469,21 @@ function renderWork() {
 }
 
 /**
- * Отметки в окне «Сообщить»: AOG, категория MEL, нехватка инструмента.
- * Ставятся только у борта — до осмотра диагноза нет; сообщение
- * словами можно отправить всегда.
+ * Отметки над чатом: AOG и категория MEL ставятся только у борта — до
+ * осмотра диагноза нет. Сообщить о проблеме и написать можно всегда.
  */
 function renderAtAircraft(call) {
   const atAircraft = call.status === "arrived";
   for (const button of el("quick-marks").querySelectorAll("button")) {
-    button.disabled = !atAircraft;
+    button.disabled = !atAircraft && button.id !== "problem-open";
   }
   el("aog-toggle").classList.toggle("active", Boolean(call.aog));
-  el("tools-toggle").classList.toggle("active", Boolean(call.missing_tools));
   for (const button of el("mel-switch").querySelectorAll("button")) {
     button.classList.toggle("active", button.dataset.mel === call.mel_category);
   }
   const hint = el("report-hint");
   hint.hidden = atAircraft && !hint.dataset.ask;
-  hint.textContent = atAircraft ? "Выберите категорию MEL" : "Отметки — после прибытия к борту";
+  hint.textContent = atAircraft ? "Выберите категорию MEL" : "AOG и MEL — после прибытия к борту";
 }
 
 function setMel(category) {
@@ -494,10 +493,44 @@ function setMel(category) {
   recordAction("assessment", { mel_category: category });
 }
 
-function toggleMissingTools() {
-  const call = state.call && state.call.call;
-  if (!call || call.status !== "arrived") return;
-  recordAction("equipment", { missing_tools: !call.missing_tools });
+function openProblem() {
+  el("problem-error").hidden = true;
+  closeSheet("chat-sheet");
+  openSheet("problem-sheet");
+  el("problem-input").focus();
+}
+
+function closeProblem() {
+  closeSheet("problem-sheet");
+  if (state.call) openChat();
+}
+
+async function sendProblem(event) {
+  event.preventDefault();
+  const callId = state.call?.call.id;
+  const text = el("problem-input").value.trim();
+  if (!callId || !text) return;
+  el("problem-send").disabled = true;
+  el("problem-error").hidden = true;
+  try {
+    const call = await Api.sendMessage(text, true);
+    el("problem-input").value = "";
+    if (state.call?.call.id !== call.id) return;
+    state.call.call = call;
+    renderChat(call);
+    closeProblem();
+  } catch (error) {
+    // Текст остаётся в поле — можно отправить ещё раз.
+    showSheetError("problem-error", error);
+  } finally {
+    el("problem-send").disabled = false;
+  }
+}
+
+/** Уведомления под открытым листом не показываются — ошибка прямо в нём. */
+function showSheetError(id, error) {
+  el(id).textContent = error.status === 0 ? "Нет связи — не отправлено" : error.detail || "Не отправлено";
+  el(id).hidden = false;
 }
 
 /* --- Связь с диспетчером --- */
@@ -511,15 +544,17 @@ function renderChat(call) {
     list.dataset.callId = call.id;
     list.dataset.lastId = 0;
     el("chat-input").value = "";
+    el("problem-input").value = "";
   }
   const follow = list.scrollHeight - list.clientHeight - list.scrollTop <= 3;
   const last = Number(list.dataset.lastId);
   for (const message of call.messages || []) {
     if (message.id <= last) continue;
     const item = document.createElement("div");
-    item.className = `chat-item is-${message.author_role}`;
+    item.className = `chat-item is-${message.author_role}${message.is_problem ? " is-problem" : ""}`;
     item.textContent =
-      message.author_role === "dispatcher" ? `Диспетчер: ${message.text}` : message.text;
+      message.author_role === "dispatcher" ? `Диспетчер: ${message.text}`
+        : message.is_problem ? `⚠ ${message.text}` : message.text;
     list.append(item);
     list.dataset.lastId = message.id;
   }
@@ -559,6 +594,7 @@ async function sendChatMessage(event) {
     return;
   }
   el("chat-send").disabled = true;
+  el("chat-error").hidden = true;
   try {
     const call = await Api.sendMessage(text);
     if (state.call?.call.id !== call.id) return;
@@ -572,7 +608,7 @@ async function sendChatMessage(event) {
   } catch (error) {
     // Текст остаётся в поле: без связи сообщение не теряется, его можно
     // отправить ещё раз, когда сеть вернётся.
-    showToast(state.offline ? "Нет связи — сообщение не отправлено" : error.detail, true);
+    showSheetError("chat-error", error);
   } finally {
     el("chat-send").disabled = false;
   }
@@ -1063,7 +1099,9 @@ function applySimulated(lat, lon) {
 
 function bindEvents() {
   el("aog-toggle").addEventListener("click", toggleAog);
-  el("tools-toggle").addEventListener("click", toggleMissingTools);
+  el("problem-open").addEventListener("click", openProblem);
+  el("problem-form").addEventListener("submit", sendProblem);
+  el("problem-close").addEventListener("click", closeProblem);
   for (const button of el("mel-switch").querySelectorAll("button")) {
     button.addEventListener("click", () => setMel(button.dataset.mel));
   }

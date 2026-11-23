@@ -9,7 +9,8 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from clock import utc_now
@@ -30,4 +31,6 @@ class CallMessage(Base):
     author_role: Mapped[str] = mapped_column(String)
     author_name: Mapped[str] = mapped_column(String)
     text: Mapped[str] = mapped_column(String)
+    # Сообщение о проблеме: у диспетчера вызов горит красным до ответа.
+    is_problem: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sql_text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

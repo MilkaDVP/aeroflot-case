@@ -90,13 +90,14 @@ def close_support(db, call, closed_at=None):
             advance_after_close(db, item.assigned_employee, item, was_working)
 
 
-def add_message(db, call, author_role, author_name, text):
+def add_message(db, call, author_role, author_name, text, *, is_problem=False):
     """Записывает сообщение в переписку группы (к основному вызову)."""
     message = CallMessage(
         call_id=root_of(call).id,
         author_role=author_role,
         author_name=author_name,
         text=" ".join(text.split()),
+        is_problem=is_problem,
     )
     db.add(message)
     return message
@@ -114,12 +115,22 @@ def messages_of(call):
         .limit(MESSAGES_SHOWN)
         .all()
     )
+    # Проблема без ответа не должна пропасть за длинной перепиской.
+    if len(rows) == MESSAGES_SHOWN and all(row.author_role == "engineer" for row in rows):
+        older = session.query(CallMessage).filter(
+            CallMessage.call_id == root_of(call).id, CallMessage.id < rows[-1].id
+        ).order_by(CallMessage.id.desc())
+        problem = older.filter(CallMessage.is_problem).first()
+        reply = older.filter(CallMessage.author_role != "engineer").first()
+        if problem and (reply is None or reply.id < problem.id):
+            rows.append(problem)
     return [
         {
             "id": row.id,
             "author_role": row.author_role,
             "author_name": row.author_name,
             "text": row.text,
+            "is_problem": row.is_problem,
             "created_at": to_iso_utc(row.created_at),
         }
         for row in reversed(rows)

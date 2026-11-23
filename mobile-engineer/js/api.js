@@ -132,7 +132,8 @@ const Api = {
     request("POST", "/api/me/status", { action, ...(extra || {}) }),
   // У борта: этап работ и статус AOG (ставит только инженер).
   setStage: (stage) => request("POST", "/api/me/stage", { stage }),
-  sendMessage: (text) => request("POST", "/api/me/message", { text }),
+  sendMessage: (text, isProblem = false) =>
+    request("POST", "/api/me/message", { text, is_problem: isProblem }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
   setTools: (taken) => request("POST", "/api/me/tools", { taken }),
   waypointDone: (node_id = null) => request("POST", "/api/me/waypoint", { node_id }),

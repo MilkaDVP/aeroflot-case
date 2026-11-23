@@ -150,8 +150,8 @@
     <div class="dock-actions">
       <button type="button" id="decline-call" class="big" hidden>Отказаться</button>
       <!-- Одно окно на всё, что инженер сообщает диспетчеру -->
-      <button type="button" class="big report-open" id="chat-open" hidden aria-label="Сообщить диспетчеру">
-        <span aria-hidden="true">⚠</span> Сообщить
+      <button type="button" class="big report-open" id="chat-open" hidden aria-label="Чат с диспетчером">
+        Чат
         <span class="chip-badge" id="chat-badge" hidden></span>
       </button>
       <button class="big primary action" id="call-action" hidden>—</button>
@@ -190,15 +190,16 @@
 </div>
 
 <!--
-  Сообщить диспетчеру: AOG, категория MEL, нехватка инструмента
-  и сообщение своими словами — в одном окне. У диспетчера вызов
-  загорается красным.
+  Чат с диспетчером, над ним отметки: AOG, «Проблема», категория MEL.
+  «Проблема» открывает своё окно: описал, отправил — у диспетчера
+  вызов загорается красным.
 -->
 <div class="sheet-backdrop" id="chat-sheet" hidden>
   <div class="sheet report">
-    <h3>Сообщить диспетчеру</h3>
+    <h3>Чат с диспетчером</h3>
     <div class="report-marks" id="quick-marks">
       <button type="button" class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
+      <button type="button" class="mark-toggle problem-open" id="problem-open">⚠ Проблема</button>
       <div class="mel-switch" id="mel-switch" role="group" aria-label="Категория MEL">
         <span>MEL</span>
         <button type="button" data-mel="A">A</button>
@@ -206,15 +207,27 @@
         <button type="button" data-mel="C">C</button>
         <button type="button" data-mel="D">D</button>
       </div>
-      <button type="button" class="mark-toggle" id="tools-toggle">Нет инструмента</button>
     </div>
     <p class="report-hint" id="report-hint" hidden></p>
     <div class="chat-list" id="chat-list"></div>
+    <div class="error" id="chat-error" hidden></div>
     <form class="chat-form" id="chat-form">
-      <input id="chat-input" maxlength="500" autocomplete="off" placeholder="Опишите проблему">
+      <input id="chat-input" maxlength="500" autocomplete="off" placeholder="Сообщение">
       <button type="submit" class="primary" id="chat-send" aria-label="Отправить">➤</button>
     </form>
     <button class="big ghost" id="chat-close">Закрыть</button>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="problem-sheet" hidden>
+  <div class="sheet">
+    <h3>Проблема</h3>
+    <form id="problem-form">
+      <textarea id="problem-input" maxlength="500" rows="4" required placeholder="Опишите проблему" aria-label="Описание проблемы"></textarea>
+      <div class="error" id="problem-error" hidden></div>
+      <button type="submit" class="big problem-send" id="problem-send">Отправить</button>
+    </form>
+    <button class="big ghost" id="problem-close">Отмена</button>
   </div>
 </div>
 

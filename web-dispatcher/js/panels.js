@@ -854,7 +854,7 @@ function updateMessages(list, messages, scrollToEnd) {
 
 function buildMessage(message) {
   const item = document.createElement("div");
-  item.className = `message is-${message.author_role}`;
+  item.className = `message is-${message.author_role}${message.is_problem ? " is-problem" : ""}`;
   item.innerHTML = `
     <span class="message-meta">${escapeHtml(message.author_name)} ·
       <span class="num">${formatClock(message.created_at)}</span></span>
@@ -876,20 +876,18 @@ function supportLines(call) {
 }
 
 /**
- * Проблема у борта, о которой сообщил инженер: AOG, нехватка инструмента
- * или сообщение, на которое диспетчер ещё не ответил. Пока она есть,
- * вызов горит красным. Ответ в «Связи с инженером» снимает подсветку
- * по сообщению; AOG и инструмент снимает сам инженер.
+ * Проблема, о которой сообщил инженер: AOG или сообщение о проблеме без
+ * ответа. Обычные сообщения чата вызов не подсвечивают. Ответ
+ * диспетчера снимает подсветку по сообщению; AOG снимает сам инженер.
  */
 function callProblem(call) {
   const reasons = [];
   if (call.aog) reasons.push("AOG");
-  if (call.missing_tools) reasons.push("Нет инструмента");
   const messages = call.messages || [];
-  const lastEngineer = messages.filter((item) => item.author_role === "engineer").at(-1);
+  const lastProblem = messages.filter((item) => item.is_problem).at(-1);
   const lastDispatcher = messages.filter((item) => item.author_role !== "engineer").at(-1);
-  if (lastEngineer && (!lastDispatcher || lastDispatcher.id < lastEngineer.id)) {
-    reasons.push(`«${lastEngineer.text}»`);
+  if (lastProblem && (!lastDispatcher || lastDispatcher.id < lastProblem.id)) {
+    reasons.push(`«${lastProblem.text}»`);
   }
   return reasons;
 }
