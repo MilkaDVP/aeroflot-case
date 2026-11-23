@@ -1068,6 +1068,8 @@ function bindEvents() {
     button.addEventListener("click", () => setMel(button.dataset.mel));
   }
   el("chat-form").addEventListener("submit", sendChatMessage);
+  el("map-zoom-in").addEventListener("click", () => routeMap.zoomBy(1.6));
+  el("map-zoom-out").addEventListener("click", () => routeMap.zoomBy(1 / 1.6));
   el("map-reset").addEventListener("click", () => routeMap.resetView());
   el("chat-open").addEventListener("click", openChat);
   el("chat-close").addEventListener("click", () => {

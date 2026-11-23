@@ -862,17 +862,22 @@ details[open] .detail-label::after { content: " ⌄"; }
 }
 .alerts .link-banner { border-color: var(--border-strong); color: var(--text-muted); }
 
-/* «Ко мне» — одна круглая кнопка вместо плюса и минуса. */
-.map-locate {
+/* «+», «−» и «Ко мне» — колонкой у правого края карты. */
+.map-controls {
   position: absolute; right: var(--edge, 8px); bottom: 34%;
-  width: 48px; height: 48px; padding: 0; border-radius: 50%;
-  display: grid; place-items: center;
-  background: rgba(18, 24, 32, 0.92); color: var(--text-muted);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.map-controls button {
+  width: 48px; height: 48px; padding: 0; border-radius: 12px;
+  display: grid; place-items: center; font-size: 24px; line-height: 1;
+  background: rgba(18, 24, 32, 0.92); color: var(--text);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
 }
+.map-controls .map-locate { border-radius: 50%; margin-top: 4px; color: var(--text-muted); }
 .map-locate.active { color: var(--route); border-color: var(--route); }
 @media (orientation: landscape) and (max-height: 540px) {
-  .map-locate { left: var(--edge); right: auto; bottom: calc(var(--safe-bottom) + 8px); }
+  .map-controls { left: var(--edge); right: auto; bottom: calc(var(--safe-bottom) + 8px); flex-direction: row; }
+  .map-controls .map-locate { margin: 0 0 0 4px; }
 }
 
 /* --- Схема аэропорта: те же цвета, что на карте диспетчера --- */

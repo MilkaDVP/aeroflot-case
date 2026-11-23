@@ -84,12 +84,16 @@
   <div class="map-wrap">
     <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
     <button class="map-toggle" id="map-toggle" aria-pressed="false">Спутник</button>
-    <!-- Вернуть карту к себе: крупный план вокруг своей метки -->
-    <button type="button" class="map-locate" id="map-reset" aria-label="Ко мне" title="Ко мне">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-      </svg>
-    </button>
+    <!-- Масштаб (ещё щипок двумя пальцами) и возврат к себе -->
+    <div class="map-controls">
+      <button type="button" id="map-zoom-in" aria-label="Приблизить">+</button>
+      <button type="button" id="map-zoom-out" aria-label="Отдалить">−</button>
+      <button type="button" class="map-locate" id="map-reset" aria-label="Ко мне" title="Ко мне">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+        </svg>
+      </button>
+    </div>
     <div class="map-hint" id="map-hint" hidden>Коснитесь карты там, где вы</div>
   </div>
 
