@@ -21,6 +21,7 @@ from graph_registry import get_graph
 from models.airport import SOURCE_MANUAL, Airport
 from models.user import ROLE_ADMIN, AuthSession, User
 from services import claim as claims
+from services import journal
 from services import shift_clock
 from schemas.auth import (
     AirportBrief,
@@ -91,6 +92,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_dispatch_db)):
     # Ответ одинаков и при неверном логине, и при неверном пароле:
     # иначе по ответу можно перебором узнать существующие учётные записи.
     if user is None or (user.employee and user.employee.archived) or not verify_password(payload.password, user.password_hash):
+        # Неудачный вход — в журнал, отдельной транзакцией: ответ — отказ.
+        journal.record(
+            db, "login_failed", f"Неудачный вход: логин «{payload.login[:60]}»",
+            airport_icao=next(iter(user.airport_icaos), None) if user else None,
+            actor=None, params={"логин": payload.login[:60]},
+        )
+        db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, ERROR_BAD_CREDENTIALS)
 
     # Инженер, который уже на смене, получает срок её окончания
@@ -114,6 +122,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_dispatch_db)):
         expires_at=datetime.max if user.employee else session_expiry(),
     )
     db.add(session)
+    journal.record(
+        db, "login", f"Вход: {user.full_name} ({journal.ROLE_TITLES.get(user.role, user.role)})",
+        airport_icao=session.airport_icao or next(iter(user.airport_icaos), None),
+        actor=journal.actor_of(user),
+        params={"логин": user.login, "аэропорты": user.airport_icaos},
+    )
     db.commit()
 
     return LoginResponse(

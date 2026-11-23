@@ -196,6 +196,23 @@ const Api = {
   // План ИИ-диспетчера; explain=false — без пояснения GigaChat (быстрее).
   aiPlan: (explain = true) => request("GET", `/api/ai/plan?explain=${explain}`),
   aiAsk: (question) => request("POST", "/api/ai/ask", { question }),
+
+  // Журнал событий: просмотр, типы, целостность, выгрузка файлом.
+  events: (params) => request("GET", `/api/events?${new URLSearchParams(params)}`),
+  eventTypes: () => request("GET", "/api/events/types"),
+  eventsIntegrity: () => request("GET", "/api/events/integrity"),
+  exportEvents: async (params) => {
+    const response = await fetch(`${CONFIG.apiBase}/api/events/export?${new URLSearchParams(params)}`, {
+      headers: { Authorization: `Bearer ${Session.token}` },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new ApiError(response.status, extractDetail(payload, response.status));
+    }
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const name = (disposition.match(/filename="([^"]+)"/) || [])[1] || `journal.${params.format}`;
+    return { blob: await response.blob(), name };
+  },
   // Захват вызова: один вызов разбирает один диспетчер. takeover —
   // начальник смены забирает чужой вызов себе.
   claimCall: (callId, takeover = false) =>

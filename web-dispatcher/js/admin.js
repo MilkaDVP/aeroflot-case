@@ -37,6 +37,7 @@ const TAB_MIN_ROLE = {
   shifts: "shift_supervisor",
   vehicles: "local_admin",
   aircraft: "local_admin",
+  journal: "shift_supervisor",
 };
 
 let editorMap = null;
@@ -208,6 +209,7 @@ function showTab(name) {
   el("page-shifts").hidden = name !== "shifts";
   el("page-vehicles").hidden = name !== "vehicles";
   el("page-aircraft").hidden = name !== "aircraft";
+  el("page-journal").hidden = name !== "journal";
   el("page-editor").hidden = true;
 
   if (name === "users") {
@@ -218,6 +220,8 @@ function showTab(name) {
     loadVehicles();
   } else if (name === "aircraft") {
     loadAircraft();
+  } else if (name === "journal") {
+    Journal.open(state.user);
   }
 }
 

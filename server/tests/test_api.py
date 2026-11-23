@@ -7,17 +7,13 @@
 то есть проверяется ровно та конфигурация, которую увидит жюри.
 """
 
-import os
-import tempfile
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
 
-# Переменные окружения выставляются до импорта модулей сервера: адрес базы
-# читается при импорте database.py и позже уже не меняется.
-_TEMP_DIR = tempfile.mkdtemp(prefix="aeroflot-test-")
-_DB_PATH = Path(_TEMP_DIR) / "test.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
+# Временная база и выключенные фоновые такты выставлены в tests/__init__.py —
+# он импортируется раньше любого тестового модуля.
+import tests  # noqa: F401,E402
+
 from fastapi.testclient import TestClient  # noqa: E402
 
 from constants import AIRPORTS_DIR  # noqa: E402
