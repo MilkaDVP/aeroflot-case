@@ -8,6 +8,10 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.deps/
+
+# Локальные секреты Docker Compose, включая FR24_API_TOKEN
+.env
 
 # База данных, создаётся при первом запуске сервера
 *.db

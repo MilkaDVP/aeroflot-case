@@ -1,0 +1,13 @@
+/* Отчёт ручной синхронизации Flightradar24 поверх общей темы администратора. */
+
+#fr24-results .item-sub {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.badge.is-error {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
