@@ -63,13 +63,53 @@ def create_all():
         if legacy:
             columns = {c["name"] for c in inspect(connection).get_columns("route_participants")}
             flag = "is_training" if "is_training" in columns else "0"
-            for table, value in (("employees", 0), ("training_engineers", 1)):
-                connection.execute(text(
-                    f"INSERT INTO {table} (id) SELECT id FROM route_participants WHERE {flag} = {value}"
-                ))
+            connection.execute(text(f"INSERT INTO employees (id) SELECT id FROM route_participants WHERE {flag} = 0"))
     added = add_missing_columns(engine)
     if added:
         print(f"База дополнена колонками: {', '.join(added)}")
+
+    retire_legacy_training(engine)
+
+
+def retire_legacy_training(target_engine):
+    """Удаляет старую команду, сохраняя историю закрытых вызовов и выданный транспорт."""
+    with target_engine.begin() as conn:
+        if conn.dialect.name == "sqlite":
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+        cols = {col["name"] for col in inspect(conn).get_columns("route_participants")}
+        if "is_training" not in cols:
+            return
+        bots = "SELECT id FROM route_participants WHERE is_training = 1"
+        active = "status NOT IN ('closed', 'cancelled')"
+        conn.exec_driver_sql(f"""UPDATE vehicles SET status='free', employee_id=NULL
+            WHERE employee_id IN ({bots}) OR (status='reserved' AND employee_id IS NULL
+            AND id IN (SELECT vehicle_id FROM calls WHERE assigned_employee_id IN ({bots}) AND {active}))""")
+        conn.exec_driver_sql(f"""UPDATE calls SET status=CASE WHEN parent_call_id IS NULL THEN 'new' ELSE 'cancelled' END,
+            closed_at=CASE WHEN parent_call_id IS NOT NULL THEN CURRENT_TIMESTAMP END,
+            previous_employee_id=assigned_employee_id, assigned_employee_id=NULL, suggested_employee_id=NULL,
+            route_node_ids=NULL, vehicle_id=NULL, pickup_node_id=NULL, eta_at=NULL, eta_minutes=NULL,
+            claimed_by_user_id=NULL, claimed_at=NULL, queued_at=NULL, first_arrived_at=NULL, work_stage=NULL,
+            aog=0, require_vehicle_pickup=0, override_reason=NULL, unassign_reason='Завершение учебного режима'
+            WHERE assigned_employee_id IN ({bots}) AND {active}""")
+        conn.exec_driver_sql(f"""UPDATE calls SET suggested_employee_id=NULL,
+            status=CASE WHEN status='suggested' THEN 'new' ELSE status END
+            WHERE suggested_employee_id IN ({bots}) AND {active}""")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS training_engineers")
+        # Оставляем только архивные карточки, на которые ссылается история.
+        conn.exec_driver_sql(f"""DELETE FROM route_participants WHERE id IN ({bots})
+            AND NOT EXISTS (SELECT 1 FROM calls WHERE route_participants.id IN
+                            (previous_employee_id, assigned_employee_id, suggested_employee_id))
+            AND NOT EXISTS (SELECT 1 FROM shift_events WHERE employee_id=route_participants.id)
+            AND NOT EXISTS (SELECT 1 FROM engineer_actions WHERE employee_id=route_participants.id)""")
+        conn.exec_driver_sql(f"UPDATE route_participants SET archived=1,status='offline' WHERE id IN ({bots})")
+        conn.exec_driver_sql(f"INSERT OR IGNORE INTO employees (id) {bots}")
+        for table, obsolete in {"airports": ("drill_enabled", "drill_speed"),
+                                "calls": ("drill_work_s", "sim_progress_m"),
+                                "route_participants": ("drill_return_path", "held", "is_training")}.items():
+            existing = {col["name"] for col in inspect(conn).get_columns(table)}
+            for name in obsolete:
+                if name in existing:
+                    conn.exec_driver_sql(f'ALTER TABLE "{table}" DROP COLUMN "{name}"')
 
 
 def add_missing_columns(target_engine):

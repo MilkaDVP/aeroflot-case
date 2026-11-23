@@ -28,8 +28,6 @@ class RouteParticipant(Base):
 
     __tablename__ = "route_participants"
 
-    is_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    __mapper_args__ = {"polymorphic_on": is_training, "polymorphic_abstract": True}
 
     always_on_shift: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
@@ -43,7 +41,6 @@ class RouteParticipant(Base):
     waiting_lat: Mapped[float | None] = mapped_column(Float)
     waiting_lon: Mapped[float | None] = mapped_column(Float)
     return_to_waiting: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    drill_return_path: Mapped[list | None] = mapped_column(JSON, nullable=True)
     return_vehicle: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     shift_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shift: Mapped[str] = mapped_column(String)
@@ -60,10 +57,6 @@ class RouteParticipant(Base):
     location_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     location_source: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    # Задержан в режиме учений: стоит на месте, хотя назначен на вызов.
-    # Так на тренировке разыгрывается «исполнитель не успевает».
-    held: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     # Индивидуальная скорость ходьбы. None — нормативная скорость пешехода
     # из constants.py. Скорость машины — свойство машины, а не человека.
@@ -114,11 +107,3 @@ class Employee(RouteParticipant):
     """Реальный сотрудник аэропорта."""
     __tablename__ = "employees"
     id: Mapped[int] = mapped_column(ForeignKey("route_participants.id"), primary_key=True)
-    __mapper_args__ = {"polymorphic_identity": False}
-
-
-class TrainingEngineer(RouteParticipant):
-    """Участник учений, которому нельзя выдать аккаунт сотрудника."""
-    __tablename__ = "training_engineers"
-    id: Mapped[int] = mapped_column(ForeignKey("route_participants.id"), primary_key=True)
-    __mapper_args__ = {"polymorphic_identity": True}

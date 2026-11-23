@@ -142,10 +142,6 @@ class Call(Base):
     route_start_lon: Mapped[float | None] = mapped_column(Float)
     require_vehicle_pickup: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Сколько метров маршрута пройдено в режиме учений. Пусто, пока
-    # исполнитель не начал движение или идёт не по учебному сценарию.
-    drill_work_s: Mapped[float] = mapped_column(Float, default=0, server_default=text("0"))
-    sim_progress_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Вызов поддержки: ещё один инженер на тот же борт по тому же вызову.
     # Здесь — основной вызов. Отдельная запись, а не список исполнителей
@@ -178,10 +174,10 @@ class Call(Base):
         lazy="selectin",
     )
     assigned_employee = relationship(
-        "RouteParticipant", foreign_keys=[assigned_employee_id], lazy="selectin"
+        "Employee", foreign_keys=[assigned_employee_id], lazy="selectin"
     )
     previous_employee = relationship(
-        "RouteParticipant", foreign_keys=[previous_employee_id], lazy="selectin"
+        "Employee", foreign_keys=[previous_employee_id], lazy="selectin"
     )
 
     @property

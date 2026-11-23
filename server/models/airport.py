@@ -49,14 +49,6 @@ class Airport(Base):
     # пусто: их граф читается из файла.
     graph: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # Режим учений: сотрудники без телефона сами движутся по назначенному
-    # маршруту. Нужен для демонстрации и тренировки диспетчеров; включает
-    # его только администратор, по умолчанию выключен.
-    drill_speed: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
-    drill_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("0")
-    )
-
     # Расписание смен (services/shift_clock.py): часовой пояс IANA и
     # граница дневной смены «ЧЧ:ММ». Пусто — Москва, 08:00–20:00.
     # Меняют начальник смены и администраторы.

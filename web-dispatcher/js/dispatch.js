@@ -29,8 +29,6 @@ const state = {
   // Все вызовы с сервера, включая вызовы поддержки (второй инженер).
   // В списке слева — только основные: state.calls.
   allCalls: [],
-  // Идут ли учения: сервер сам двигает сотрудников без телефона.
-  drill: false,
   // Вызов, который этот диспетчер держит в работе, и когда последний раз
   // подтвердил захват серверу (services/claim.py: без подтверждения
   // захват истекает через 2 минуты).
@@ -110,7 +108,7 @@ async function start() {
     }));
 
     initAlerts();
-    // ИИ-диспетчер: панель с планом назначений, кнопка рядом с учениями.
+    // ИИ-диспетчер: панель с планом назначений.
     AiPanel.init(document.getElementById("ai-toggle"), document.getElementById("ai-panel"), {
       onChanged: refresh,
       // «На карте»: стоянка вызова и маршрут предложенного инженера;
@@ -148,19 +146,16 @@ async function start() {
 async function refresh() {
   const version = ++refreshVersion;
   try {
-    const [employees, aircraft, calls, vehicles, drill, reports] = await Promise.all([
-      Api.mapParticipants(),
+    const [employees, aircraft, calls, vehicles, reports] = await Promise.all([
+      Api.employees(),
       Api.aircraft(),
       Api.calls(),
       Api.vehicles(),
-      Api.drillState(),
       Api.reports(),
     ]);
     if (version < appliedRefresh) return;
     appliedRefresh = version;
     const previous = state.selectedCall;
-    state.drill = drill.enabled;
-    document.getElementById("drill-speed").value = drill.speed;
     state.reports = reports;
 
     state.employees = employees;
@@ -182,7 +177,6 @@ async function refresh() {
     }
 
     renderAll();
-    renderDrill();
     renderInbox(reports, processReport, rejectReport);
 
     // Прогноз по назначенному вызову меняется вместе с координатами
@@ -208,8 +202,7 @@ async function refresh() {
         refreshExecutorMenu();
         loadExtraCandidates(selected);
       }
-      // Маршрут из одной вершины (исполнитель рядом с бортом или учебный
-      // инженер после переноса) рисуется от его текущего места — оно
+      // Маршрут из одной вершины рисуется от его текущего места — оно
       // меняется на каждом опросе, поэтому перерисовываем всегда.
       if (previous.status !== selected.status ||
           selected.route_node_ids?.length === 1 ||
@@ -521,7 +514,7 @@ function executorNodes() {
   const ctx = panelContext();
   const nodes = [];
   if (ctx.adding) {
-    nodes.push(linkButton("Снять исполнителя", unassignSelected, "is-danger"), ...holdButton(call));
+    nodes.push(linkButton("Снять исполнителя", unassignSelected, "is-danger"));
     const person = state.employees.find(e => e.id === call.assigned_employee_id);
     if (person && ["assigned", "accepted"].includes(call.status)) {
       const select = document.createElement("select");
@@ -560,7 +553,7 @@ function executorNodes() {
  * Блок «Управление исполнителями» в правой колонке.
  *
  * Стоит сразу под главной карточкой вызова и раскрывается вниз — вместо
- * отдельного окна поверх карты. Содержимое (кандидаты, снятие, учения)
+ * отдельного окна поверх карты. Содержимое (кандидаты, снятие)
  * перестраивается при каждом обновлении, пока блок раскрыт.
  */
 function refreshExecutorMenu() {
@@ -660,8 +653,7 @@ function queueOptions() {
  * или вызов закрыт, линия не нужна, и карта остаётся чистой.
  */
 function showCallRoute(call) {
-  // Исполнитель нужен, чтобы маршрут из одной вершины шёл от его места
-  // (учебный инженер после ручного переноса).
+  // Исполнитель нужен, чтобы маршрут из одной вершины шёл от его места.
   const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
   if (call.status === "assigned" || call.status === "accepted") {
     airportMap.showRoute(
@@ -1120,78 +1112,10 @@ async function rejectReport(report) {
   }
 }
 
-/* --- Режим учений --- */
-
-/**
- * Значок учений в шапке и переключатель.
- *
- * Значок виден всем: диспетчер должен понимать, что сотрудники на карте
- * движутся по учебному сценарию и прибытие подтверждается само.
- * Включает и выключает учения администратор аэропорта и старше.
- */
-function renderDrill() {
-  document.getElementById("drill-badge").hidden = !state.drill;
-  const toggle = document.getElementById("drill-toggle");
-  toggle.hidden = !roleAtLeast(Session.user.role, "local_admin");
-  document.getElementById("drill-speed-box").hidden = toggle.hidden || !state.drill;
-  toggle.textContent = state.drill ? "Завершить учения" : "Начать учения";
-}
-
-document.getElementById("drill-speed").addEventListener("change", async event => {
-  try { await Api.setDrill(true, Number(event.target.value)); }
-  catch (error) { showToast(error.detail, true); }
-  await refresh();
-});
-
-async function toggleDrill() {
-  try {
-    await Api.setDrill(!state.drill);
-    await refresh();
-  } catch (error) {
-    showToast(error.detail, true);
-  }
-}
-
-/**
- * Карточка назначенного вызова; в учениях — с кнопкой задержки.
- *
- * «Задержать» останавливает исполнителя на маршруте: так на тренировке
- * разыгрывается вводная «исполнитель встал», и видно, как меняется прогноз.
- */
 function renderAssignedCard(call, scrollToEnd = false) {
   renderAssignedPanel(elements.suggestBody, call, sendCallMessage, scrollToEnd);
   refreshExecutorMenu();
 }
-
-/** В учениях — ссылка «задержать»: разыгрывается вводная «исполнитель встал». */
-function holdButton(call) {
-  if (!state.drill || !call.assigned_employee_id || call.status === "arrived") {
-    return [];
-  }
-  const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
-  if (!employee?.is_training) {
-    return [];
-  }
-  const button = linkButton(
-    employee.held ? "Отпустить (учения)" : "Задержать (учения)",
-    () => toggleHold(employee),
-    "is-warn"
-  );
-  button.id = "hold-button";
-  return [button];
-}
-
-async function toggleHold(employee) {
-  try {
-    await Api.holdEmployee(employee.id, !employee.held);
-    await refresh();
-    refreshExecutorMenu();
-  } catch (error) {
-    showToast(error.detail, true);
-  }
-}
-
-document.getElementById("drill-toggle").addEventListener("click", toggleDrill);
 
 /* --- Подложка карты --- */
 

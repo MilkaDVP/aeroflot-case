@@ -575,7 +575,7 @@ async function loadUsers() {
     const employees = await Api.adminRoster();
     if (state.user.airport_icao) {
       // Весь состав аэропорта, а не только смена текущей сессии:
-      // в учётных записях нужны все люди (учебные инженеры — нет).
+      // в учётных записях нужны все люди.
 
       await loadGraphOnce();
       fillPlaces("user-place");

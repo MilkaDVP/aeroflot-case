@@ -30,8 +30,7 @@ from database import get_db, get_dispatch_db
 from models.airport import Airport
 from models.call import ACTIVE_CALL_STATUSES, Call
 from services.shifts import end_shift, start_clock
-from services.drill import is_enabled, reroute_after_move
-from models.employee import Employee, RouteParticipant
+from models.employee import Employee
 from models.user import (
     ROLE_ADMIN,
     ROLE_ENGINEER,
@@ -94,9 +93,7 @@ def to_response(employee):
         location_at=to_iso_utc(employee.location_at),
         location_source=employee.location_source,
         seen_at=to_iso_utc(employee.seen_at),
-        is_training=employee.is_training,
         always_on_shift=employee.always_on_shift,
-        held=bool(employee.held),
     )
 
 
@@ -167,7 +164,6 @@ def admin_roster(context: Context = Depends(require_roles(ROLE_SHIFT_SUPERVISOR)
 @router.get("", response_model=list[EmployeeResponse], summary="Сотрудники аэропорта")
 def list_employees(
     shift: str | None = None,
-    include_training: bool = False,
     all_shifts: bool = False,
     context: Context = Depends(require_airport),
     db: Session = Depends(get_db),
@@ -179,17 +175,16 @@ def list_employees(
     сменой. Параметр shift позволяет посмотреть состав другой смены,
     shift=all — всех сотрудников аэропорта (для учётных записей).
     """
-    model = RouteParticipant if include_training and is_enabled(db, context.airport_icao) else Employee
-    query = db.query(model).filter_by(
+    query = db.query(Employee).filter_by(
         archived=False, airport_icao=context.airport_icao,
     )
     selected_shift = shift or context.shift
     # all_shifts=true и shift=all — одно и то же: весь состав аэропорта
     # (учётные записи администрирования), без фильтра по смене сессии.
     if selected_shift and not all_shifts and selected_shift != "all":
-        query = query.filter(model.shift == selected_shift)
+        query = query.filter(Employee.shift == selected_shift)
 
-    return [to_response(employee) for employee in query.order_by(model.full_name).all()]
+    return [to_response(employee) for employee in query.order_by(Employee.full_name).all()]
 
 
 @router.post(
@@ -378,7 +373,7 @@ def update_location(
     устареть. Прогноз прибытия по GPS-фиксации, которой больше
     полутора минут, ненадёжен, а точку, поставленную вручную, не обновляют намеренно.
     """
-    employee = load_employee(db, context, employee_id, RouteParticipant)
+    employee = load_employee(db, context, employee_id)
     ensure_own_card(context, employee)
 
     if context.user.role != ROLE_ENGINEER and employee.location_source == "gps" and payload.source == LOCATION_MANUAL:
@@ -394,10 +389,8 @@ def update_location(
         employee.waiting_lat, employee.waiting_lon = payload.lat, payload.lon
     changed = record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
     from services.assignment import refresh_navigation
-    if changed and not employee.is_training:
+    if changed:
         refresh_navigation(db, employee)
-    if employee.is_training and payload.source == LOCATION_MANUAL and not reroute_after_move(db, employee):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Из выбранной точки нет маршрута к борту")
     db.commit()
     return to_response(employee)
 

@@ -50,7 +50,7 @@ class Vehicle(Base):
         DateTime, default=utc_now, onupdate=utc_now
     )
 
-    employee = relationship("RouteParticipant", back_populates="vehicle", lazy="selectin")
+    employee = relationship("Employee", back_populates="vehicle", lazy="selectin")
 
     def position(self):
         """

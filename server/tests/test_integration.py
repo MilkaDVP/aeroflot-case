@@ -1,27 +1,18 @@
-"""
-Сквозные сценарии на стыке веток feature/lean-ui, codex/lean-ui-bugfixes
-и victor.
-
-Каждая ветка покрывала свою часть тестами; здесь проверяется, что части
-работают вместе: учётные записи и роли (victor) с жизненным циклом смены
-инженера (codex), учебные инженеры (codex) с переносом объектов на карте
-(victor), перенос борта вне стоянки (victor) с назначением и контролем
-срока (lean-ui), захват вызова (victor) с учениями (codex).
-"""
+"""Проверки смен, назначения инженеров, перемещения бортов и прав доступа."""
 
 from datetime import timedelta
 
 from clock import utc_now
 from database import SessionLocal
 from graph_registry import get_graph
-from models.employee import Employee, TrainingEngineer
+from models.employee import Employee
 from models.user import User
 from services.shifts import expire_shifts
 from tests.test_api import auth_header
-from tests.test_drill import DrillCase
+from tests.test_mentor import MentorCase
 
 
-class TestRealEngineerLifecycle(DrillCase):
+class TestRealEngineerLifecycle(MentorCase):
     """Сценарий 1. Реальный инженер: от учётной записи до конца смены."""
 
     def create_engineer(self, login="volnov"):
@@ -118,81 +109,14 @@ class TestRealEngineerLifecycle(DrillCase):
         self.assertIsNotNone(account["employee_id"])
 
 
-class TestTrainingIsolation(DrillCase):
-    """Сценарий 2. Учебный инженер не затрагивает реальные данные."""
-
-    def snapshot_real(self):
-        with SessionLocal() as db:
-            return {
-                person.id: (person.lat, person.lon, person.status, person.shift)
-                for person in db.query(Employee).filter_by(airport_icao="UUEE")
-            }
-
-    def test_учения_не_трогают_штат(self):
-        before = self.snapshot_real()
-        self.assertEqual(self.enable().status_code, 200)
-
-        call = self.register()
-        bot = self.assign_best(call["id"])["employee_id"]
-        with SessionLocal() as db:
-            self.assertIsNotNone(db.get(TrainingEngineer, bot))
-            self.assertIsNone(db.get(Employee, bot))
-
-        # Перенос учебного инженера на карте (как перетаскивание мышью)
-        # пересчитывает маршрут от нового места.
-        graph = get_graph("UUEE")
-        route = self.call(call["id"])["route_node_ids"]
-        middle = graph.node(route[len(route) // 2])
-        moved = self.send_location(bot, middle["lat"], middle["lon"])
-        self.assertEqual(moved.status_code, 200, moved.text)
-        after_move = self.call(call["id"])["route_node_ids"]
-        self.assertLess(len(after_move), len(route))
-
-        self.step(120)
-        self.assertEqual(self.enable(False).status_code, 200)
-        self.assertEqual(self.snapshot_real(), before)
-
-    def test_учебный_инженер_не_получает_учётную_запись(self):
-        self.enable()
-        with SessionLocal() as db:
-            bot = db.query(TrainingEngineer).filter_by(airport_icao="UUEE").first()
-            self.assertIsNone(db.query(User).filter(User.employee_id == bot.id).first())
-            bot_id = bot.id
-        # В учётных записях и в составе аэропорта его нет.
-        local = auth_header(self.login("local_uuee", "local_uuee"))
-        roster = self.client.get("/api/employees?all_shifts=true", headers=local).json()
-        self.assertNotIn(bot_id, [item["id"] for item in roster])
-        # Карточку учебного инженера нельзя править как сотрудника.
-        patch = self.client.patch(f"/api/employees/{bot_id}", json={"shift": "night"}, headers=local)
-        self.assertEqual(patch.status_code, 404, patch.text)
-
-    def test_в_учениях_реального_не_назначить(self):
-        self.enable()
-        call = self.register()
-        real = self.employee_id("Соколов А. В.")
-        response = self.client.post(
-            f"/api/calls/{call['id']}/assign",
-            json={"employee_id": real, "override_reason": "проверка"},
-            headers=auth_header(self.supervisor),
-        )
-        self.assertEqual(response.status_code, 409, response.text)
-
-    def test_учебный_вызов_и_захват(self):
-        # Захват вызова работает и в учениях: второй диспетчер не назначит.
-        self.enable()
-        call = self.register()
-        second = self.login("dispatcher2", "dispatcher")
-        bot = self.suggest(call["id"])["best"]["employee_id"]
-        response = self.client.post(
-            f"/api/calls/{call['id']}/assign",
-            json={"employee_id": bot},
-            headers=auth_header(second),
-        )
-        self.assertEqual(response.status_code, 409, response.text)
-
-
-class TestAircraftMoveWithAssignment(DrillCase):
+class TestAircraftMoveWithAssignment(MentorCase):
     """Сценарий 4. Борт с назначенным инженером уходит со стоянки и возвращается."""
+
+    def call(self, call_id):
+        calls = self.client.get(
+            "/api/calls?include_closed=true", headers=auth_header(self.dispatcher)
+        ).json()
+        return next(item for item in calls if item["id"] == call_id)
 
     def aircraft(self, board):
         items = self.client.get("/api/aircraft", headers=auth_header(self.dispatcher)).json()
@@ -245,7 +169,7 @@ class TestAircraftMoveWithAssignment(DrillCase):
         self.assertEqual(response.status_code, 403, response.text)
 
 
-class TestShiftExpiryIndependence(DrillCase):
+class TestShiftExpiryIndependence(MentorCase):
     """Сценарий 5. Конец смены инженера не зависит от входа и расписания аэропорта."""
 
     def test_истёкшая_смена_не_разлогинивает(self):
@@ -278,21 +202,8 @@ class TestShiftExpiryIndependence(DrillCase):
         self.assertTrue(me["on_shift"])
 
 
-class TestPermissionsAcrossFeatures(DrillCase):
+class TestPermissionsAcrossFeatures(MentorCase):
     """Сценарий 7. Права на стыке функций."""
-
-    def test_диспетчер_не_включает_учения(self):
-        response = self.enable(token=self.dispatcher)
-        self.assertEqual(response.status_code, 403, response.text)
-
-    def test_администратор_аэропорта_включает_учения(self):
-        local = self.login("local_uuee", "local_uuee")
-        self.assertEqual(self.enable(token=local).status_code, 200)
-
-    def test_реального_не_задержать_в_учениях(self):
-        self.enable()
-        real = self.employee_id("Соколов А. В.")
-        self.assertEqual(self.hold(real).status_code, 409)
 
     def test_чужой_аэропорт_не_двигает_сотрудника(self):
         dme = self.login("dispatcher_uudd", "dispatcher", airport="UUDD")

@@ -171,7 +171,6 @@ def update_assigned_route(call, plan, *, reset_eta=True):
     call.route_start_lon = call.assigned_employee.lon
     call.route_node_ids = plan.node_ids
     call.pickup_node_id = plan.pickup_node_id
-    call.sim_progress_m = None
     if reset_eta and call.status != CALL_ARRIVED:
         call.eta_minutes = round(plan.minutes, 1)
         call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
@@ -214,7 +213,6 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     # исполнителя и машину как None, хотя в базе они записаны.
     if employee.waiting_lat is None:
         employee.waiting_lat, employee.waiting_lon = employee.lat, employee.lon
-    employee.drill_return_path = None
     employee.return_to_waiting = False
     employee.return_vehicle = False
     call.assigned_employee = employee
@@ -383,7 +381,6 @@ def unassign(db, call, reason):
     call.vehicle = None
     call.pickup_node_id = None
     call.route_node_ids = None
-    call.sim_progress_m = None
     call.eta_minutes = None
     call.eta_at = None
     call.queued_at = None

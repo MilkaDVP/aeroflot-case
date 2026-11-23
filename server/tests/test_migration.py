@@ -15,7 +15,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 
 import models  # noqa: F401  регистрация моделей в метаданных
-from database import Base, add_missing_columns
+from database import Base, add_missing_columns, retire_legacy_training
 
 
 class TestAddMissingColumns(unittest.TestCase):
@@ -41,6 +41,28 @@ class TestAddMissingColumns(unittest.TestCase):
         self.assertEqual(sorted(added), ["calls.eta_at", "calls.queued_at"])
         self.assertIn("eta_at", self.columns())
         self.assertIn("queued_at", self.columns())
+
+    def test_retired_training_team_is_removed_without_affecting_staff(self):
+        from sqlalchemy.orm import Session
+        from models.employee import Employee
+        add_missing_columns(self.engine)
+        with Session(self.engine) as db:
+            employee = Employee(full_name="Инженер", airport_icao="UUEE", shift="day")
+            db.add(employee)
+            db.commit()
+            staff_id = employee.id
+        with self.engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE route_participants ADD COLUMN is_training BOOLEAN DEFAULT 0")
+            conn.exec_driver_sql("CREATE TABLE training_engineers (id INTEGER PRIMARY KEY)")
+            conn.exec_driver_sql("""INSERT INTO route_participants
+                (full_name,airport_icao,shift,status,qualifications,updated_at,is_training)
+                VALUES ('Учебный','UUEE','day','free','[]',CURRENT_TIMESTAMP,1)""")
+            conn.exec_driver_sql("INSERT INTO training_engineers VALUES (last_insert_rowid())")
+        retire_legacy_training(self.engine)
+        retire_legacy_training(self.engine)
+        with self.engine.connect() as conn:
+            self.assertFalse(inspect(conn).has_table("training_engineers"))
+            self.assertEqual(conn.exec_driver_sql("SELECT id FROM route_participants").scalars().all(), [staff_id])
 
     def test_повторный_запуск_ничего_не_меняет(self):
         add_missing_columns(self.engine)

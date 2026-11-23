@@ -153,7 +153,6 @@ const Api = {
 
   adminRoster: () => request("GET", "/api/employees/roster"),
   airportRoster: () => request("GET", "/api/employees?all_shifts=true"),
-  mapParticipants: () => request("GET", "/api/employees?include_training=true"),
   employees: (shift) =>
     request("GET", shift ? `/api/employees?shift=${shift}` : "/api/employees"),
   // Имитация координат с рабочего экрана: задание разрешает задавать
@@ -234,11 +233,6 @@ const Api = {
   rejectReport: (reportId, reason) =>
     request("POST", `/api/reports/${reportId}/reject`, { reason }),
 
-  // Режим учений: состояние, переключение (администратор), задержка сотрудника.
-  drillState: () => request("GET", "/api/drill"),
-  setDrill: (enabled, speed) => request("POST", "/api/drill", { enabled, speed }),
-  holdEmployee: (employeeId, held) =>
-    request("POST", `/api/drill/hold/${employeeId}`, { held }),
 
   // Лента Наставника и итог смены одним ответом.
 
