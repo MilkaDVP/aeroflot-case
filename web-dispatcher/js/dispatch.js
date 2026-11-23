@@ -41,10 +41,8 @@ const state = {
 const elements = {
   map: document.getElementById("map"),
   callsList: document.getElementById("calls-list"),
-  callsCount: document.getElementById("calls-count"),
   suggestBody: document.getElementById("suggest-body"),
   assignButton: document.createElement("button"),
-  executorMenu: document.getElementById("executor-menu"),
   clock: document.getElementById("clock"),
   connStatus: document.getElementById("conn-status"),
 };
@@ -112,6 +110,29 @@ async function start() {
     }));
 
     initAlerts();
+    // ИИ-диспетчер: панель с планом назначений, кнопка рядом с учениями.
+    AiPanel.init(document.getElementById("ai-toggle"), document.getElementById("ai-panel"), {
+      onChanged: refresh,
+      // «На карте»: стоянка вызова и маршрут предложенного инженера;
+      // null — вернуть карту к выбранному вызову.
+      onPreview: (item) => {
+        if (!item) {
+          if (state.selectedCall) showCallRoute(state.selectedCall);
+          else airportMap.clearRoute();
+          return;
+        }
+        airportMap.focusOn(item.stand_node_id, 3);
+        airportMap.showRoute(item.route_node_ids, item.pickup_node_id, item.stand_node_id,
+          "Некого отправить");
+      },
+      onOpenCall: (callId) => {
+        const call = state.calls.find((item) => item.id === callId);
+        if (call) {
+          AiPanel.close();
+          selectCall(call);
+        }
+      },
+    });
     await refresh();
     const saved = Number(sessionStorage.getItem(selectionKey()));
     const call = state.calls.find((item) => item.id === saved);
@@ -206,7 +227,6 @@ async function refresh() {
 }
 
 function renderAll() {
-  elements.callsCount.textContent = state.calls.length;
   renderAlerts(state.calls);
   renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
   renderShiftStats(state.employees, state.vehicles);
@@ -519,16 +539,39 @@ function executorNodes() {
   return nodes.filter(Boolean);
 }
 
+/**
+ * Блок «Управление исполнителями» в правой колонке.
+ *
+ * Стоит сразу под главной карточкой вызова и раскрывается вниз — вместо
+ * отдельного окна поверх карты. Содержимое (кандидаты, снятие, учения)
+ * перестраивается при каждом обновлении, пока блок раскрыт.
+ */
 function refreshExecutorMenu() {
-  if (popoverState.anchor === elements.executorMenu) {
-    popoverState.root.querySelector(".popover-body").replaceChildren(...executorNodes());
-    placePopover(popoverState.root, elements.executorMenu);
+  const body = elements.suggestBody;
+  const call = state.selectedCall;
+  let box = body.querySelector('[data-drawer="exec"]');
+  // Вызов не выбран или его разбирает другой диспетчер — блока нет.
+  if (!call || body.querySelector(".claim-notice") || body.querySelector(".empty")) {
+    box?.remove();
+    return;
+  }
+  if (!box) {
+    box = drawer("exec", "Управление исполнителями", []);
+    box.addEventListener("drawer-toggle", (event) => {
+      if (event.detail) fillExecutorDrawer(box);
+    });
+    const anchor = body.firstElementChild;
+    if (anchor) anchor.after(box);
+    else body.append(box);
+  }
+  if (box.classList.contains("is-open")) {
+    fillExecutorDrawer(box);
   }
 }
 
-elements.executorMenu.addEventListener("click", () => {
-  openPopover(elements.executorMenu, "Управление исполнителями", executorNodes());
-});
+function fillExecutorDrawer(box) {
+  box.querySelector(".drawer-inner").replaceChildren(...executorNodes());
+}
 
 document.getElementById("cancel-call").addEventListener("click", async () => {
   const call = state.selectedCall;
@@ -1093,6 +1136,7 @@ async function toggleDrill() {
  */
 function renderAssignedCard(call, scrollToEnd = false) {
   renderAssignedPanel(elements.suggestBody, call, sendCallMessage, scrollToEnd);
+  refreshExecutorMenu();
 }
 
 /** В учениях — ссылка «задержать»: разыгрывается вводная «исполнитель встал». */

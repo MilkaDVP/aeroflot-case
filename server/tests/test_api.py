@@ -21,6 +21,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH.as_posix()}"
 # Фоновые такты учений в тестах выключены: движение проверяется прямым
 # вызовом шага с заданным временем, иначе результат зависел бы от часов.
 os.environ["DRILL_LOOP"] = "0"
+# Тесты не обращаются к внешнему GigaChat, даже если ключ лежит в server/.env.
+os.environ["GIGACHAT_ENABLED"] = "0"
 
 from fastapi.testclient import TestClient  # noqa: E402
 

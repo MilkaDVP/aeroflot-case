@@ -57,6 +57,8 @@ start();
 async function start() {
   registerServiceWorker();
   routeMap = new RouteMap(el("route-map"), onMapTap);
+  // «◎» подсвечивается, когда инженер приблизил или сдвинул карту сам.
+  routeMap.onViewChange = (custom) => el("map-reset").classList.toggle("active", custom);
   locator = new Locator(onPosition, onGeoError);
   bindEvents();
   watchMapSize();
@@ -518,12 +520,6 @@ function openChat() {
   el("chat-list").scrollTop = el("chat-list").scrollHeight;
 }
 
-/** Готовая фраза — одним касанием, без набора текста в перчатках. */
-function sendQuickText(button) {
-  el("chat-input").value = button.dataset.text;
-  sendChatMessage(null);
-}
-
 async function sendChatMessage(event) {
   if (event) {
     event.preventDefault();
@@ -901,11 +897,11 @@ function bindEvents() {
   el("parts-toggle").addEventListener("click", toggleWaitingParts);
   el("aog-toggle").addEventListener("click", toggleAog);
   el("chat-form").addEventListener("submit", sendChatMessage);
+  el("map-zoom-in").addEventListener("click", () => routeMap.zoomBy(1.6));
+  el("map-zoom-out").addEventListener("click", () => routeMap.zoomBy(1 / 1.6));
+  el("map-reset").addEventListener("click", () => routeMap.resetView());
   el("chat-open").addEventListener("click", openChat);
   el("chat-close").addEventListener("click", () => closeSheet("chat-sheet"));
-  for (const button of document.querySelectorAll(".quick-text")) {
-    button.addEventListener("click", () => sendQuickText(button));
-  }
   el("confirm-yes").addEventListener("click", () => answerConfirm(true));
   el("confirm-no").addEventListener("click", () => answerConfirm(false));
   el("geo-notice").addEventListener("click", switchToManualPlace);

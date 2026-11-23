@@ -136,6 +136,12 @@
   <div class="map-wrap">
     <svg class="route-map" id="route-map" preserveAspectRatio="xMidYMid meet"></svg>
     <button class="map-toggle" id="map-toggle">Схема</button>
+    <!-- Масштаб: ещё щипок двумя пальцами и перетаскивание -->
+    <div class="map-zoom">
+      <button type="button" id="map-zoom-in" aria-label="Приблизить">+</button>
+      <button type="button" id="map-zoom-out" aria-label="Отдалить">−</button>
+      <button type="button" id="map-reset" aria-label="Весь маршрут" title="Весь маршрут">◎</button>
+    </div>
     <div class="map-hint" id="map-hint" hidden>Коснитесь карты, чтобы указать, где вы</div>
   </div>
 
@@ -176,7 +182,8 @@
 <!--
   Сообщения диспетчеру. У борта сверху две отметки, которые нужны
   системе: «Жду запчасти» (инженера можно переключить на срочный борт)
-  и AOG (ставит только инженер, после осмотра). Всё остальное — словами.
+  и AOG (ставит только инженер, после осмотра). Всё остальное инженер
+  пишет сам — готовых фраз нет.
 -->
 <div class="sheet-backdrop" id="chat-sheet" hidden>
   <div class="sheet">
@@ -184,11 +191,6 @@
     <div class="quick-marks" id="quick-marks" hidden>
       <button class="mark-toggle" id="parts-toggle">Жду запчасти</button>
       <button class="mark-toggle aog-toggle" id="aog-toggle">AOG</button>
-    </div>
-    <div class="quick-texts">
-      <button class="quick-text" data-text="Нужен второй инженер">Нужен второй инженер</button>
-      <button class="quick-text" data-text="Нужен инструмент">Нужен инструмент</button>
-      <button class="quick-text" data-text="Задерживаюсь">Задерживаюсь</button>
     </div>
     <div class="chat-list" id="chat-list"></div>
     <form class="chat-form" id="chat-form">

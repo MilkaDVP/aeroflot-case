@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api import (
     admin_airports,
+    ai,
     airports,
     auth,
     calls,
@@ -150,6 +151,7 @@ app.include_router(drill.router)
 app.include_router(reports.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
+app.include_router(ai.router)
 app.include_router(users.router)
 
 

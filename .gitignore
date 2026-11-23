@@ -17,3 +17,7 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Локальные секреты (ключ GigaChat и т. п.) — не в репозиторий.
+.env
+*.env

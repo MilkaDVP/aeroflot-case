@@ -1739,3 +1739,434 @@
 
 /* Смена сессии не совпадает с идущей по часам аэропорта. */
 #ctx-shift.is-off-schedule { color: var(--warn); }
+
+/* --- Раскрывающиеся блоки правой колонки --- */
+
+.drawer {
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.drawer.is-open { border-color: var(--border-strong); }
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  padding: var(--gap-sm) var(--gap);
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawer-head:hover { color: var(--text); background: var(--bg-hover); }
+.drawer.is-open .drawer-head { color: var(--text); }
+
+.drawer-title { flex: 1; }
+
+.drawer-badge {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--route);
+  color: #fff;
+  font-size: var(--fs-xs);
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.drawer.is-open .drawer-badge { display: none; }
+
+.drawer-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.2s ease;
+}
+
+.drawer.is-open .drawer-chevron { transform: rotate(-135deg) translateY(-2px); }
+
+/* Разворот вниз: высота анимируется через сетку, без расчёта в JS. */
+.drawer-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.drawer.is-open .drawer-body { grid-template-rows: 1fr; }
+
+.drawer-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.drawer.is-open .drawer-inner { padding-bottom: var(--gap); }
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-body, .drawer-chevron { transition: none; }
+}
+
+/* Значок сообщений инженера на карточке вызова. */
+.flag-msg {
+  color: var(--route);
+  border: 1px solid var(--route);
+}
+
+/* Кнопка «История» на месте счётчика вызовов. */
+.panel-head-button {
+  padding: 3px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.panel-head-button:hover { color: var(--text); border-color: var(--route); }
+
+/* --- ИИ-диспетчер ---
+   Фирменная гамма: чёрный, белый, синий и голубой. Без цветных полос,
+   градиентов и плашек — акцент только синим. */
+
+.ai-panel,
+.ai-toggle {
+  --ai-blue: #2f7bff;
+  --ai-sky: #8ec5ff;
+  --ai-ink: #0b0f14;
+  --ai-card: #121820;
+  --ai-line: rgba(142, 197, 255, 0.16);
+}
+
+.ai-toggle {
+  position: relative;
+  padding: 5px 14px;
+  border: 1px solid var(--ai-blue);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.ai-toggle::before { content: "✦ "; color: var(--ai-sky); }
+.ai-toggle:hover { background: rgba(47, 123, 255, 0.15); }
+.ai-toggle:active { transform: scale(0.97); }
+.ai-toggle.active { background: var(--ai-blue); }
+.ai-toggle.active::before { color: #fff; }
+.ai-toggle[hidden] { display: none; }
+
+/* Сколько вызовов можно назначить сразу. */
+.ai-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ai-sky);
+  color: var(--ai-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.ai-badge[hidden] { display: none; }
+
+/* Панель выпадает под кнопкой поверх правой колонки, карту не закрывает. */
+.ai-panel {
+  position: fixed;
+  top: 52px;
+  right: 12px;
+  z-index: 40;
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--ai-ink);
+  border: 1px solid var(--ai-line);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: ai-drop 0.2s ease-out;
+}
+
+.ai-panel[hidden] { display: none; }
+
+@keyframes ai-drop {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.ai-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 10px var(--gap);
+  border-bottom: 1px solid var(--ai-line);
+}
+
+.ai-title { font-weight: 700; flex: 1; color: #fff; }
+.ai-title::before { content: "✦ "; color: var(--ai-sky); }
+
+.ai-engine {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ai-line);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.ai-engine.is-live { border-color: var(--ai-sky); color: var(--ai-sky); }
+
+.ai-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.ai-icon:hover { background: rgba(47, 123, 255, 0.15); color: #fff; }
+
+.ai-body {
+  overflow-y: auto;
+  padding: var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* Блоки не сжимаются — длинное пояснение раздвигает панель. */
+.ai-body > * { flex-shrink: 0; }
+
+/* Пояснение обстановки. */
+.ai-summary {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(47, 123, 255, 0.1);
+  color: #fff;
+}
+
+.ai-summary p { margin: 0; line-height: 1.5; }
+
+.ai-thinking { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--fs-sm); }
+.ai-thinking span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ai-sky);
+  animation: ai-dot 1s ease-in-out infinite;
+}
+.ai-thinking span:nth-child(2) { animation-delay: 0.15s; }
+.ai-thinking span:nth-child(3) { animation-delay: 0.3s; margin-right: 6px; }
+
+@keyframes ai-dot { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+.ai-assign-all {
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ai-blue);
+  color: #fff;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.ai-assign-all:disabled { background: var(--ai-card); color: var(--text-muted); }
+
+/* Карточки вызовов. */
+.ai-list { display: flex; flex-direction: column; gap: var(--gap-sm); }
+
+.ai-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--ai-sky);
+  border: 1px dashed var(--ai-line);
+  border-radius: 10px;
+}
+
+.ai-item {
+  position: relative;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--ai-card);
+  border: 1px solid var(--ai-line);
+  animation: ai-card-in 0.25s ease-out both;
+  transition: border-color 0.15s, opacity 0.3s;
+}
+
+.ai-item:hover { border-color: rgba(142, 197, 255, 0.35); }
+.ai-item.is-previewed { border-color: var(--ai-blue); }
+.ai-item.is-working { opacity: 0.6; }
+.ai-item.is-done { border-color: var(--ai-sky); }
+.ai-item.is-done::after {
+  content: "✓ назначено";
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  color: var(--ai-sky);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+@keyframes ai-card-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.ai-item-top { display: flex; align-items: center; gap: 6px; }
+.ai-item-top .call-board { color: #fff; }
+
+.ai-tag {
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.ai-left { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
+.ai-left.is-over { color: #fff; font-weight: 600; }
+
+.ai-item-what { font-size: var(--fs-sm); color: var(--text-muted); margin-top: 3px; }
+
+.ai-engineer { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+
+.ai-avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ai-blue);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-engineer-main { flex: 1; min-width: 0; font-size: var(--fs-sm); color: #fff; }
+
+.ai-reason { font-size: var(--fs-xs); color: var(--ai-sky); margin-top: 6px; }
+
+.ai-item-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+
+.ai-assign {
+  margin-right: auto;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ai-blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+.ai-icon-action {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--ai-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.ai-icon-action:hover { color: #fff; border-color: var(--ai-blue); }
+
+/* «Спросить ИИ». */
+.ai-ask {
+  border-top: 1px solid var(--ai-line);
+  padding: var(--gap-sm) var(--gap);
+}
+
+.ai-answers { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.ai-answers:empty { display: none; }
+
+.ai-qa { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+
+.ai-q {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 12px 12px 2px 12px;
+  background: var(--ai-blue);
+  color: #fff;
+  font-size: var(--fs-sm);
+}
+
+.ai-a {
+  align-self: flex-start;
+  max-width: 92%;
+  padding: 6px 10px;
+  border-radius: 12px 12px 12px 2px;
+  background: var(--ai-card);
+  border: 1px solid var(--ai-line);
+  color: #fff;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.ai-ask-row { display: flex; gap: 6px; }
+.ai-ask-row input {
+  flex: 1;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--ai-line);
+  background: var(--ai-card);
+  color: #fff;
+  font: inherit;
+}
+.ai-ask-row input:focus { outline: none; border-color: var(--ai-blue); }
+.ai-ask-row button {
+  width: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ai-blue);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-panel, .ai-item, .ai-thinking span { animation: none; }
+}
+
+/* Горящий вызов в плане — как красная карточка в «Активных вызовах»;
+   срочный — красная рамка. */
+.ai-item.is-alert {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.ai-item.is-urgent:not(.is-alert) { border-color: rgba(242, 86, 77, 0.55); }
+.ai-item.is-alert .ai-left { color: var(--danger-text); font-weight: 600; }
+.ai-assign:disabled { background: var(--ai-card); color: var(--text-muted); border: 1px solid var(--ai-line); cursor: help; }

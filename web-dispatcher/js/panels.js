@@ -155,26 +155,27 @@ function buildCallCard(call, selectedId, onSelect) {
     item.classList.add("is-claimed-other");
   }
 
+  // Только то, что нужно по регламенту: борт и срочность, сколько
+  // осталось из 15 минут, где и какой допуск нужен, что сломалось,
+  // кто едет и когда будет. Подробности — в правой колонке.
   item.innerHTML = `
     <div class="call-top">
       <span class="call-board">${escapeHtml(call.board_number)}</span>
       ${callFlags(call)}
+      ${messageFlag(call)}
       ${deadlineLabel(call)}
     </div>
     <div class="call-where">
       ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
-      <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span> ·
-      <span class="num" title="${
-        call.reported_at ? "Экипаж сообщил в это время" : "Вызов зарегистрирован в это время"
-      }. От него идут 15 минут">с ${formatClock(call.reported_at || call.created_at)}</span>
+      <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span>
     </div>
     <div class="call-defect">${escapeHtml(call.defect_name)}</div>
-    ${descriptionLine(call)}
     ${whoLine(call)}
-    ${supportLines(call)}
-    ${lastEngineerMessage(call)}
-    ${controlNote(call)}
+    ${compactNote(call)}
   `;
+  item.title = call.defect_description
+    ? `Экипаж: «${call.defect_description}»`
+    : "";
 
   item.addEventListener("click", () => onSelect(call));
   return item;
@@ -228,6 +229,56 @@ function renderSuggestion(container, result) {
     return;
   }
   container.append(widget("Кого отправить", [buildEtaBlock(result)]));
+}
+
+/*
+ * Раскрывающиеся блоки правой колонки: «Управление исполнителями»
+ * и «Связь с инженером». Раньше это были отдельные всплывающие окна
+ * поверх карты; теперь блок разворачивается вниз прямо в колонке,
+ * и всё видно на одном месте. Что раскрыто — помнится между вызовами.
+ */
+const drawerOpen = { exec: false, chat: false };
+
+/**
+ * Блок с заголовком-кнопкой. badge — число в заголовке (например,
+ * сообщения инженера), пока блок свёрнут.
+ */
+function drawer(key, title, parts, badge) {
+  const box = document.createElement("section");
+  box.className = "drawer";
+  box.dataset.drawer = key;
+  box.classList.toggle("is-open", Boolean(drawerOpen[key]));
+
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "drawer-head";
+  head.setAttribute("aria-expanded", String(Boolean(drawerOpen[key])));
+  head.innerHTML = `<span class="drawer-title">${escapeHtml(title)}</span>` +
+    `<span class="drawer-badge"${badge ? "" : " hidden"}>${escapeHtml(String(badge || ""))}</span>` +
+    '<span class="drawer-chevron" aria-hidden="true"></span>';
+  head.addEventListener("click", () => {
+    drawerOpen[key] = !drawerOpen[key];
+    box.classList.toggle("is-open", drawerOpen[key]);
+    head.setAttribute("aria-expanded", String(drawerOpen[key]));
+    box.dispatchEvent(new CustomEvent("drawer-toggle", { detail: drawerOpen[key] }));
+  });
+
+  const body = document.createElement("div");
+  body.className = "drawer-body";
+  const inner = document.createElement("div");
+  inner.className = "drawer-inner";
+  for (const part of parts) {
+    if (part) inner.append(part);
+  }
+  body.append(inner);
+  box.append(head, body);
+  return box;
+}
+
+function setDrawerBadge(box, badge) {
+  const label = box.querySelector(".drawer-badge");
+  label.hidden = !badge;
+  label.textContent = badge ? String(badge) : "";
 }
 
 /** Карточка: заголовок и содержимое. Пустые части пропускаются. */
@@ -645,8 +696,9 @@ function whoLine(call) {
   }
 
   const forecast = call.control && call.control.forecast_at;
+  const helpers = (call.support || []).length;
   return (
-    `<div class="call-who"><b>${name}</b> · ${escapeHtml(statusTitle(call.status))}` +
+    `<div class="call-who"><b>${name}</b>${helpers ? ` +${helpers}` : ""} · ${escapeHtml(statusTitle(call.status))}` +
     (forecast ? ` · будет ~<span class="num">${formatClock(forecast)}</span>` : "") +
     `</div>`
   );
@@ -665,10 +717,16 @@ function renderAssignedPanel(container, call, onSend, scrollToEnd) {
   if (list?.dataset.callId === String(call.id)) {
     container.firstElementChild.replaceWith(summary);
     updateMessages(list, call.messages, scrollToEnd);
+    setDrawerBadge(container.querySelector('[data-drawer="chat"]'), engineerMessageCount(call));
     return;
   }
   const chat = buildMessages(call, onSend);
-  container.replaceChildren(summary, widget("Связь с инженером", [chat]));
+  const chatDrawer = drawer("chat", "Связь с инженером", [chat], engineerMessageCount(call));
+  // Развернули — переписка прокручивается к последнему сообщению.
+  chatDrawer.addEventListener("drawer-toggle", (event) => {
+    if (event.detail) updateMessages(chat.querySelector(".messages"), call.messages, true);
+  });
+  container.replaceChildren(summary, chatDrawer);
   updateMessages(chat.querySelector(".messages"), call.messages, true);
 }
 
@@ -679,6 +737,10 @@ function linkButton(text, onClick, extraClass) {
   button.textContent = text;
   button.addEventListener("click", onClick);
   return button;
+}
+
+function engineerMessageCount(call) {
+  return (call.messages || []).filter((item) => item.author_role === "engineer").length;
 }
 
 /** Вторые инженеры вызова: кто, на каком шаге, когда будет. */
@@ -779,6 +841,29 @@ function supportLines(call) {
         )}</div>`
     )
     .join("");
+}
+
+/**
+ * Значок сообщений инженеров: сколько их, последнее — во всплывающей
+ * подсказке. Сам текст читают в «Связи с инженером».
+ */
+function messageFlag(call) {
+  const fromEngineers = (call.messages || []).filter((item) => item.author_role === "engineer");
+  if (!fromEngineers.length) return "";
+  const last = fromEngineers[fromEngineers.length - 1];
+  return `<span class="flag flag-msg" title="${escapeHtml(`${last.author_name}: ${last.text}`)}">✉ ${fromEngineers.length}</span>`;
+}
+
+/**
+ * Пометка на карточке — только когда регламент под угрозой, одной
+ * строкой без советов: что делать, видно справа при выборе вызова.
+ */
+function compactNote(call) {
+  const control = call.control;
+  if (!control || !NOTE_WITH_REASON.includes(control.level) || !control.reason) {
+    return "";
+  }
+  return `<div class="call-note level-${escapeHtml(control.level)}">${escapeHtml(control.reason)}</div>`;
 }
 
 /** Последнее сообщение инженера — на карточке: диспетчер видит его, не открывая вызов. */

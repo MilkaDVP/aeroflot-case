@@ -38,6 +38,14 @@ const FALLBACK_SPAN_M = 2400;
 const MIN_ROUTE_SPAN_M = 160;
 const PADDING_RATIO = 0.14;
 
+// Масштаб, который инженер задаёт сам (щипок, колесо, кнопки): во сколько
+// раз ближе автоматического вида. Пределы — чтобы не «улететь» в одну
+// стоянку или в целый город.
+const USER_ZOOM_MIN = 0.4;
+const USER_ZOOM_MAX = 12;
+// Смещение пальца, после которого касание — уже сдвиг карты, а не «я здесь».
+const TAP_SLOP_PX = 8;
+
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
@@ -53,7 +61,172 @@ class RouteMap {
     this.contentLayer = group("layer-content");
     this.svg.append(this.tileLayer, this.contentLayer);
 
+    // Свой вид инженера переживает обновления данных: карта больше не
+    // возвращается к автоматическому охвату на каждом опросе.
+    this.userZoom = 1;
+    this.userPan = { x: 0, y: 0 };
+    this.base = null;
+    this.lastArgs = null;
+    this.pointers = new Map();
+    this.gesture = null;
+    this.suppressTap = false;
+    this.onViewChange = null;
+
     this.svg.addEventListener("click", (event) => this.handleTap(event));
+    this.setupGestures();
+  }
+
+  /* --- Масштаб и сдвиг пальцами, колесом и кнопками --- */
+
+  setupGestures() {
+    const svg = this.svg;
+    svg.addEventListener("pointerdown", (event) => {
+      // Захват нужен, чтобы жест не обрывался, когда палец уходит с карты;
+      // если браузер отказал — работаем без него.
+      try {
+        svg.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват недоступен — не страшно
+      }
+      this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      this.startGesture();
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (!this.pointers.has(event.pointerId)) return;
+      this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      this.moveGesture();
+    });
+    const end = (event) => {
+      this.pointers.delete(event.pointerId);
+      if (this.pointers.size === 0) {
+        if (this.gesture && this.gesture.moved) {
+          // Касание, которым закончился сдвиг, — не «я здесь».
+          this.suppressTap = true;
+          setTimeout(() => { this.suppressTap = false; }, 0);
+          this.rerender();
+        }
+        this.gesture = null;
+      } else {
+        this.startGesture();
+      }
+    };
+    svg.addEventListener("pointerup", end);
+    svg.addEventListener("pointercancel", end);
+    svg.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      this.zoomAt(event.deltaY < 0 ? 1.25 : 1 / 1.25, event.clientX, event.clientY);
+      this.scheduleRerender();
+    }, { passive: false });
+  }
+
+  /** Запоминает исходное положение пальцев и вида для текущего жеста. */
+  startGesture() {
+    const points = [...this.pointers.values()];
+    const moved = this.gesture ? this.gesture.moved : false;
+    this.gesture = {
+      moved,
+      pan: { x: this.userPan.x, y: this.userPan.y },
+      centre: midpoint(points),
+      spread: points.length > 1 ? distance(points[0], points[1]) : 0,
+    };
+  }
+
+  moveGesture() {
+    const gesture = this.gesture;
+    if (!gesture || !this.view) return;
+    const points = [...this.pointers.values()];
+    const centre = midpoint(points);
+    const dx = centre.x - gesture.centre.x;
+    const dy = centre.y - gesture.centre.y;
+    if (!gesture.moved && points.length < 2 && Math.hypot(dx, dy) < TAP_SLOP_PX) return;
+    gesture.moved = true;
+
+    if (points.length > 1 && gesture.spread > 0) {
+      // Щипок: масштаб относительно точки между пальцами, плюс сдвиг
+      // самой этой точки. Отсчёт каждый раз от предыдущего положения.
+      const spread = distance(points[0], points[1]);
+      this.zoomAt(spread / gesture.spread, gesture.centre.x, gesture.centre.y);
+      this.panBy(dx, dy);
+      gesture.centre = centre;
+      gesture.spread = spread;
+      return;
+    }
+    // Сдвиг одним пальцем: от положения в начале жеста.
+    this.userPan = { x: gesture.pan.x, y: gesture.pan.y };
+    this.applyView();
+    this.panBy(dx, dy);
+  }
+
+  /** Сдвиг вида на экранные пиксели (карта едет за пальцем). */
+  panBy(dx, dy) {
+    const box = this.svg.getBoundingClientRect();
+    const mpp = this.view.width / (box.width || 1);
+    this.userPan.x -= dx * mpp;
+    this.userPan.y -= dy * mpp;
+    this.applyView();
+  }
+
+  /** Масштаб с неподвижной точкой под пальцем или курсором. */
+  zoomAt(factor, clientX, clientY) {
+    if (!this.view || !this.base) return;
+    const next = Math.min(USER_ZOOM_MAX, Math.max(USER_ZOOM_MIN, this.userZoom * factor));
+    const box = this.svg.getBoundingClientRect();
+    const fx = (clientX - box.left) / (box.width || 1);
+    const fy = (clientY - box.top) / (box.height || 1);
+    // Точка под пальцем в метрах — после масштаба она должна остаться там же.
+    const px = this.view.minX + fx * this.view.width;
+    const py = this.view.minY + fy * this.view.height;
+    this.userZoom = next;
+    this.applyView();
+    this.userPan.x += px - (this.view.minX + fx * this.view.width);
+    this.userPan.y += py - (this.view.minY + fy * this.view.height);
+    this.applyView();
+  }
+
+  /** Кнопки «+» и «−»: масштаб от центра карты. */
+  zoomBy(factor) {
+    const box = this.svg.getBoundingClientRect();
+    this.zoomAt(factor, box.left + box.width / 2, box.top + box.height / 2);
+    this.rerender();
+  }
+
+  /** «◎» — обратно к автоматическому виду: маршрут и своя точка целиком. */
+  resetView() {
+    this.userZoom = 1;
+    this.userPan = { x: 0, y: 0 };
+    this.rerender();
+  }
+
+  isUserView() {
+    return this.userZoom !== 1 || this.userPan.x !== 0 || this.userPan.y !== 0;
+  }
+
+  /** Автоматический охват плюс масштаб и сдвиг инженера. */
+  applyView() {
+    if (!this.base) return;
+    const width = this.base.width / this.userZoom;
+    const height = this.base.height / this.userZoom;
+    const cx = this.base.cx + this.userPan.x;
+    const cy = this.base.cy + this.userPan.y;
+    this.view = {
+      minX: cx - width / 2,
+      minY: cy - height / 2,
+      width,
+      height,
+      scaleRef: Math.min(width, height),
+    };
+    this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
+    if (this.onViewChange) this.onViewChange(this.isUserView());
+  }
+
+  /** Перерисовать с теми же данными — после жеста значки и снимок под новый масштаб. */
+  rerender() {
+    if (this.lastArgs) this.render(...this.lastArgs);
+  }
+
+  scheduleRerender() {
+    clearTimeout(this.rerenderTimer);
+    this.rerenderTimer = setTimeout(() => this.rerender(), 120);
   }
 
   setImagery(enabled) {
@@ -70,6 +243,7 @@ class RouteMap {
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
   render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -175,17 +349,11 @@ class RouteMap {
     const centreX = (Math.max(...xs) + Math.min(...xs)) / 2;
     const centreY = (Math.max(...ys) + Math.min(...ys)) / 2;
 
-    this.view = {
-      minX: centreX - width / 2,
-      minY: centreY - height / 2,
-      width,
-      height,
-      // Опорный размер для значков: они не должны зависеть от того,
-      // насколько вытянут экран.
-      scaleRef: Math.min(width, height),
-    };
-
-    this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
+    // Автоматический охват; поверх него — масштаб и сдвиг инженера.
+    // Опорный размер значков (scaleRef) берётся от итогового вида, чтобы
+    // они не зависели ни от масштаба, ни от того, насколько вытянут экран.
+    this.base = { cx: centreX, cy: centreY, width, height };
+    this.applyView();
   }
 
   /* --- Подложка --- */
@@ -330,7 +498,7 @@ class RouteMap {
 
   /** Касание по карте — координаты для режима имитации. */
   handleTap(event) {
-    if (!this.onTap || !this.view) {
+    if (!this.onTap || !this.view || this.suppressTap) {
       return;
     }
     const box = this.svg.getBoundingClientRect();
@@ -376,4 +544,14 @@ function group(className) {
   const element = document.createElementNS(SVG_NS, "g");
   element.setAttribute("class", className);
   return element;
+}
+
+function midpoint(points) {
+  const x = points.reduce((sum, p) => sum + p.x, 0) / (points.length || 1);
+  const y = points.reduce((sum, p) => sum + p.y, 0) / (points.length || 1);
+  return { x, y };
+}
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }

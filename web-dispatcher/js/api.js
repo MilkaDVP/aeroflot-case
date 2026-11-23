@@ -192,6 +192,9 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
+  // План ИИ-диспетчера; explain=false — без пояснения GigaChat (быстрее).
+  aiPlan: (explain = true) => request("GET", `/api/ai/plan?explain=${explain}`),
+  aiAsk: (question) => request("POST", "/api/ai/ask", { question }),
   // Захват вызова: один вызов разбирает один диспетчер. takeover —
   // начальник смены забирает чужой вызов себе.
   claimCall: (callId, takeover = false) =>
