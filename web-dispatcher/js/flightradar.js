@@ -1,48 +1,74 @@
-/* Ручная онлайн-синхронизация бортов из Flightradar24. */
+/* Ручная онлайн-синхронизация бортов из бесплатного ADSB.lol и FR24. */
 
-el("fr24-sync-form").addEventListener("submit", onFlightradarSubmit);
+const LIVE_AIRCRAFT_SOURCES = [
+  {
+    name: "ADSB.lol",
+    formId: "adsblol-sync-form",
+    buttonId: "adsblol-sync-submit",
+    noteId: "adsblol-note",
+    resultsId: "adsblol-results",
+    endpoint: "/api/aircraft/adsblol/sync",
+    buttonLabel: "Загрузить из ADSB.lol",
+  },
+  {
+    name: "Flightradar24",
+    formId: "fr24-sync-form",
+    buttonId: "fr24-sync-submit",
+    noteId: "fr24-note",
+    resultsId: "fr24-results",
+    endpoint: "/api/aircraft/flightradar/sync",
+    buttonLabel: "Загрузить из Flightradar24",
+  },
+];
+
+for (const source of LIVE_AIRCRAFT_SOURCES) {
+  el(source.formId).addEventListener("submit", (event) =>
+    onLiveAircraftSubmit(event, source)
+  );
+}
 
 /** Разовый запрос: фонового опроса и расхода кредитов без команды нет. */
-async function onFlightradarSubmit(event) {
+async function onLiveAircraftSubmit(event, source) {
   event.preventDefault();
 
-  if (!state.user.airport_icao) {
-    setNote("fr24-note", "Сначала выберите аэропорт", "is-error");
+  if (!state.user || !state.user.airport_icao) {
+    setNote(source.noteId, "Сначала выберите аэропорт", "is-error");
     return;
   }
 
-  const button = el("fr24-sync-submit");
-  const results = el("fr24-results");
+  const button = el(source.buttonId);
+  const results = el(source.resultsId);
   button.disabled = true;
   button.textContent = "Загрузка…";
   results.replaceChildren();
   results.hidden = true;
   setNote(
-    "fr24-note",
-    "Запрашиваем текущие позиции Flightradar24. Это может занять несколько секунд.",
+    source.noteId,
+    `Запрашиваем текущие позиции ${source.name}. Это может занять несколько секунд.`,
     "is-pending"
   );
 
   try {
-    const result = await request("POST", "/api/aircraft/flightradar/sync");
+    const result = await request("POST", source.endpoint);
     setNote(
-      "fr24-note",
-      `${result.airport_icao}: получено ${result.received}; добавлено ${result.created}; ` +
-        `уже есть ${result.existing}; пропущено ${result.skipped}.`,
+      source.noteId,
+      `${result.airport_icao} · ${source.name}: получено ${result.received}; ` +
+        `добавлено ${result.created}; уже есть ${result.existing}; ` +
+        `пропущено ${result.skipped}.`,
       "is-ok"
     );
-    renderFlightradarResults(result.items);
+    renderLiveAircraftResults(source.resultsId, result.items);
     await loadAircraft();
   } catch (error) {
-    setNote("fr24-note", error.detail, "is-error");
+    setNote(source.noteId, error.detail, "is-error");
   } finally {
     button.disabled = false;
-    button.textContent = "Загрузить текущие борта";
+    button.textContent = source.buttonLabel;
   }
 }
 
-function renderFlightradarResults(items) {
-  const container = el("fr24-results");
+function renderLiveAircraftResults(containerId, items) {
+  const container = el(containerId);
   container.replaceChildren();
   container.hidden = !items.length;
 

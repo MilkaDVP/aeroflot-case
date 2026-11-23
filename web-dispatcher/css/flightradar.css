@@ -1,6 +1,7 @@
 /* Отчёт ручной синхронизации Flightradar24 поверх общей темы администратора. */
 
-#fr24-results .item-sub {
+#fr24-results .item-sub,
+#adsblol-results .item-sub {
   overflow: visible;
   text-overflow: clip;
   white-space: normal;

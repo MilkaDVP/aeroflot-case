@@ -31,6 +31,9 @@ services:
       FR24_API_TOKEN: "${FR24_API_TOKEN:-}"
       FR24_API_BASE_URL: "${FR24_API_BASE_URL:-}"
       FR24_API_TIMEOUT_SECONDS: "${FR24_API_TIMEOUT_SECONDS:-15}"
+      # Бесплатный источник без API-ключа. Эти параметры обычно менять не нужно.
+      ADSBLOL_API_BASE_URL: "${ADSBLOL_API_BASE_URL:-https://api.adsb.lol}"
+      ADSBLOL_API_TIMEOUT_SECONDS: "${ADSBLOL_API_TIMEOUT_SECONDS:-15}"
     volumes:
       # База переживает пересоздание контейнера.
       - server-data:/app/data

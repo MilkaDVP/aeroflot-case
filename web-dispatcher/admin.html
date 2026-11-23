@@ -296,15 +296,37 @@
           </form>
           <div class="admin-note" id="aircraft-note" hidden></div>
 
-          <h2 class="with-gap">Онлайн-загрузка из Flightradar24</h2>
+          <h2 class="with-gap">Онлайн-загрузка бортов</h2>
           <p class="muted small">
-            По нажатию сервер получит текущие позиции и добавит только борта
-            со скоростью до 30 узлов рядом со свободной стоянкой. Существующие
-            борта и вызовы не изменяются. Автоматического опроса нет.
+            По нажатию сервер добавит только борта со скоростью до 30 узлов
+            рядом со свободной стоянкой. Существующие борта и вызовы не
+            изменяются. Автоматического опроса нет.
+          </p>
+
+          <h3>
+            <a href="https://www.adsb.lol/" target="_blank" rel="noopener noreferrer">ADSB.lol</a>
+            — бесплатно
+          </h3>
+          <p class="muted small">
+            API-ключ не нужен. Используются позиции не старше 60 секунд;
+            один запрос выполняется только по нажатию.
+          </p>
+          <form class="admin-form" id="adsblol-sync-form">
+            <button type="submit" class="primary" id="adsblol-sync-submit">
+              Загрузить из ADSB.lol
+            </button>
+          </form>
+          <div class="admin-note" id="adsblol-note" aria-live="polite" hidden></div>
+          <div class="admin-list" id="adsblol-results" hidden></div>
+
+          <h3 class="with-gap">Flightradar24 — по API-ключу</h3>
+          <p class="muted small">
+            Дополнительный источник. Работает, если на сервере задан
+            FR24_API_TOKEN; запрос может расходовать кредиты сервиса.
           </p>
           <form class="admin-form" id="fr24-sync-form">
-            <button type="submit" class="primary" id="fr24-sync-submit">
-              Загрузить текущие борта
+            <button type="submit" id="fr24-sync-submit">
+              Загрузить из Flightradar24
             </button>
           </form>
           <div class="admin-note" id="fr24-note" aria-live="polite" hidden></div>
