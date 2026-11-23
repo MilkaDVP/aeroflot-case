@@ -31,6 +31,7 @@ class RouteParticipant(Base):
     is_training: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     __mapper_args__ = {"polymorphic_on": is_training, "polymorphic_abstract": True}
 
+    always_on_shift: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String)
@@ -39,6 +40,10 @@ class RouteParticipant(Base):
     # [{"category": "B1.1", "aircraft_types": ["A320"], "valid_until": "2027-03-15"}]
     qualifications: Mapped[list] = mapped_column(JSON, default=list)
 
+    waiting_lat: Mapped[float | None] = mapped_column(Float)
+    waiting_lon: Mapped[float | None] = mapped_column(Float)
+    return_to_waiting: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    return_vehicle: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     shift_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shift: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default=STATUS_OFFLINE)

@@ -15,7 +15,7 @@ from auth.dependencies import Context, get_context
 from auth.security import new_token, session_expiry, verify_password
 from clock import to_iso_utc
 from services.shifts import end_shift, start_clock
-from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_OFFLINE
+from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_FREE, STATUS_OFFLINE
 from database import get_db, get_dispatch_db
 from graph_registry import get_graph
 from models.airport import SOURCE_MANUAL, Airport
@@ -95,8 +95,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_dispatch_db)):
 
     # Инженер, который уже на смене, получает срок её окончания
     # (services/shifts.py) — смена заканчивается по нему, а не по входу.
-    if user.employee and user.employee.status != STATUS_OFFLINE and not user.employee.shift_ends_at:
-        start_clock(user.employee)
+    if user.employee:
+        if user.employee.status == STATUS_OFFLINE:
+            user.employee.status = STATUS_FREE
+        user.employee.shift_ends_at = None
     airports = airport_briefs(db, user)
     single = airports[0] if len(airports) == 1 else None
     session = AuthSession(
@@ -132,7 +134,9 @@ def logout(db: Session = Depends(get_dispatch_db), context: Context = Depends(ge
     при выходе из приложения уходит со смены.
     """
     claims.release_all(db, context.user.id)
-    if context.user.employee:
+    if (context.user.employee and not context.user.employee.always_on_shift
+            and not db.query(AuthSession.token).filter(AuthSession.user_id == context.user.id,
+                                                    AuthSession.token != context.session.token).first()):
         end_shift(db, context.user.employee, "Выход из приложения")
     db.delete(context.session)
     db.commit()

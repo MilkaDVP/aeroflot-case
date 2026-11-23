@@ -5,9 +5,9 @@
 такты в тестах выключены, поэтому результат не зависит от часов.
 """
 
+from tests.test_api import auth_header
 from database import SessionLocal
 from services import drill
-from tests.test_api import auth_header
 from tests.test_mentor import MentorCase
 
 
@@ -252,6 +252,14 @@ class TestHold(DrillCase):
         call = self.register()
         best = self.assign_best(call["id"])
         self.hold(best["employee_id"])
-        self.enable(False)
-        self.enable()
-        self.assertFalse(self.employee(best["employee_id"])["held"])
+        self.assertEqual(self.enable(False).status_code, 200)
+        from models.employee import TrainingEngineer
+        with SessionLocal() as db:
+            self.assertFalse(db.query(TrainingEngineer).filter_by(airport_icao="UUEE", archived=False).first())
+            self.assertTrue(db.get(TrainingEngineer, best["employee_id"]).archived)
+        self.assertEqual(self.enable().status_code, 200)
+        with SessionLocal() as db:
+            team = db.query(TrainingEngineer).filter_by(airport_icao="UUEE", archived=False).all()
+            self.assertEqual(len(team), 6)
+            self.assertNotIn(best["employee_id"], [person.id for person in team])
+            self.assertFalse(any(person.held for person in team))

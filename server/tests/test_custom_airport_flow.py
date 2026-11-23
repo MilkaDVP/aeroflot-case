@@ -155,6 +155,114 @@ class TestCustomAirportFlow(ApiTestCase):
         self.assertIsNotNone(current["call"])
         self.assertEqual(current["call"]["board_number"], "RA-00001")
 
+    def test_roles_and_vehicle_return(self):
+        admin = self.build_airport()
+
+        def post(token, path, **payload):
+            r = self.client.post("/api/" + path, json=payload, headers=auth_header(token))
+            self.assertIn(r.status_code, (200, 201), r.text)
+            return r.json()
+
+        def create_account(actor, role):
+            post(actor, "admin/users", full_name=role, role=role, login="test-" + role,
+                 password="demo", airport_icao=ICAO)
+            return self.login("test-" + role, "demo", airport=ICAO)
+
+        local = create_account(admin, "local_admin")
+        supervisor = create_account(local, "shift_supervisor")
+        dispatcher = create_account(local, "dispatcher")
+        person = self.register_engineer(local)
+        board = self.put_aircraft(local)
+        def point(index):
+            return {key: NODES[index][key] for key in ("lat", "lon")}
+        old = post(local, "vehicles", call_sign="V1", **point(0))
+        new = post(local, "vehicles", call_sign="V2", **point(3))
+        for actor in (local, supervisor, dispatcher):
+            for index in (1, 0):
+                post(actor, f"employees/{person['id']}/location", **point(index))
+                post(actor, f"vehicles/{old['id']}/location", **point(index))
+                post(actor, f"aircraft/{board['id']}/location", free=True, **point(index))
+        post(local, f"aircraft/{board['id']}/location", stand_node_id="s1", **point(2))
+        job = post(dispatcher, "calls", aircraft_id=board["id"], defect_code="hydraulic_leak")
+        path = f"calls/{job['id']}"
+        post(dispatcher, path + "/assign", employee_id=person["id"], travel="walk")
+        engineer = self.login("poligonov", "engineer", airport=ICAO)
+        def location(index):
+            post(engineer, f"employees/{person['id']}/location", source="gps", **point(index))
+        def current():
+            return self.client.get("/api/me/current-call", headers=auth_header(engineer)).json()
+        post(engineer, "me/status", action="accepted")
+        location(3)
+        self.assertEqual(current()["route_points"][0]["id"], "s2")
+        post(dispatcher, path + "/transport?vehicle_id=" + str(old["id"]))
+        location(0)
+        location(1)
+        post(dispatcher, path + "/transport?vehicle_id=" + str(new["id"]))
+        self.assertIn("Верните", current()["instruction"])
+        # Повтор запроса после потери ответа не снимает резерв.
+        post(dispatcher, path + "/transport?vehicle_id=" + str(new["id"]))
+        denied = self.client.post("/api/me/status", json={"action": "arrived"}, headers=auth_header(engineer))
+        self.assertEqual(denied.status_code, 409)
+        self.assertEqual(current()["call"]["status"], "accepted")
+        location(0)
+        self.assertTrue(current()["vehicle"]["pickup"])
+        denied = self.client.post("/api/me/status", json={"action": "arrived"}, headers=auth_header(engineer))
+        self.assertEqual(denied.status_code, 409)
+        location(3)
+        self.assertFalse(current()["vehicle"]["pickup"])
+        location(2)
+        post(supervisor, path + "/transport")
+        self.assertIn("Верните", current()["instruction"])
+        location(3)
+        self.assertIsNone(current()["vehicle"])
+        location(2)
+        post(engineer, "me/status", action="arrived")
+        post(engineer, "me/status", action="closed")
+        self.assertIn("ожидания", current()["instruction"])
+        location(0)
+        self.assertNotIn("instruction", current())
+
+    def test_close_with_car_returns_it_before_walk_to_waiting_place(self):
+        admin = self.build_airport()
+        person = self.register_engineer(admin)
+        aircraft = self.put_aircraft(admin)
+        engineer = self.login("poligonov", "engineer", airport=ICAO)
+
+        def post(actor, path, **data):
+            r = self.client.post("/api/" + path, json=data, headers=auth_header(actor))
+            self.assertIn(r.status_code, (200, 201), r.text)
+            return r.json()
+
+        def location(node):
+            post(engineer, f"employees/{person['id']}/location", source="gps",
+                 lat=node["lat"], lon=node["lon"])
+
+        def leg():
+            return self.client.get("/api/me/current-call", headers=auth_header(engineer)).json()
+
+        parking = NODES[1]
+        car = post(admin, "vehicles", call_sign="RETURN", lat=parking["lat"], lon=parking["lon"])
+        job = post(admin, "calls", aircraft_id=aircraft["id"], defect_code="hydraulic_leak")
+        path = f"calls/{job['id']}"
+        post(admin, path + "/assign", employee_id=person["id"], travel="walk")
+        post(admin, path + "/transport?vehicle_id=" + str(car["id"]))
+        post(engineer, "me/status", action="accepted")
+        location(parking)
+        location(NODES[2])
+        post(engineer, "me/status", action="arrived")
+        post(engineer, "me/status", action="closed")
+        self.assertIn("Верните спецтранспорт", leg()["instruction"])
+        self.assertEqual(leg()["route_points"][-1]["lon"], parking["lon"])
+        location(NODES[0])  # Приехать на место ожидания первым недостаточно.
+        self.assertIn("Верните спецтранспорт", leg()["instruction"])
+        location(parking)
+        self.assertIn("место ожидания", leg()["instruction"])
+        fleet = self.client.get("/api/vehicles", headers=auth_header(admin)).json()
+        self.assertEqual(fleet[0]["status"], "free")
+        self.assertEqual(fleet[0]["lon"], parking["lon"])
+        location(NODES[0])
+        self.assertNotIn("instruction", leg())
+
     # --- Проверки при заведении ---
 
     def test_борт_ставится_только_на_стоянку(self):

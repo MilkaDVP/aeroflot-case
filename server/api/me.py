@@ -88,6 +88,11 @@ class EngineerStatusRequest(BaseModel):
     age_s: float | None = Field(default=None, ge=0, le=OFFLINE_ACTION_MAX_AGE_S)
 
 
+class ReturnNavigation(MessageResponse):
+    instruction: str
+    route_points: list[dict]
+
+
 class CurrentCallResponse(BaseModel):
     """
     Текущий вызов инженера вместе с геометрией маршрута.
@@ -97,6 +102,7 @@ class CurrentCallResponse(BaseModel):
     отрисовки одной ломаной.
     """
 
+    instruction: str | None = None
     call: CallResponse
     route_points: list[dict]
     eta_minutes: float | None
@@ -123,12 +129,9 @@ def route_points(call):
     if not call.route_node_ids:
         return []
     graph = get_graph(call.airport_icao)
-    points = []
-    for node_id in call.route_node_ids:
-        node = graph.node(node_id)
-        if node:
-            points.append({"id": node["id"], "lat": node["lat"], "lon": node["lon"]})
-    return points
+    from services.assignment import route_geometry
+    return [{key: node[key] for key in ("id", "lat", "lon")}
+            for node in route_geometry(call, graph)]
 
 
 def vehicle_info(call):
@@ -148,7 +151,7 @@ def vehicle_info(call):
 
 @router.get(
     "/current-call",
-    response_model=CurrentCallResponse | MessageResponse,
+    response_model=CurrentCallResponse | ReturnNavigation | MessageResponse,
     summary="Текущий вызов инженера",
 )
 def current_call(context: Context = Depends(get_context), db: Session = Depends(get_db)):
@@ -161,12 +164,17 @@ def current_call(context: Context = Depends(get_context), db: Session = Depends(
     """
     employee = load_own_employee(context, db)
     call = working_call_of(db, employee)
+    from services.assignment import navigation_leg
+    leg = navigation_leg(employee)
     if call is None:
+        if leg:
+            return ReturnNavigation(message=leg["instruction"], **leg)
         return MessageResponse(message=ERROR_NO_ACTIVE_CALL)
 
     return CurrentCallResponse(
         call=call_to_response(call),
-        route_points=route_points(call),
+        instruction=leg["instruction"] if leg else None,
+        route_points=leg["route_points"] if leg else route_points(call),
         eta_minutes=call.eta_minutes,
         queued_count=len(queued_calls_of(db, employee)),
         vehicle=vehicle_info(call),
@@ -212,6 +220,10 @@ def update_status(
             ERROR_WRONG_ORDER.format(status=call.status),
         )
 
+    if payload.action == ACTION_ARRIVED and employee.return_vehicle:
+        raise HTTPException(409, "Сначала верните транспорт")
+    if payload.action == ACTION_ARRIVED and call.require_vehicle_pickup and call.vehicle and call.vehicle.status == VEHICLE_RESERVED:
+        raise HTTPException(409, "Сначала заберите назначенный транспорт")
     now = utc_now()
     performed = now - timedelta(seconds=payload.age_s or 0)
     call_status, employee_status = ENGINEER_ACTIONS[payload.action]

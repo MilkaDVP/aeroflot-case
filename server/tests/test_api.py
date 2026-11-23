@@ -128,7 +128,9 @@ class TestShiftContinuity(ApiTestCase):
             db.flush()
             expire_shifts(db)
             db.commit()
-        self.assertFalse(me()["on_shift"])
+        # Активная сессия сохраняет смену после истечения старого таймера.
+        self.assertTrue(me()["on_shift"])
+        self.assertIsNone(me()["shift_ends_at"])
         self.client.post(path + "/shift", headers=headers, json={"on_shift": True})
         self.assertEqual(self.client.post("/api/auth/logout", headers=headers).status_code, 200)
         with SessionLocal() as db:

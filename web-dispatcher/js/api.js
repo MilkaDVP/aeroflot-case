@@ -141,6 +141,7 @@ function extractDetail(payload, status) {
 }
 
 const Api = {
+  changeTransport: (id, vehicle) => request("POST", `/api/calls/${id}/transport${vehicle ? "?vehicle_id=" + vehicle : ""}`),
   login: (login, password) => request("POST", "/api/auth/login", { login, password }),
   logout: () => request("POST", "/api/auth/logout"),
   me: () => request("GET", "/api/auth/me"),
@@ -150,6 +151,7 @@ const Api = {
   airports: () => request("GET", "/api/airports"),
   airportGraph: (icao) => request("GET", `/api/airports/${icao}`),
 
+  adminRoster: () => request("GET", "/api/employees/roster"),
   airportRoster: () => request("GET", "/api/employees?all_shifts=true"),
   mapParticipants: () => request("GET", "/api/employees?include_training=true"),
   employees: (shift) =>

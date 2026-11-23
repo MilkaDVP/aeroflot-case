@@ -144,6 +144,7 @@ function el(id) {
 }
 
 function bindEvents() {
+  el("people-search").addEventListener("input", () => renderPeople(state.people.users, state.people.employees));
   for (const button of document.querySelectorAll("#tabs button")) {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   }
@@ -568,18 +569,14 @@ function canManageAccounts() {
 async function loadUsers() {
   el("users-scope").textContent =
     state.user.role === "admin" ? "· вся система" : `· ${state.user.airport_icao || "—"}`;
-  // Без аэропорта сессии карточек инженеров нет — квалификацию и допуски
-  // не изменить. Об этом надо сказать прямо, а не показывать неполный список.
-  el("users-airport-note").hidden = Boolean(state.user.airport_icao);
-
   try {
     const users = await Api.users();
     // Карточки сотрудников есть только в выбранном аэропорту.
-    let employees = [];
+    const employees = await Api.adminRoster();
     if (state.user.airport_icao) {
       // Весь состав аэропорта, а не только смена текущей сессии:
       // в учётных записях нужны все люди (учебные инженеры — нет).
-      employees = await Api.airportRoster();
+
       await loadGraphOnce();
       fillPlaces("user-place");
     }
@@ -604,11 +601,19 @@ function renderPeople(users, employees) {
   const accountOf = new Map(
     users.filter((user) => user.employee_id).map((user) => [user.employee_id, user])
   );
+  const airport = state.user.airport_icao;
+  const terms = el("people-search").value.toLocaleLowerCase().trim().split(/\s+/);
+  function matches(icao, fields) {
+    const text = fields.join(" ").toLocaleLowerCase();
+    return (!airport || airport === icao) && terms.every(term => text.includes(term));
+  }
   const cardIds = new Set(employees.map((employee) => employee.id));
   const accounts = users.filter(
-    (user) => !(user.role === ENGINEER && cardIds.has(user.employee_id))
+    (user) => !(user.role === ENGINEER && cardIds.has(user.employee_id)) && matches(user.airport_icao, [user.login, user.full_name, user.role, roleTitle(user.role)])
   );
 
+  employees = employees.filter(e => matches(e.airport_icao, [e.full_name, accountOf.get(e.id)?.login,
+    roleTitle(ENGINEER), ENGINEER, e.shift, ...e.qualifications.flatMap(q => [q.category, ...q.aircraft_types, q.valid_until])]));
   if (!accounts.length && !employees.length) {
     container.innerHTML = '<div class="empty">Никого нет</div>';
     return;
@@ -659,12 +664,19 @@ function accountRow(user) {
       // Инженер правится вместе с карточкой (квалификация, допуски), а она
       // есть только в аэропорту сессии. Сюда попадают инженеры, чья
       // карточка не загружена: аэропорт не выбран или он другой.
-      const edit = actionButton("Изменить", "", () => {});
-      edit.disabled = true;
-      edit.title = state.user.airport_icao
-        ? `Инженер аэропорта ${user.airport_icao}: переключите аэропорт в шапке, чтобы изменить квалификацию`
-        : "Выберите аэропорт в шапке, чтобы изменить квалификацию и допуски";
-      actions.append(edit);
+      actions.append(actionButton("Изменить", "", async () => {
+        try {
+          await Api.selectAirport(user.airport_icao, state.user.shift || "day");
+          state.user = await Api.me();
+          state.graph = null;
+          fillAirportSwitch();
+          await loadUsers();
+          const employee = state.people.employees.find(item => item.id === user.employee_id);
+          if (employee) startEngineerEdit(employee, user);
+        } catch (error) {
+          window.alert(error.detail);
+        }
+      }));
     } else {
       actions.append(actionButton("Изменить", "", () => startAccountEdit(user)));
     }
@@ -680,7 +692,7 @@ function engineerRow(employee, account) {
   const { row, actions } = personRow({
     online: Boolean(account && account.online),
     title: employee.full_name,
-    sub: `${account ? account.login : "без входа в приложение"} · ${marks || "без отметок"}`,
+    sub: `${employee.airport_icao} · ${account ? account.login : "без входа в приложение"} · ${marks || "без отметок"}`,
     role: ENGINEER,
     meta: `${SHIFT_NAMES[employee.shift] || employee.shift} · ${statusTitle(employee.status)}`,
   });
@@ -779,9 +791,9 @@ function syncUserForm() {
   }
   el("user-note").dataset.airportHint = needAirport ? "1" : "";
   // Инженер заводится в аэропорту сессии: места берутся из его схемы.
-  el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || editing !== null;
+  el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || (editing !== null && state.user.role !== "admin");
 
-  el("user-login-row").hidden = editing !== null;
+  el("user-login-row").hidden = editing !== null && !canManageAccounts();
   el("user-login").required = !engineer && editing === null;
   el("user-password").required = !engineer && editing === null;
   el("user-login-label").textContent = engineer
@@ -822,6 +834,8 @@ function startAccountEdit(user) {
   fillRoleSelect(user.role);
   el("user-password").value = "";
   el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  el("user-airport").value = user.airport_icao || el("user-airport").value;
+  el("user-login").value = user.login;
   openUserEdit(`Изменить: ${user.login}`);
 }
 
@@ -830,7 +844,17 @@ function startAccountEdit(user) {
  * только смену, место и присутствие на смене; квалификацию и ФИО —
  * администратор аэропорта.
  */
-function startEngineerEdit(employee, account) {
+async function startEngineerEdit(employee, account) {
+  if (employee.airport_icao !== state.user.airport_icao) {
+    try {
+      await Api.selectAirport(employee.airport_icao, state.user.shift || "day");
+      state.user = await Api.me();
+      state.graph = null;
+      fillAirportSwitch();
+      await loadGraphOnce();
+      fillPlaces("user-place");
+    } catch (error) { window.alert(error.detail); return; }
+  }
   resetUserForm();
   state.editingUser = { kind: "engineer", employee, account };
   el("user-form-card").hidden = false;
@@ -847,17 +871,19 @@ function startEngineerEdit(employee, account) {
     el("user-valid").value = mark.valid_until;
   }
   el("user-place").value = nearestPlaceId(employee) || el("user-place").value;
-  el("user-on-shift").checked = employee.status !== "offline";
+  el("user-place").dataset.original = el("user-place").value;
+  el("user-on-shift").checked = employee.always_on_shift;
   // Занятого снять со смены может только технический администратор:
   // сервер вернёт его вызовы к подбору (services/shifts.end_shift).
   // Остальным это недоступно — сервер ответит отказом.
-  el("user-on-shift").disabled = isBusyStatus(employee.status) && state.user.role !== "admin";
+  el("user-on-shift").disabled = !canManageAccounts();
   for (const id of ENGINEER_CARD_FIELDS) el(id).disabled = !canManageAccounts();
 
   // Новый пароль задаётся, только если вход у инженера есть.
-  el("user-password-row").hidden = !(account && canManageAccounts());
+  el("user-password-row").hidden = !canManageAccounts();
   el("user-password").value = "";
   el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  el("user-login").value = account?.login || "";
   openUserEdit(`Изменить: ${employee.full_name}`);
   setNote("user-note", engineerHint(employee), "");
 }
@@ -890,13 +916,13 @@ function engineerCard() {
     .value.split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
-  if (!types.length) return { error: "Укажите хотя бы один тип ВС" };
+  const qualifications = types.length ? [
+    { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
+  ] : [];
   return {
     full_name: el("user-name").value.trim(),
     shift: el("user-shift").value,
-    qualifications: [
-      { category: el("user-mark").value, aircraft_types: types, valid_until: el("user-valid").value.trim() },
-    ],
+    qualifications,
     lat: place.lat,
     lon: place.lon,
     on_shift: el("user-on-shift").checked,
@@ -945,9 +971,10 @@ async function createAccount() {
 }
 
 async function saveAccount(user) {
-  const changes = { full_name: el("user-name").value.trim() };
+  const changes = { full_name: el("user-name").value.trim(), login: el("user-login").value.trim() };
   if (el("user-password").value) changes.password = el("user-password").value;
   if (el("user-role").value !== user.role) changes.role = el("user-role").value;
+  if (state.user.role === "admin" && el("user-role").value !== "admin" && el("user-airport").value !== user.airport_icao) changes.airport_icao = el("user-airport").value;
   const updated = await Api.updateUser(user.id, changes);
   return `${updated.login}: изменения сохранены`;
 }
@@ -987,20 +1014,21 @@ async function saveEngineer({ employee, account }) {
   }
   // Начальнику смены сервер разрешает только смену и статус.
   const changes = canManageAccounts()
-    ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications }
+    ? { full_name: card.full_name, shift: card.shift, qualifications: [...card.qualifications, ...employee.qualifications.slice(1)] }
     : { shift: card.shift };
   // Снятие со смены передаётся и для занятого (его вызов вернётся к
   // подбору); «на смене» для занятого не шлём — он и так на смене.
-  if (!card.on_shift || !isBusyStatus(employee.status)) {
-    changes.status = card.on_shift ? "free" : "offline";
+  if (canManageAccounts()) {
+    changes.always_on_shift = card.on_shift;
+    const login = el("user-login").value.trim();
+    if (login && login !== account?.login) changes.login = login;
+    if (el("user-password").value) changes.password = el("user-password").value;
   }
   const updated = await Api.updateEmployee(employee.id, changes);
-  if (employee.lat !== card.lat || employee.lon !== card.lon) {
+  if (el("user-place").value !== el("user-place").dataset.original) {
     await Api.sendLocation(employee.id, card.lat, card.lon);
   }
-  if (account && el("user-password").value) {
-    await Api.updateUser(account.id, { password: el("user-password").value });
-  }
+
   return `${updated.full_name}: изменения сохранены`;
 }
 

@@ -415,6 +415,19 @@ def seed_airport_data(db, airport):
     return employees, len(aircraft), vehicles
 
 
+def initialize_base():
+    with SessionLocal() as db:
+        if db.query(User.id).first():
+            return
+        for icao in ("UUEE", "UUDD"):
+            graph = get_graph(icao)
+            if db.get(Airport, icao) is None:
+                db.add(Airport(icao=icao, name=graph.name, city=graph.city))
+        db.add(User(login="admin", password_hash=hash_password("admin"),
+                    role=ROLE_ADMIN, full_name="Администратор системы"))
+        db.commit()
+
+
 def seed_if_empty(verbose=True):
     """
     Наполняет базу, если она пуста.

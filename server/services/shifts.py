@@ -37,9 +37,14 @@ def initialize_shift_clocks(db):
         Employee.archived.is_(False),
     )
     for employee in active:
-        start_clock(employee)
+        employee.shift_ends_at = None
 
 
 def expire_shifts(db):
     for employee in db.query(Employee).filter(Employee.shift_ends_at <= utc_now()):
-        end_shift(db, employee, "Смена завершена")
+        from models.user import User, AuthSession
+        online = db.query(AuthSession.token).join(User).filter(User.employee_id == employee.id).first()
+        if employee.always_on_shift or online:
+            employee.shift_ends_at = None
+        else:
+            end_shift(db, employee, "Смена завершена")

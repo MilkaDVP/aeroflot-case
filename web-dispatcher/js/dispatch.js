@@ -521,6 +521,22 @@ function executorNodes() {
   const nodes = [];
   if (ctx.adding) {
     nodes.push(linkButton("Снять исполнителя", unassignSelected, "is-danger"), ...holdButton(call));
+    const person = state.employees.find(e => e.id === call.assigned_employee_id);
+    if (person && !person.is_training && ["assigned", "accepted"].includes(call.status)) {
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", "Транспорт исполнителя");
+      select.add(new Option("Пешком", ""));
+      for (const v of state.vehicles.filter(v => v.status === "free" || v.call_sign === call.vehicle_call_sign)) {
+        select.add(new Option(v.call_sign, v.id, false, v.call_sign === call.vehicle_call_sign));
+      }
+      nodes.push(select, linkButton("Изменить транспорт", async () => {
+        try {
+          await Api.changeTransport(call.id, select.value);
+          await refresh();
+          refreshExecutorMenu();
+        } catch (error) { showToast(error.detail, true); }
+      }));
+    }
     for (const member of call.support || []) {
       nodes.push(linkButton(`Снять помощника · ${member.employee_name}`, () => removeSupport(member), "is-danger"));
     }
