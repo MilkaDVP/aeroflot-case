@@ -33,6 +33,7 @@ from constants import (
     MODE_VEHICLE,
     MODE_WALK,
     PICKUP_RADIUS_M,
+    ROUTE_DEVIATION_M,
     STAGE_INSPECTION,
     STAGE_REPAIR,
     STAGE_WAITING_PARTS,
@@ -165,11 +166,13 @@ def assigned_route(call, graph):
     return plan_for(graph, person, call.stand_node_id, [])
 
 
-def update_assigned_route(call, plan):
+def update_assigned_route(call, plan, *, reset_eta=True):
+    call.route_start_lat = call.assigned_employee.lat
+    call.route_start_lon = call.assigned_employee.lon
     call.route_node_ids = plan.node_ids
     call.pickup_node_id = plan.pickup_node_id
     call.sim_progress_m = None
-    if call.status != CALL_ARRIVED:
+    if reset_eta and call.status != CALL_ARRIVED:
         call.eta_minutes = round(plan.minutes, 1)
         call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
 
@@ -215,8 +218,11 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     employee.return_vehicle = False
     call.assigned_employee = employee
     call.status = CALL_ASSIGNED
+    call.require_vehicle_pickup = False
     call.eta_minutes = round(plan.minutes, 1)
     call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
+    call.route_start_lat = call.assigned_employee.lat
+    call.route_start_lon = call.assigned_employee.lon
     call.route_node_ids = plan.node_ids
     call.pickup_node_id = plan.pickup_node_id
 
@@ -241,10 +247,6 @@ def enqueue(db, call, employee):
     текущий вызов и всё, что уже стоит перед этим в очереди, и только
     потом поедет сюда.
     """
-    if employee.waiting_lat is None:
-        employee.waiting_lat, employee.waiting_lon = employee.lat, employee.lon
-    employee.return_to_waiting = False
-    employee.return_vehicle = False
     call.assigned_employee = employee
     call.status = CALL_QUEUED
     call.queued_at = utc_now()
@@ -502,7 +504,8 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
     if source == LOCATION_GPS and employee.location_source == LOCATION_GPS and employee.location_at:
         seconds = (now - age - employee.location_at).total_seconds()
         if seconds <= 0:
-            return
+            employee.seen_at = now
+            return False
         if 2 <= seconds <= 90 and employee.lat is not None:
             speed = haversine_m(employee.lat, employee.lon, lat, lon) * 3.6 / seconds
             if employee.has_vehicle and 1 <= speed <= 80:
@@ -517,6 +520,7 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
     employee.updated_at = now
 
     pick_up_if_near(employee)
+    return True
 
 
 def return_destination(employee):
@@ -538,10 +542,18 @@ def navigation_leg(employee):
     points = [{"lat": employee.lat, "lon": employee.lon}]
     if not route:
         return {"instruction": instruction + " — нет доступного маршрута", "route_points": []}
-    if route:
-        points.extend(graph.node(n) for n in route.node_ids)
-        points.append({"lat": lat, "lon": lon})
+    points.extend(graph.node(n) for n in route.node_ids)
+    points.append({"lat": lat, "lon": lon})
     return {"instruction": instruction, "route_points": points}
+
+
+def route_geometry(call, graph):
+    nodes = [node for key in call.route_node_ids or [] if (node := graph.node(key))]
+    if nodes and call.route_start_lat is not None and call.route_start_lon is not None:
+        start = {"id": None, "lat": call.route_start_lat, "lon": call.route_start_lon}
+        if haversine_m(start["lat"], start["lon"], nodes[0]["lat"], nodes[0]["lon"]) > 0.1:
+            nodes.insert(0, start)
+    return nodes
 
 
 def refresh_navigation(db, employee):
@@ -563,13 +575,13 @@ def refresh_navigation(db, employee):
     if not call or call.status == CALL_ARRIVED:
         return
     graph = get_graph(employee.airport_icao)
-    nodes = [graph.node(n) for n in call.route_node_ids or []]
-    segments = zip(nodes, nodes[1:])
-    if target or not any(a and b and distance_to_segment(employee.lat, employee.lon, a, b) <= 50
+    nodes = route_geometry(call, graph)
+    segments = zip(nodes, nodes[1:] or nodes)
+    if target or not any(distance_to_segment(employee.lat, employee.lon, a, b) <= ROUTE_DEVIATION_M
                          for a, b in segments):
         plan = assigned_route(call, graph)
         if plan:
-            update_assigned_route(call, plan)
+            update_assigned_route(call, plan, reset_eta=False)
 
 
 def pick_up_if_near(employee):

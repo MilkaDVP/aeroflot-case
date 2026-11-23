@@ -129,12 +129,9 @@ def route_points(call):
     if not call.route_node_ids:
         return []
     graph = get_graph(call.airport_icao)
-    points = []
-    for node_id in call.route_node_ids:
-        node = graph.node(node_id)
-        if node:
-            points.append({"id": node["id"], "lat": node["lat"], "lon": node["lon"]})
-    return points
+    from services.assignment import route_geometry
+    return [{key: node[key] for key in ("id", "lat", "lon")}
+            for node in route_geometry(call, graph)]
 
 
 def vehicle_info(call):
@@ -225,6 +222,8 @@ def update_status(
 
     if payload.action == ACTION_ARRIVED and employee.return_vehicle:
         raise HTTPException(409, "Сначала верните транспорт")
+    if payload.action == ACTION_ARRIVED and call.require_vehicle_pickup and call.vehicle and call.vehicle.status == VEHICLE_RESERVED:
+        raise HTTPException(409, "Сначала заберите назначенный транспорт")
     now = utc_now()
     performed = now - timedelta(seconds=payload.age_s or 0)
     call_status, employee_status = ENGINEER_ACTIONS[payload.action]

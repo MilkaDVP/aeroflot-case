@@ -144,9 +144,7 @@ function el(id) {
 }
 
 function bindEvents() {
-  for (const id of ["people-search", "people-airport"]) {
-    el(id).addEventListener("input", () => renderPeople(state.people.users, state.people.employees));
-  }
+  el("people-search").addEventListener("input", () => renderPeople(state.people.users, state.people.employees));
   for (const button of document.querySelectorAll("#tabs button")) {
     button.addEventListener("click", () => showTab(button.dataset.tab));
   }
@@ -582,10 +580,6 @@ async function loadUsers() {
       await loadGraphOnce();
       fillPlaces("user-place");
     }
-    const picker = el("people-airport");
-    const selected = picker.value;
-    picker.replaceChildren(new Option("Все доступные", ""), ...state.user.airports.map(a => new Option(a.icao, a.icao)));
-    picker.value = selected;
     state.people = { users, employees };
     renderPeople(users, employees);
   } catch (error) {
@@ -607,7 +601,7 @@ function renderPeople(users, employees) {
   const accountOf = new Map(
     users.filter((user) => user.employee_id).map((user) => [user.employee_id, user])
   );
-  const airport = el("people-airport").value;
+  const airport = state.user.airport_icao;
   const terms = el("people-search").value.toLocaleLowerCase().trim().split(/\s+/);
   function matches(icao, fields) {
     const text = fields.join(" ").toLocaleLowerCase();

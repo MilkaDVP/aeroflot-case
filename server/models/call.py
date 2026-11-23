@@ -137,6 +137,9 @@ class Call(Base):
     # её забирает. pickup_node_id пуст, если машина уже была при нём
     # или он идёт пешком: тогда маршрут из одного участка.
     vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), nullable=True)
+    route_start_lat: Mapped[float | None] = mapped_column(Float)
+    route_start_lon: Mapped[float | None] = mapped_column(Float)
+    require_vehicle_pickup: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Сколько метров маршрута пройдено в режиме учений. Пусто, пока
     # исполнитель не начал движение или идёт не по учебному сценарию.

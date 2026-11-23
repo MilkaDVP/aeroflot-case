@@ -592,7 +592,7 @@ def change_transport(call_id: int, vehicle_id: int | None = None,
     employee = call.assigned_employee
     if not employee or call.status not in ("assigned", "accepted") or employee.is_training:
         raise HTTPException(409, "Транспорт меняют у инженера в пути")
-    if call.vehicle_id == vehicle_id and not employee.return_vehicle:
+    if call.vehicle_id == vehicle_id:
         return to_response(call, db)
     target = db.get(Vehicle, vehicle_id) if vehicle_id else None
     if vehicle_id is not None and (not target or target.archived or target.airport_icao != call.airport_icao
@@ -605,6 +605,7 @@ def change_transport(call_id: int, vehicle_id: int | None = None,
     if old and old != target and not employee.return_vehicle:
         release_vehicle(employee)
     call.vehicle = target
+    call.require_vehicle_pickup = target is not None and target.status != VEHICLE_IN_USE
     if target and target != old:
         target.status = VEHICLE_RESERVED
         if not employee.return_vehicle:

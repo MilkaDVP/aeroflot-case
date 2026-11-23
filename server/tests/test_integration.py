@@ -52,7 +52,7 @@ class TestRealEngineerLifecycle(DrillCase):
         employee = self.create_engineer()
 
         # Вход: сессия не истекает (связь на перроне может пропадать),
-        # смена ещё не начата.
+        # активная сессия выводит инженера на смену.
         token = self.client.post(
             "/api/auth/login", json={"login": "volnov", "password": "secret"}
         ).json()["token"]
@@ -60,7 +60,8 @@ class TestRealEngineerLifecycle(DrillCase):
         me = self.client.get("/api/auth/me", headers=headers).json()
         self.assertEqual(me["employee_id"], employee["id"])
         self.assertEqual(me["role"], "engineer")
-        self.assertFalse(me["on_shift"])
+        self.assertTrue(me["on_shift"])
+        self.assertFalse(employee["always_on_shift"])
 
         # Начало смены: срок окончания выставлен.
         shift = self.client.post(
@@ -255,7 +256,8 @@ class TestShiftExpiryIndependence(DrillCase):
             db.commit()
         me = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(me.status_code, 200)
-        self.assertFalse(me.json()["on_shift"])
+        self.assertTrue(me.json()["on_shift"])
+        self.assertIsNone(me.json()["shift_ends_at"])
 
     def test_расписание_аэропорта_не_снимает_инженера(self):
         # Смена аэропорта (shift_clock) лишь подсказывает смену при входе;

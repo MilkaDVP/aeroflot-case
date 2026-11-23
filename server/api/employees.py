@@ -112,10 +112,10 @@ def load_employee(db, context, employee_id, model=Employee):
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NOT_FOUND)
     if context.user.role != ROLE_ADMIN:
-        if employee.airport_icao not in context.user.airport_icaos:
-            raise HTTPException(403, ERROR_FOREIGN_AIRPORT.format(icao=employee.airport_icao))
         if context.airport_icao:
             check_same_airport(context, employee.airport_icao)
+        if employee.airport_icao not in context.user.airport_icaos:
+            raise HTTPException(404, ERROR_NOT_FOUND)
     return employee
 
 
@@ -281,6 +281,7 @@ def delete_employee(
     context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
 ):
     employee = load_employee(db, context, employee_id)
+    check_same_airport(context, employee.airport_icao)
     active = db.query(Call.id).filter(
         Call.assigned_employee_id == employee.id, Call.status.in_(ACTIVE_CALL_STATUSES)
     ).first()
@@ -391,9 +392,9 @@ def update_location(
     if (context.user.role != ROLE_ENGINEER and employee.status in (STATUS_FREE, STATUS_OFFLINE)
             and not employee.return_vehicle and not employee.return_to_waiting):
         employee.waiting_lat, employee.waiting_lon = payload.lat, payload.lon
-    record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
+    changed = record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
     from services.assignment import refresh_navigation
-    if not employee.is_training:
+    if changed and not employee.is_training:
         refresh_navigation(db, employee)
     if employee.is_training and payload.source == LOCATION_MANUAL and not reroute_after_move(db, employee):
         raise HTTPException(status.HTTP_409_CONFLICT, "Из выбранной точки нет маршрута к борту")

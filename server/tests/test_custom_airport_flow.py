@@ -199,8 +199,15 @@ class TestCustomAirportFlow(ApiTestCase):
         location(1)
         post(dispatcher, path + "/transport?vehicle_id=" + str(new["id"]))
         self.assertIn("Верните", current()["instruction"])
+        # Повтор запроса после потери ответа не снимает резерв.
+        post(dispatcher, path + "/transport?vehicle_id=" + str(new["id"]))
+        denied = self.client.post("/api/me/status", json={"action": "arrived"}, headers=auth_header(engineer))
+        self.assertEqual(denied.status_code, 409)
+        self.assertEqual(current()["call"]["status"], "accepted")
         location(0)
         self.assertTrue(current()["vehicle"]["pickup"])
+        denied = self.client.post("/api/me/status", json={"action": "arrived"}, headers=auth_header(engineer))
+        self.assertEqual(denied.status_code, 409)
         location(3)
         self.assertFalse(current()["vehicle"]["pickup"])
         location(2)
@@ -214,6 +221,47 @@ class TestCustomAirportFlow(ApiTestCase):
         self.assertIn("ожидания", current()["instruction"])
         location(0)
         self.assertNotIn("instruction", current())
+
+    def test_close_with_car_returns_it_before_walk_to_waiting_place(self):
+        admin = self.build_airport()
+        person = self.register_engineer(admin)
+        aircraft = self.put_aircraft(admin)
+        engineer = self.login("poligonov", "engineer", airport=ICAO)
+
+        def post(actor, path, **data):
+            r = self.client.post("/api/" + path, json=data, headers=auth_header(actor))
+            self.assertIn(r.status_code, (200, 201), r.text)
+            return r.json()
+
+        def location(node):
+            post(engineer, f"employees/{person['id']}/location", source="gps",
+                 lat=node["lat"], lon=node["lon"])
+
+        def leg():
+            return self.client.get("/api/me/current-call", headers=auth_header(engineer)).json()
+
+        parking = NODES[1]
+        car = post(admin, "vehicles", call_sign="RETURN", lat=parking["lat"], lon=parking["lon"])
+        job = post(admin, "calls", aircraft_id=aircraft["id"], defect_code="hydraulic_leak")
+        path = f"calls/{job['id']}"
+        post(admin, path + "/assign", employee_id=person["id"], travel="walk")
+        post(admin, path + "/transport?vehicle_id=" + str(car["id"]))
+        post(engineer, "me/status", action="accepted")
+        location(parking)
+        location(NODES[2])
+        post(engineer, "me/status", action="arrived")
+        post(engineer, "me/status", action="closed")
+        self.assertIn("Верните спецтранспорт", leg()["instruction"])
+        self.assertEqual(leg()["route_points"][-1]["lon"], parking["lon"])
+        location(NODES[0])  # Приехать на место ожидания первым недостаточно.
+        self.assertIn("Верните спецтранспорт", leg()["instruction"])
+        location(parking)
+        self.assertIn("место ожидания", leg()["instruction"])
+        fleet = self.client.get("/api/vehicles", headers=auth_header(admin)).json()
+        self.assertEqual(fleet[0]["status"], "free")
+        self.assertEqual(fleet[0]["lon"], parking["lon"])
+        location(NODES[0])
+        self.assertNotIn("instruction", leg())
 
     # --- Проверки при заведении ---
 
