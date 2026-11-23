@@ -142,6 +142,13 @@ class Call(Base):
     route_start_lon: Mapped[float | None] = mapped_column(Float)
     require_vehicle_pickup: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     pickup_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Нужен инструмент со склада: маршрут идёт через склад (30 с на
+    # получение). Когда инженер его получил — tools_taken_at.
+    needs_tools: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    tools_taken_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Промежуточные точки маршрута: склад, посадка в машину, высадка —
+    # с регламентными задержками (algorithm/transport.py).
+    route_stops: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Вызов поддержки: ещё один инженер на тот же борт по тому же вызову.
     # Здесь — основной вызов. Отдельная запись, а не список исполнителей

@@ -59,6 +59,7 @@ class AirportMap {
     this.layers = {
       basemap: createGroup("layer-basemap"),
       scrim: createGroup("layer-scrim"),
+      areas: createGroup("layer-areas"),
       taxiways: createGroup("layer-taxiways"),
       stands: createGroup("layer-stands"),
       route: createGroup("layer-route"),
@@ -170,10 +171,58 @@ class AirportMap {
     this.graph = graph;
     this.nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
 
-    this.fitView(graph.nodes);
+    // У полигона «весь аэропорт» — это его контур, а не только стоянки.
+    const outline = (graph.boundary || []).flat().map(([x, y]) => ({ x, y, type: "boundary" }));
+    this.fitView(outline.length ? outline : graph.nodes);
     this.measureBaseScale();
     this.drawTaxiways(graph);
     this.drawStands(graph);
+    // После стоянок: те очищают слой подписей, а подписи объектов — там же.
+    this.drawAreas(graph);
+  }
+
+  /**
+   * Площадные объекты полигона: контур территории, здания, склады,
+   * стоянка спецтехники, ВПП и зоны обслуживания ВС. У аэропортов из OSM
+   * их нет — слой просто пуст.
+   */
+  drawAreas(graph) {
+    const layer = this.layers.areas;
+    layer.replaceChildren();
+    const ring = (points) => "M" + points.map((p) => `${p[0]},${p[1]}`).join(" L") + " Z";
+    for (const points of graph.boundary || []) {
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", ring(points));
+      path.setAttribute("class", "area area-boundary");
+      layer.append(path);
+    }
+    for (const item of graph.objects || []) {
+      for (const points of item.rings || []) {
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("d", ring(points));
+        path.setAttribute("class", `area area-${item.kind || "object"}`);
+        path.append(title(item.name || ""));
+        layer.append(path);
+      }
+      if (item.label && item.kind !== "runway") {
+        const label = this.createMarker(item.label[0], item.label[1]);
+        const text = document.createElementNS(SVG_NS, "text");
+        text.setAttribute("class", "label label-area");
+        text.textContent = item.name || "";
+        label.append(text);
+        label.dataset.always = "1";
+        this.layers.labels.append(label);
+      }
+    }
+    for (const zone of graph.zones || []) {
+      for (const points of zone.rings || []) {
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("d", ring(points));
+        path.setAttribute("class", "area area-zone");
+        path.append(title(`Зона обслуживания ВС ${zone.ref}`));
+        layer.append(path);
+      }
+    }
   }
 
   /**
@@ -286,7 +335,15 @@ class AirportMap {
 
       const path = document.createElementNS(SVG_NS, "path");
       path.setAttribute("d", edgePath(from, to, edge.points));
-      path.setAttribute("class", edge.vehicle_allowed ? "taxiway" : "taxiway walk-only");
+      // Вид дороги полигона: служебная, пешеходная, рулёжка, ВПП. У графов
+      // из OSM вида нет — там рулёжка, проезжая или только пешком.
+      const kind = edge.kind ? ` road-${edge.kind}` : "";
+      path.setAttribute("class", (edge.vehicle_allowed ? "taxiway" : "taxiway walk-only") + kind);
+      if (edge.kind) {
+        const names = { service: "Служебная дорога", pedestrian: "Пешеходная дорожка",
+          taxi: "Рулёжная дорожка — только ВС", runway: "ВПП — только ВС" };
+        path.append(title(`${names[edge.kind] || edge.kind}${edge.speed_kmh ? `, ${edge.speed_kmh} км/ч` : ""}`));
+      }
       layer.append(path);
     }
   }
@@ -305,6 +362,21 @@ class AirportMap {
 
       const isTech = node.type === "tech_center";
       const marker = this.createMarker(node.x, node.y);
+      const place = { warehouse: "Склад", vehicle_parking: "Стоянка спецтехники", terminal: "Терминал" }[node.type];
+
+      if (place) {
+        // Вход в объект полигона: сюда ведут маршруты через склад
+        // и к стоянке спецтехники. Подпись — у самого объекта.
+        const shape = document.createElementNS(SVG_NS, "rect");
+        shape.setAttribute("x", -5);
+        shape.setAttribute("y", -5);
+        shape.setAttribute("width", 10);
+        shape.setAttribute("height", 10);
+        shape.setAttribute("class", `place place-${node.type}`);
+        marker.append(shape, title(`${node.ref || place} — вход`));
+        stands.append(marker);
+        continue;
+      }
 
       if (isTech) {
         const shape = document.createElementNS(SVG_NS, "rect");
@@ -883,7 +955,7 @@ class AirportMap {
    * пеший — пунктиром, на машине — сплошной линией. Иначе диспетчер
    * не отличил бы «идёт пешком» от «едет».
    */
-  drawRoute(nodeIds, pickupNodeId, employee) {
+  drawRoute(nodeIds, pickupNodeId, employee, stops) {
     this.clearRoute();
 
     const known = (nodeIds || []).filter((id) => this.nodesById.has(id));
@@ -922,6 +994,14 @@ class AirportMap {
     if (split > 0 && split < known.length - 1) {
       this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "М", "Здесь забрать машину");
     }
+    // Промежуточные точки: склад (получить инструмент, 30 с). Посадка
+    // отмечена буквой «М» выше; высадка у борта — это конец маршрута.
+    for (const stop of stops || []) {
+      if (stop.kind === "warehouse") {
+        this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "С",
+          `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
+      }
+    }
     this.appendRouteEnd(first, "start", "А", "Начало маршрута");
     this.appendRouteEnd(last, "finish", "Б", "Конец маршрута — стоянка борта");
     this.updateMarkerScale();
@@ -932,8 +1012,8 @@ class AirportMap {
    * Маршрут, а если его нет — явная отметка «маршрут не построен»
    * на стоянке вызова.
    */
-  showRoute(nodeIds, pickupNodeId, standNodeId, missingText, employee) {
-    if (!this.drawRoute(nodeIds, pickupNodeId, employee) && standNodeId) {
+  showRoute(nodeIds, pickupNodeId, standNodeId, missingText, employee, stops) {
+    if (!this.drawRoute(nodeIds, pickupNodeId, employee, stops) && standNodeId) {
       this.drawRouteMissing(standNodeId, missingText);
     }
   }

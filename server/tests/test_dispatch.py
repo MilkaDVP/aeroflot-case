@@ -8,12 +8,13 @@
     c0 ──300── c1 ──300── c2 ──300── c3 ──300── c4
    стоянка 1                                 стоянка 10
 
-Расстояния до стоянки 10 и время пешком при 4.5 км/ч:
-    c0 — 1200 м — 16.0 мин   (регламент нарушен)
-    c1 —  900 м — 12.0 мин   (жёлтая зона)
-    c2 —  600 м —  8.0 мин
-    c3 —  300 м —  4.0 мин
-На спецтранспорте при 20 км/ч те же 1200 м — 3.6 мин.
+Расстояния до стоянки 10 и время пешком при 5 км/ч (регламент):
+    c0 — 1200 м — 14.4 мин
+    c1 —  900 м — 10.8 мин
+    c2 —  600 м —  7.2 мин
+    c3 —  300 м —  3.6 мин
+На спецтранспорте при 20 км/ч те же 1200 м — 3.6 мин, плюс высадка 10 с.
+Медленный инженер (speed_kmh=4) от c0 идёт 18 мин — регламент нарушен.
 """
 
 import math
@@ -141,7 +142,7 @@ class TestScenarios(unittest.TestCase):
         result = suggest(self.graph, CALL_A320, [far, near], SHIFT_DAY, TODAY)
 
         self.assertEqual(result.best.employee["id"], 2)
-        self.assertAlmostEqual(result.best.minutes, 8.0, places=1)
+        self.assertAlmostEqual(result.best.minutes, 7.2, places=1)
         self.assertTrue(result.within_regulation)
 
     def test_сценарий_2_ближайший_без_допуска_отсеивается(self):
@@ -154,31 +155,32 @@ class TestScenarios(unittest.TestCase):
         result = suggest(self.graph, call, [near_wrong_type, far_correct], SHIFT_DAY, TODAY)
 
         self.assertEqual(result.best.employee["id"], 2)
-        self.assertAlmostEqual(result.best.minutes, 12.0, places=1)
+        self.assertAlmostEqual(result.best.minutes, 10.8, places=1)
         # Диспетчер должен видеть, почему ближайший не назначен.
         reasons = [item["reason"] for item in result.rejected if item["employee_id"] == 1]
         self.assertEqual(len(reasons), 1)
         self.assertIn("B777", reasons[0])
 
     def test_сценарий_3_спецтранспорт_обгоняет_пешехода(self):
-        # Пешеход стоит вчетверо ближе, но приедет позже машины.
-        walker = make_engineer(1, node_index=3, has_vehicle=False)
+        # Пешеход стоит вдвое ближе (7.2 мин), но приедет позже машины
+        # (3.6 мин езды и 10 с на высадку).
+        walker = make_engineer(1, node_index=2, has_vehicle=False)
         driver = make_engineer(2, node_index=0, has_vehicle=True)
 
         result = suggest(self.graph, CALL_A320, [walker, driver], SHIFT_DAY, TODAY)
 
         self.assertEqual(result.best.employee["id"], 2)
-        self.assertAlmostEqual(result.best.minutes, 3.6, places=1)
+        self.assertAlmostEqual(result.best.minutes, 3.6 + 10 / 60, places=2)
 
     def test_сценарий_4_никто_не_успевает_в_регламент(self):
-        # Единственный подходящий сотрудник идёт 16 минут. Система обязана
+        # Единственный подходящий сотрудник идёт 18 минут. Система обязана
         # его показать с явным предупреждением, а не промолчать.
-        lonely = make_engineer(1, node_index=0)
+        lonely = dict(make_engineer(1, node_index=0), speed_kmh=4.0)
 
         result = suggest(self.graph, CALL_A320, [lonely], SHIFT_DAY, TODAY)
 
         self.assertIsNotNone(result.best)
-        self.assertAlmostEqual(result.best.minutes, 16.0, places=1)
+        self.assertAlmostEqual(result.best.minutes, 18.0, places=1)
         self.assertFalse(result.within_regulation)
         self.assertFalse(result.best.within_regulation)
         self.assertIn("превышение регламента", result.message)
@@ -231,9 +233,9 @@ class TestScenarios(unittest.TestCase):
         self.assertIn(1, [item["employee_id"] for item in result.rejected])
 
     def test_жёлтая_зона_отмечается(self):
-        # 12 минут — успевает, но запаса почти нет. Для диспетчера это
+        # 12.9 минуты — успевает, но запаса почти нет. Для диспетчера это
         # отдельный визуальный сигнал, а не просто «уложился».
-        engineer = make_engineer(1, node_index=1)
+        engineer = dict(make_engineer(1, node_index=1), speed_kmh=4.2)
         result = suggest(self.graph, CALL_A320, [engineer], SHIFT_DAY, TODAY)
 
         self.assertTrue(result.best.within_regulation)

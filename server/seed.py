@@ -176,6 +176,58 @@ DOMODEDOVO = {
 
 DEMO_AIRPORTS = [SHEREMETYEVO, DOMODEDOVO]
 
+# --- Испытательный полигон ВДНХ ---------------------------------------------
+#
+# Граф — из геоданных организаторов (data/geodata/vdnh →
+# data/import_geodata.py → data/airports/VDNH.json). Зоны обслуживания ВС —
+# стоянки 1–10, инженеры — в ангаре, машины — на стоянке спецтехники.
+# Количество и расстановку агентов на испытаниях задают организаторы:
+# их заводят в администрировании, а это — стартовый набор для проверки.
+
+POLYGON = {
+    "icao": "VDNH",
+    "name": "Полигон ВДНХ",
+    "city": "Москва",
+    "timezone": "Europe/Moscow",
+    "aircraft": [
+        ("RA-73001", "A320", "1"),
+        ("RA-73002", "A321", "3"),
+        ("RA-89101", "SSJ-100", "5"),
+        ("RA-73003", "B737", "7"),
+        ("RA-73004", "A320", "9"),
+        ("RA-89102", "SSJ-100", "10"),
+    ],
+    "engineers": [
+        ("Орлов В. С.", "B1.1", ["A320", "A321", "B737", "SSJ-100"], VALID_UNTIL,
+         SHIFT_DAY, STATUS_FREE, ("tech", "Ангар")),
+        ("Лебедев К. А.", "B1.1", ["A320", "A321", "SSJ-100"], VALID_UNTIL,
+         SHIFT_DAY, STATUS_FREE, ("tech", "Ангар")),
+        ("Кравцова Н. И.", "B2", ["A320", "A321", "B737", "SSJ-100"], VALID_UNTIL,
+         SHIFT_DAY, STATUS_FREE, ("stand", "8")),
+        ("Ершов Д. М.", "A1", ["A320", "B737"], VALID_UNTIL,
+         SHIFT_DAY, STATUS_FREE, ("stand", "2")),
+        ("Тарасов И. П.", "B1.1", ["A320", "A321", "B737", "SSJ-100"], VALID_UNTIL,
+         SHIFT_NIGHT, STATUS_FREE, ("tech", "Ангар")),
+        ("Зуев Р. О.", "B2", ["A320", "A321", "B737", "SSJ-100"], VALID_UNTIL,
+         SHIFT_NIGHT, STATUS_FREE, ("tech", "Ангар")),
+    ],
+    "vehicles": [
+        ("ТМ-01", "Техпомощь", ("node", "vehicle_parking_1")),
+        ("ТМ-02", "Техпомощь", ("node", "vehicle_parking_1")),
+    ],
+    "users": [
+        ("local_vdnh", "local_vdnh", ROLE_LOCAL_ADMIN, "Админ полигона ВДНХ", None),
+        ("supervisor_vdnh", "supervisor", ROLE_SHIFT_SUPERVISOR, "Начальник смены ВДНХ", None),
+        ("dispatcher_vdnh", "dispatcher", ROLE_DISPATCHER, "Диспетчер ВДНХ", None),
+        ("orlov", "engineer", ROLE_ENGINEER, "Орлов В. С.", "Орлов В. С."),
+        ("lebedev", "engineer", ROLE_ENGINEER, "Лебедев К. А.", "Лебедев К. А."),
+        ("kravtsova", "engineer", ROLE_ENGINEER, "Кравцова Н. И.", "Кравцова Н. И."),
+        ("ershov", "engineer", ROLE_ENGINEER, "Ершов Д. М.", "Ершов Д. М."),
+        ("tarasov", "engineer", ROLE_ENGINEER, "Тарасов И. П.", "Тарасов И. П."),
+        ("zuev", "engineer", ROLE_ENGINEER, "Зуев Р. О.", "Зуев Р. О."),
+    ],
+}
+
 # Учётные записи: логин, пароль, роль, ФИО, карточка сотрудника, аэропорты.
 # Пароли простые намеренно: это конкурсный стенд, логины и пароли
 # публикуются в README для проверки жюри.
@@ -402,6 +454,47 @@ def seed_working_call(db, icao, aircraft, employees, working_call):
     employee.busy_until = arrived_at + timedelta(minutes=DEFAULT_WORK_DURATION_MIN)
 
 
+def ensure_polygon(db, verbose=True):
+    """
+    Испытательный полигон: карточка аэропорта, люди, машины, борта.
+
+    Досоздаётся и в уже наполненной базе — при каждом запуске сервера,
+    если граф полигона есть, а людей и бортов в нём ещё нет. Повторный
+    запуск ничего не меняет.
+    """
+    icao = POLYGON["icao"]
+    if icao not in available_icaos():
+        return False
+    graph = get_graph(icao)
+    airport = db.get(Airport, icao)
+    if airport is None:
+        airport = Airport(icao=icao, name=POLYGON["name"], city=POLYGON["city"])
+        db.add(airport)
+    if not airport.timezone:
+        airport.timezone = POLYGON["timezone"]
+    db.commit()
+    if (db.query(Employee.id).filter(Employee.airport_icao == icao).first()
+            or db.query(Aircraft.id).filter(Aircraft.airport_icao == icao).first()):
+        return False
+
+    employees = seed_employees(db, graph, icao, POLYGON["engineers"])
+    seed_aircraft(db, graph, icao, POLYGON["aircraft"])
+    seed_vehicles(db, graph, icao, POLYGON["vehicles"], employees)
+    for login, password, role, full_name, employee_name in POLYGON["users"]:
+        if db.query(User.id).filter(User.login == login).first():
+            continue
+        employee = employees.get(employee_name) if employee_name else None
+        user = User(login=login, password_hash=hash_password(password), role=role,
+                    full_name=full_name, employee_id=employee.id if employee else None)
+        user.airports.append(airport)
+        db.add(user)
+    db.commit()
+    if verbose:
+        print(f"Полигон {icao}: {len(employees)} инженеров, {len(POLYGON['aircraft'])} бортов, "
+              f"{len(POLYGON['vehicles'])} машин")
+    return True
+
+
 def seed_airport_data(db, airport):
     """Сотрудники, борта, машины и вызовы одного аэропорта."""
     icao = airport["icao"]
@@ -471,6 +564,7 @@ def seed_if_empty(verbose=True):
         # Учётные записи создаются после сотрудников: инженер привязывается
         # к своей карточке по идентификатору.
         seed_users(db, employees)
+        ensure_polygon(db, verbose)
 
         if verbose:
             print(

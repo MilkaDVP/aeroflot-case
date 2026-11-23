@@ -757,3 +757,36 @@ button:disabled { opacity: 0.5; }
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* Инструмент со склада: куда зайти и отметка «получен». */
+.tools-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #c9a8ff;
+  background: rgba(163, 113, 247, 0.14);
+}
+.tools-note[hidden] { display: none; }
+.tools-note span { flex: 1; }
+.tools-note.is-done { color: var(--ok, #35c46a); background: rgba(53, 196, 106, 0.12); }
+.tools-button {
+  flex: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.route-warehouse {
+  fill: #a371f7;
+  stroke: #0b0f14;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.tools-note { flex-wrap: wrap; }
+.tools-note span { min-width: 60%; }

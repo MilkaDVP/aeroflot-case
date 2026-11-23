@@ -33,6 +33,26 @@ function transportLabel(candidate) {
 }
 
 /**
+ * Цепочка маршрута через промежуточные точки: «Склад №2 · инструмент 30 с
+ * → ТМ-01 · посадка → борт». Пусто, если маршрут без остановок.
+ */
+function routeChain(stops, vehicleCallSign) {
+  const parts = [];
+  for (const stop of stops || []) {
+    if (stop.final) continue;
+    if (stop.kind === "warehouse") {
+      parts.push(`${escapeHtml(stop.name || "склад")} · инструмент ${stop.dwell_s} с`);
+    } else if (stop.kind === "board") {
+      parts.push(`${escapeHtml(vehicleCallSign || "машина")} · посадка ${stop.dwell_s} с`);
+    } else if (stop.kind === "alight") {
+      parts.push(`высадка ${stop.dwell_s} с`);
+    }
+  }
+  if (!parts.length) return "";
+  return `<div class="route-chain" title="Промежуточные точки маршрута">${parts.join(" → ")} → борт</div>`;
+}
+
+/**
  * Длительность в минутах словами: «14 мин», «3 ч 24 мин».
  * От часа — часами: «204 мин» приходится пересчитывать в уме.
  */
@@ -394,6 +414,7 @@ function buildEtaBlock(result) {
       <span${best.vehicle_call_sign ? term("vehicle") : ""}>${transportLabel(best)}</span> ·
       <span class="num">${Math.round(best.route.distance_m)}</span> м
     </div>
+    ${routeChain(best.route.stops, best.vehicle_call_sign)}
     <div class="eta-message ${result.within_regulation ? "is-ok" : "is-danger"}">
       ${escapeHtml(result.message)}
     </div>
@@ -560,7 +581,9 @@ function busyStageLine(busy) {
 function callFlags(call) {
   return (
     (call.aog ? `<span class="flag flag-aog"${term("aog")}>AOG</span>` : "") +
-    (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "")
+    (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "") +
+    (call.needs_tools && !call.tools_taken_at
+      ? '<span class="flag flag-tools" title="Маршрут через склад: получить инструмент">инструмент</span>' : "")
   );
 }
 
@@ -913,6 +936,9 @@ function buildAssignmentBlock(call) {
         ? ` · <span class="num">${escapeHtml(call.vehicle_call_sign)}</span>`
         : ""
     }</div>
+    ${call.needs_tools && call.tools_taken_at
+      ? '<div class="route-chain">Инструмент получен</div>'
+      : routeChain(call.route_stops, call.vehicle_call_sign)}
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
     ${
       call.override_reason

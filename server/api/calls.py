@@ -34,7 +34,7 @@ from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
 from models.employee import Employee
 from models.vehicle import Vehicle
 from constants import VEHICLE_FREE, VEHICLE_RESERVED, VEHICLE_IN_USE
-from services.assignment import assigned_route, update_assigned_route, release_vehicle
+from services.assignment import assigned_route, depots_for, update_assigned_route, release_vehicle
 from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
@@ -191,6 +191,9 @@ def to_response(call, db=None, now=None):
         queued_at=to_iso_utc(call.queued_at),
         vehicle_call_sign=call.vehicle.call_sign if call.vehicle else None,
         pickup_node_id=call.pickup_node_id,
+        needs_tools=bool(call.needs_tools),
+        tools_taken_at=to_iso_utc(call.tools_taken_at),
+        route_stops=call.route_stops or [],
         previous_employee_name=previous.full_name if previous else None,
         unassign_reason=call.unassign_reason,
         unassigned_at=to_iso_utc(call.unassigned_at),
@@ -277,6 +280,8 @@ def run_suggestion(db, context, call, purpose=None):
         # Отметка, записанная при регистрации: для типа, заведённого
         # диспетчером, во встроенном справочнике её не вычислить.
         "required_mark": call.required_mark,
+        # Инструмент со склада — маршрут через склад, пока не получен.
+        "needs_tools": bool(call.needs_tools) and call.tools_taken_at is None,
     }
     vehicles = [vehicle.as_algorithm_dict() for vehicle in free_vehicles(db, call.airport_icao)]
     employees, removed = candidates_for(db, context, call)
@@ -400,6 +405,7 @@ def create_call(
 
     call = new_call(db, aircraft, defect, payload.description)
     call.urgent = payload.urgent
+    call.needs_tools = payload.needs_tools
     # Кто зарегистрировал вызов, тот его и разбирает: он открывается у него
     # сразу, и второй диспетчер не должен перехватить его на полпути.
     claims.take(db, call, context.user)
@@ -563,13 +569,15 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         if not can_override(context):
             raise HTTPException(status.HTTP_403_FORBIDDEN, ERROR_OVERRIDE_FORBIDDEN)
 
+    graph = get_graph(call.airport_icao)
     plan, pickup_vehicle = plan_route(
         db,
         employee,
         call.stand_node_id,
-        get_graph(call.airport_icao),
+        graph,
         payload.travel,
         ride_vehicle,
+        depots_for(call, graph),
     )
     if plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)

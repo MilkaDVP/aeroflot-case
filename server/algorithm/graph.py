@@ -2,8 +2,21 @@
 Граф аэропорта: загрузка подготовленного JSON и доступ к вершинам.
 
 Граф неориентированный: по рулёжке ходят и ездят в обе стороны.
-Рёбра различаются флагом vehicle_allowed — спецтранспорт проходит
-не везде, где проходит человек.
+
+У ребра есть допуск по агентам и скоростной режим:
+- vehicle_allowed — проезд спецтранспорта;
+- walk_allowed — проход пешком (по умолчанию да). Рулёжные дорожки и ВПП
+  на испытательном полигоне — только для воздушных судов: оба флага
+  ложны, и маршрут через них не строится вовсе;
+- speed_kmh — ограничение скорости на участке (по умолчанию нет).
+  Время в пути по ребру считается по меньшей из скоростей — агента
+  и ограничения, поэтому маршрут выбирается самый быстрый, а не самый
+  короткий.
+- kind — вид дороги для карты: service, pedestrian, taxi, runway.
+
+Помимо графа, полигон может нести объекты (склады, стоянка спецтехники,
+ангар, терминал), зоны обслуживания ВС и контур территории — для карты
+и для фиксации прибытия по попаданию в зону стоянки.
 """
 
 import json
@@ -31,6 +44,9 @@ class AirportGraph:
         self.nodes = {node["id"]: node for node in payload["nodes"]}
         self.edges = payload["edges"]
         self._adjacency = build_adjacency(payload["edges"])
+        self.objects = payload.get("objects", [])
+        self.zones = payload.get("zones", [])
+        self.boundary = payload.get("boundary", [])
         self.centre = self.operational_centre()
 
     def operational_centre(self):
@@ -60,22 +76,32 @@ class AirportGraph:
         """Вершина по идентификатору или None, если такой нет."""
         return self.nodes.get(node_id)
 
+    def links(self, node_id, mode):
+        """
+        Рёбра от вершины, разрешённые выбранному способу передвижения.
+
+        Возвращает тройки (сосед, длина в метрах, ограничение скорости
+        в км/ч или None).
+        """
+        index = 1 if mode == MODE_VEHICLE else 2
+        return [
+            (link[0], link[3], link[4]) for link in self._adjacency[node_id] if link[index]
+        ]
+
     def neighbours(self, node_id, mode):
         """
         Соседи вершины, достижимые выбранным способом передвижения.
 
         Возвращает пары (идентификатор соседа, длина ребра в метрах).
         """
-        if mode == MODE_VEHICLE:
-            return [
-                (neighbour_id, distance)
-                for neighbour_id, distance, vehicle_allowed in self._adjacency[node_id]
-                if vehicle_allowed
-            ]
-        return [
-            (neighbour_id, distance)
-            for neighbour_id, distance, _ in self._adjacency[node_id]
-        ]
+        return [(neighbour, length) for neighbour, length, _ in self.links(node_id, mode)]
+
+    def zone_at(self, lat, lon):
+        """Зона обслуживания ВС, в которой лежит точка, или None."""
+        for zone in self.zones:
+            if any(point_in_ring(lat, lon, ring) for ring in zone.get("rings_ll", [])):
+                return zone
+        return None
 
     def nodes_of_type(self, node_type):
         """Все вершины заданного типа: stand, tech_center или junction."""
@@ -116,14 +142,34 @@ def build_adjacency(edges):
     Списки смежности из плоского списка рёбер.
 
     Каждое ребро добавляется в обе стороны: граф неориентированный.
+    Элемент списка: (сосед, проезд машины, проход пешком, длина, скорость).
+    Ребро, закрытое для всех агентов (рулёжка, ВПП), в смежность не входит.
     """
     adjacency = defaultdict(list)
     for edge in edges:
+        vehicle = bool(edge["vehicle_allowed"])
+        walk = bool(edge.get("walk_allowed", True))
+        if not (vehicle or walk):
+            continue
         distance = edge["distance_m"]
-        vehicle_allowed = edge["vehicle_allowed"]
-        adjacency[edge["from_id"]].append((edge["to_id"], distance, vehicle_allowed))
-        adjacency[edge["to_id"]].append((edge["from_id"], distance, vehicle_allowed))
+        limit = edge.get("speed_kmh")
+        adjacency[edge["from_id"]].append((edge["to_id"], vehicle, walk, distance, limit))
+        adjacency[edge["to_id"]].append((edge["from_id"], vehicle, walk, distance, limit))
     return adjacency
+
+
+def point_in_ring(lat, lon, ring):
+    """Лежит ли точка внутри кольца [[lat, lon], ...] — луч по долготе."""
+    inside = False
+    count = len(ring)
+    for i in range(count):
+        lat1, lon1 = ring[i]
+        lat2, lon2 = ring[(i + 1) % count]
+        if (lat1 > lat) != (lat2 > lat):
+            cross = lon1 + (lat - lat1) * (lon2 - lon1) / (lat2 - lat1)
+            if lon < cross:
+                inside = not inside
+    return inside
 
 
 def load_airport(icao, airports_dir=None):

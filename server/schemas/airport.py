@@ -22,9 +22,25 @@ class EdgeSchema(BaseModel):
     to_id: str
     distance_m: float
     vehicle_allowed: bool
+    # Проход пешком; рулёжки и ВПП полигона закрыты для всех агентов.
+    walk_allowed: bool = True
+    # Вид дороги (service, pedestrian, taxi, runway) и скоростной режим.
+    kind: str | None = None
+    speed_kmh: float | None = None
     # Промежуточные точки [x, y] для отрисовки изгиба рулёжки. Пустой
     # список — участок рисуется прямой линией между вершинами.
     points: list[list[float]] = []
+
+
+class AreaSchema(BaseModel):
+    """Площадной объект карты: здание, склад, зона обслуживания ВС."""
+
+    name: str | None = None
+    kind: str | None = None
+    ref: str | None = None
+    node_id: str | None = None
+    rings: list[list[list[float]]] = []
+    label: list[float] | None = None
 
 
 class AirportGraphResponse(BaseModel):
@@ -45,6 +61,10 @@ class AirportGraphResponse(BaseModel):
     # Происхождение графа: builtin и osm — данные OpenStreetMap, manual —
     # размечен администратором. Нужно для честной подписи под картой.
     source: str = "builtin"
+    # Объекты, зоны обслуживания ВС и контур территории (геоданные полигона).
+    objects: list[AreaSchema] = []
+    zones: list[AreaSchema] = []
+    boundary: list[list[list[float]]] = []
 
 
 class AirportImportRequest(BaseModel):

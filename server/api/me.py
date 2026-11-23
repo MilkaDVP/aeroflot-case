@@ -305,6 +305,43 @@ def set_stage(
     return call_to_response(call)
 
 
+class ToolsRequest(BaseModel):
+    """Наличие инструмента: получен со склада или ещё нет."""
+
+    taken: bool = True
+
+
+@router.post("/tools", response_model=CallResponse, summary="Инструмент получен")
+def set_tools(
+    payload: ToolsRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(get_context),
+):
+    """
+    Инженер отмечает, что получил инструмент на складе (или что его нет).
+
+    Получил — маршрут перестраивается от склада прямо к борту, и прогноз
+    больше не закладывает 30 секунд на склад. Снял отметку — маршрут
+    снова идёт через склад.
+    """
+    from services.assignment import assigned_route, update_assigned_route
+    from graph_registry import get_graph
+
+    employee = load_own_employee(context, db)
+    call = working_call_of(db, employee)
+    if call is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    if not call.needs_tools:
+        raise HTTPException(status.HTTP_409_CONFLICT, "По этому вызову инструмент со склада не нужен")
+    call.tools_taken_at = utc_now() if payload.taken else None
+    if call.status != CALL_ARRIVED and employee.lat is not None:
+        plan = assigned_route(call, get_graph(call.airport_icao))
+        if plan is not None:
+            update_assigned_route(call, plan)
+    db.commit()
+    return call_to_response(call)
+
+
 @router.post("/aog", response_model=CallResponse, summary="Статус AOG")
 def set_aog(
     payload: AogRequest,

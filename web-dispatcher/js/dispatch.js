@@ -415,7 +415,10 @@ async function selectCall(call, { keepView = false } = {}) {
       airportMap.showRoute(
         suggestion.best.route.node_ids,
         suggestion.best.route.pickup_node_id,
-        call.stand_node_id
+        call.stand_node_id,
+        undefined,
+        undefined,
+        suggestion.best.route.stops
       );
       elements.assignButton.disabled = !isAssignable(call);
     } else {
@@ -449,7 +452,10 @@ function pickCandidate(candidate) {
   airportMap.showRoute(
     candidate.route && candidate.route.node_ids,
     candidate.route && candidate.route.pickup_node_id,
-    state.selectedCall && state.selectedCall.stand_node_id
+    state.selectedCall && state.selectedCall.stand_node_id,
+    undefined,
+    undefined,
+    candidate.route && candidate.route.stops
   );
   updateAssignButton();
 }
@@ -657,7 +663,8 @@ function showCallRoute(call) {
   const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
   if (call.status === "assigned" || call.status === "accepted") {
     airportMap.showRoute(
-      call.route_node_ids, call.pickup_node_id, call.stand_node_id, undefined, employee
+      call.route_node_ids, call.pickup_node_id, call.stand_node_id, undefined, employee,
+      call.tools_taken_at ? [] : call.route_stops
     );
   } else if (call.status === "queued") {
     airportMap.showRoute(

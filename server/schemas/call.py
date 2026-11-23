@@ -13,6 +13,8 @@ class CallCreateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     # Срочный вызов стоит первым в списке диспетчера.
     urgent: bool = False
+    # Нужен инструмент со склада: маршрут исполнителя пройдёт через склад.
+    needs_tools: bool = False
 
 
 class CallControl(BaseModel):
@@ -84,6 +86,11 @@ class CallResponse(BaseModel):
     # забирает (пусто — машина уже при нём или он идёт пешком).
     vehicle_call_sign: str | None = None
     pickup_node_id: str | None = None
+    # Инструмент со склада: нужен ли, получен ли, и промежуточные точки
+    # маршрута (склад, посадка, высадка) с задержками.
+    needs_tools: bool = False
+    tools_taken_at: str | None = None
+    route_stops: list[dict] = []
     # С кого сняли назначение, когда и почему. Остаётся в вызове после
     # переназначения: диспетчеру видно, что борт уже ждал другого.
     previous_employee_name: str | None = None
@@ -131,6 +138,9 @@ class RouteSchema(BaseModel):
     # Узел, где исполнитель забирает машину; пусто — машина не нужна
     # или уже при нём.
     pickup_node_id: str | None = None
+    # Промежуточные точки и остановки: склад, посадка, высадка.
+    stops: list[dict] = []
+    dwell_s: float = 0
 
 
 class CandidateSchema(BaseModel):

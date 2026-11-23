@@ -2150,3 +2150,34 @@
 .ai-item.is-urgent:not(.is-alert) { border-color: rgba(242, 86, 77, 0.55); }
 .ai-item.is-alert .ai-left { color: var(--danger-text); font-weight: 600; }
 .ai-assign:disabled { background: var(--ai-card); color: var(--text-muted); border: 1px solid var(--ai-line); cursor: help; }
+
+/* --- Полигон: объекты, зоны, виды дорог --- */
+.area { stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: visiblePainted; }
+.area-boundary { fill: none; stroke: rgba(142, 197, 255, 0.45); stroke-dasharray: 6 4; stroke-width: 1.5; pointer-events: none; }
+.area-terminal, .area-object { fill: rgba(139, 155, 173, 0.18); stroke: rgba(139, 155, 173, 0.6); }
+.area-tech_center { fill: rgba(227, 167, 44, 0.12); stroke: rgba(227, 167, 44, 0.7); }
+.area-warehouse { fill: rgba(163, 113, 247, 0.16); stroke: rgba(163, 113, 247, 0.8); }
+.area-vehicle_parking { fill: rgba(61, 139, 253, 0.14); stroke: rgba(61, 139, 253, 0.8); }
+.area-runway { fill: rgba(228, 236, 244, 0.06); stroke: rgba(228, 236, 244, 0.35); }
+.area-zone { fill: rgba(53, 196, 106, 0.08); stroke: rgba(53, 196, 106, 0.55); stroke-dasharray: 3 2; }
+.label-area { fill: var(--text-muted); font-size: 11px; text-anchor: middle; paint-order: stroke; stroke: var(--bg-deep); stroke-width: 3px; }
+.taxiway.road-service { stroke: #5c7187; }
+.taxiway.road-pedestrian { stroke: #3e6b52; stroke-dasharray: 4 3; }
+.taxiway.road-taxi { stroke: rgba(227, 167, 44, 0.35); stroke-dasharray: 2 4; }
+.taxiway.road-runway { stroke: rgba(228, 236, 244, 0.35); stroke-width: 6; }
+.place { stroke: var(--bg-deep); stroke-width: 1.5; }
+.place-warehouse { fill: var(--busy); }
+.place-vehicle_parking { fill: var(--route); }
+.place-terminal { fill: var(--neutral); }
+.map.has-basemap .taxiway.road-pedestrian { stroke: rgba(120, 220, 160, 0.7); }
+.map.has-basemap .taxiway.road-taxi { stroke: rgba(240, 190, 80, 0.45); }
+.map.has-basemap .taxiway.road-runway { stroke: rgba(255, 255, 255, 0.45); }
+.route-chain {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.flag-tools {
+  color: var(--busy);
+  border: 1px solid var(--busy);
+}

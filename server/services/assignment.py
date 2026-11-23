@@ -24,8 +24,8 @@
 from datetime import timedelta
 
 from algorithm.geo import haversine_m
-from algorithm.routing import Route, route_from_point, shortest_path
-from algorithm.transport import plan_for, plan_via, plan_walk
+from algorithm.routing import route_from_point, shortest_path
+from algorithm.transport import STOP_WAREHOUSE, plan_for, plan_via, plan_walk, warehouses
 from clock import utc_now
 from constants import (
     DEFAULT_WORK_DURATION_MIN,
@@ -118,7 +118,24 @@ def free_vehicles(db, airport_icao):
     )
 
 
-def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=None):
+def depots_for(call, graph):
+    """
+    Склады, через которые должен пройти маршрут исполнителя.
+
+    Инструмент нужен и ещё не получен: если склад уже выбран при
+    назначении — он же (инженер туда и идёт), иначе любой склад
+    аэропорта. Склада в аэропорту нет — маршрут без него.
+    """
+    if not call.needs_tools or call.tools_taken_at is not None:
+        return None
+    planned = [
+        stop["node_id"] for stop in (call.route_stops or [])
+        if stop.get("kind") == STOP_WAREHOUSE and graph.node(stop["node_id"])
+    ]
+    return planned[:1] or warehouses(graph) or None
+
+
+def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=None, depots=None):
     """
     Как сотрудник доберётся до стоянки.
 
@@ -132,7 +149,7 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
     if employee.lat is None or employee.lon is None:
         return None, None
     if travel == TRAVEL_WALK:
-        return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id), None
+        return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id, depots), None
     if travel == TRAVEL_WITH_LEAD:
         if ride_vehicle is None:
             return None, None
@@ -144,6 +161,7 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
         employee.as_algorithm_dict(),
         stand_node_id,
         [vehicle.as_algorithm_dict() for vehicle in pool],
+        depots,
     )
     if plan is None or not plan.pickup:
         return plan, None
@@ -159,11 +177,19 @@ def assigned_route(call, graph):
         return None
     person = employee.as_algorithm_dict()
     vehicle = call.vehicle
+    depots = depots_for(call, graph)
     if vehicle is None:
-        return plan_walk(graph, person, call.stand_node_id)
+        return plan_walk(graph, person, call.stand_node_id, depots)
     if vehicle.status == VEHICLE_RESERVED or vehicle.employee_id != employee.id:
+        if depots:
+            # Машина ждёт, а инструмента ещё нет: выбор пути между складом
+            # и этой машиной — как при назначении, но только с ней.
+            plan = plan_for(graph, {**person, "vehicle": None}, call.stand_node_id,
+                            [vehicle.as_algorithm_dict()], depots)
+            if plan is not None:
+                return plan
         return plan_via(graph, person, call.stand_node_id, vehicle.as_algorithm_dict())
-    return plan_for(graph, person, call.stand_node_id, [])
+    return plan_for(graph, person, call.stand_node_id, [], depots)
 
 
 def update_assigned_route(call, plan, *, reset_eta=True):
@@ -171,6 +197,7 @@ def update_assigned_route(call, plan, *, reset_eta=True):
     call.route_start_lon = call.assigned_employee.lon
     call.route_node_ids = plan.node_ids
     call.pickup_node_id = plan.pickup_node_id
+    call.route_stops = plan.stops
     if reset_eta and call.status != CALL_ARRIVED:
         call.eta_minutes = round(plan.minutes, 1)
         call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
@@ -192,12 +219,7 @@ def travel_between(graph, employee, from_stand, to_stand):
             return None
         return route_from_point(graph, employee.lat, employee.lon, to_stand, mode, speed)
 
-    route = shortest_path(graph, from_stand, to_stand, mode)
-    if route is None:
-        return None
-    # Пересборка ради скорости машины или человека: shortest_path знает
-    # только нормативную скорость способа передвижения.
-    return Route(route.node_ids, route.distance_m, mode, 0.0, speed)
+    return shortest_path(graph, from_stand, to_stand, mode, speed)
 
 
 def assign_now(db, call, employee, plan, pickup_vehicle):
@@ -224,6 +246,7 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     call.route_start_lon = call.assigned_employee.lon
     call.route_node_ids = plan.node_ids
     call.pickup_node_id = plan.pickup_node_id
+    call.route_stops = plan.stops
 
     if pickup_vehicle is not None:
         # Через связь обновится и обратная сторона (employee.vehicle),
@@ -381,6 +404,7 @@ def unassign(db, call, reason):
     call.vehicle = None
     call.pickup_node_id = None
     call.route_node_ids = None
+    call.route_stops = None
     call.eta_minutes = None
     call.eta_at = None
     call.queued_at = None

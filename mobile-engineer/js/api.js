@@ -132,6 +132,7 @@ const Api = {
   setStage: (stage) => request("POST", "/api/me/stage", { stage }),
   sendMessage: (text) => request("POST", "/api/me/message", { text }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
+  setTools: (taken) => request("POST", "/api/me/tools", { taken }),
 
   setShift: (employeeId, onShift, extend = false) =>
     request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift, extend }),

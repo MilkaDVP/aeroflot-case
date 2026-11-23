@@ -5,7 +5,8 @@
 
     c0 ──300── c1 ──300── c2 ──300── c3 ──300── c4 (стоянка)
 
-Пешком 4.5 км/ч: 300 м — 4.0 мин. На машине 20 км/ч: 300 м — 0.9 мин.
+Пешком 5 км/ч (регламент): 300 м — 3.6 мин. На машине 20 км/ч: 300 м — 0.9 мин.
+Посадка в машину и высадка — по 10 с.
 """
 
 import unittest
@@ -49,11 +50,11 @@ class TestPlan(unittest.TestCase):
         plan = plan_for(self.graph, make_engineer(1, node_index=0), STAND, [])
         self.assertEqual(plan.mode, MODE_WALK)
         self.assertEqual(len(plan.legs), 1)
-        self.assertAlmostEqual(plan.minutes, 16.0, places=1)
+        self.assertAlmostEqual(plan.minutes, 14.4, places=1)
 
     def test_свободная_машина_рядом_выигрывает_у_ходьбы(self):
-        # Пешком 1200 м — 16 мин, регламент нарушен. До машины в c1 —
-        # 300 м пешком (4.0), дальше 900 м на машине (2.7): 6.7 мин.
+        # Пешком 1200 м — 14.4 мин. До машины в c1 — 300 м пешком (3.6),
+        # посадка 10 с, 900 м на машине (2.7), высадка 10 с: 6.63 мин.
         plan = plan_for(
             self.graph, make_engineer(1, node_index=0), STAND, [parked_vehicle(7, 1)]
         )
@@ -62,7 +63,9 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(plan.vehicle["call_sign"], "ТМ-7")
         self.assertEqual(plan.pickup_node_id, "c1")
         self.assertEqual([leg.mode for leg in plan.legs], [MODE_WALK, MODE_VEHICLE])
-        self.assertAlmostEqual(plan.minutes, 6.7, places=1)
+        self.assertAlmostEqual(plan.minutes, 6.63, places=2)
+        # Посадка и высадка — остановки маршрута.
+        self.assertEqual([stop["kind"] for stop in plan.stops], ["board", "alight"])
         # Узел пересадки не повторяется в общем маршруте.
         self.assertEqual(plan.node_ids, ["c0", "c1", "c2", "c3", "c4"])
 
@@ -78,7 +81,7 @@ class TestPlan(unittest.TestCase):
     def test_выбирается_ближайшая_по_времени_машина(self):
         vehicles = [parked_vehicle(7, 3), parked_vehicle(8, 1)]
         plan = plan_for(self.graph, make_engineer(1, node_index=0), STAND, vehicles)
-        # Через c1: 4.0 + 2.7 = 6.7; через c3: 12.0 + 0.9 = 12.9.
+        # Через c1: 3.6 + 2.7 + 20 с = 6.6; через c3: 10.8 + 0.9 + 20 с = 12.0.
         self.assertEqual(plan.vehicle["call_sign"], "ТМ-8")
 
     def test_своя_машина_без_пешего_участка(self):
@@ -91,7 +94,8 @@ class TestPlan(unittest.TestCase):
         self.assertFalse(plan.pickup)
         self.assertEqual(plan.mode, MODE_VEHICLE)
         self.assertEqual(len(plan.legs), 1)
-        self.assertAlmostEqual(plan.minutes, 3.6, places=1)
+        # 1200 м на машине — 3.6 мин, плюс высадка у борта 10 с.
+        self.assertAlmostEqual(plan.minutes, 3.6 + 10 / 60, places=2)
 
 
 class TestSuggestWithVehicles(unittest.TestCase):
@@ -109,12 +113,12 @@ class TestSuggestWithVehicles(unittest.TestCase):
         self.assertTrue(best["pickup"])
         self.assertEqual(best["vehicle_call_sign"], "ТМ-7")
         self.assertEqual(len(best["route"]["legs"]), 2)
-        # Без машины регламент был бы нарушен (16 мин), с ней — нет.
+        # Пешком 14.4 мин — впритык; с машиной — 6.6 мин.
         self.assertTrue(result.within_regulation)
 
     def test_машина_меняет_порядок_кандидатов(self):
-        # Пешком ближе второй (c2, 8 мин), но первому (c0) рядом машина:
-        # 6.7 мин. Без учёта машин система выбрала бы не того.
+        # Пешком ближе второй (c2, 7.2 мин), но первому (c0) рядом машина:
+        # 6.6 мин. Без учёта машин система выбрала бы не того.
         far = make_engineer(1, node_index=0)
         near = make_engineer(2, node_index=2)
         result = suggest(
@@ -125,7 +129,7 @@ class TestSuggestWithVehicles(unittest.TestCase):
     def test_без_списка_машин_поведение_прежнее(self):
         result = suggest(self.graph, CALL_A320, [make_engineer(1, node_index=2)], SHIFT_DAY, TODAY)
         self.assertFalse(result.best.as_dict()["pickup"])
-        self.assertAlmostEqual(result.best.minutes, 8.0, places=1)
+        self.assertAlmostEqual(result.best.minutes, 7.2, places=1)
 
 
 if __name__ == "__main__":

@@ -437,6 +437,7 @@ function renderWork() {
   el("call-vehicle").textContent = state.call.instruction || vehicleInstruction(vehicle);
   el("call-eta").textContent =
     call.eta_minutes === null ? "—" : `${formatMinutes(call.eta_minutes)} мин`;
+  renderTools(call);
 
   const step = ACTIONS[call.status];
   el("call-action").textContent = step ? step.label : "Ожидание";
@@ -582,6 +583,33 @@ async function toggleAog() {
     showToast(error.detail, true);
   }
 }
+
+/**
+ * Инструмент со склада: маршрут сначала ведёт на склад (30 с на
+ * получение). Получил — отметка, и маршрут перестраивается к борту.
+ */
+function renderTools(call) {
+  el("call-tools").hidden = !call.needs_tools;
+  if (!call.needs_tools) return;
+  const warehouse = (call.route_stops || []).find((stop) => stop.kind === "warehouse");
+  const taken = Boolean(call.tools_taken_at);
+  el("call-tools").classList.toggle("is-done", taken);
+  el("call-tools-text").textContent = taken
+    ? "Инструмент получен"
+    : `Сначала на ${warehouse?.name || "склад"}: получить инструмент`;
+  el("call-tools-toggle").textContent = taken ? "Отменить" : "Инструмент получен";
+}
+
+el("call-tools-toggle").addEventListener("click", async () => {
+  const call = state.call && state.call.call;
+  if (!call) return;
+  try {
+    await Api.setTools(!call.tools_taken_at);
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+});
 
 /** Строка про машину: забрать по пути или уже едем на ней. */
 function vehicleInstruction(vehicle) {
@@ -746,7 +774,10 @@ function drawRoute() {
     state.airportPoint,
     state.call ? state.call.vehicle : null,
     state.call ? state.call.call.pickup_node_id : null,
-    choosing ? state.airportPoint : null
+    choosing ? state.airportPoint : null,
+    state.call && !state.call.call.tools_taken_at
+      ? (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id
+      : null
   );
   el("map-hint").hidden = locator.mode !== "simulation";
 }

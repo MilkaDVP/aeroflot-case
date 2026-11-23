@@ -38,7 +38,7 @@ from constants import (
     STATUSES_BUSY,
 )
 from algorithm.qualification import find_qualification, parse_mark, required_mark
-from algorithm.transport import best_plan, drive_distances_to, prepare_vehicles
+from algorithm.transport import Network, best_plan, warehouses
 from clock import utc_today
 
 REASON_WRONG_SHIFT = "не на этой смене"
@@ -156,10 +156,11 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
 
     required = required_for(call)
 
-    # Общие для всех кандидатов расчёты по машинам: посадка машин на граф
-    # и один проход Дейкстры на транспорте от стоянки (см. transport.py).
-    prepared = prepare_vehicles(graph, vehicles or [])
-    drive_map = drive_distances_to(graph, stand_id) if prepared else None
+    # Общие для всех кандидатов расчёты: посадка машин на граф, склады
+    # (если нужен инструмент) и проходы Дейкстры от стоянки и складов —
+    # один раз на подбор (см. transport.py).
+    depots = (warehouses(graph) or None) if call.get("needs_tools") else None
+    net = Network(graph, stand_id, vehicles or [], depots)
 
     candidates = []
     rejected = []
@@ -198,7 +199,7 @@ def suggest(graph, call, employees, shift, on_date=None, vehicles=None):
 
         # Шаг 4. Способ добраться и время в пути: своя машина, пешком
         # или пешком до ближайшей свободной машины и дальше на ней.
-        plan = best_plan(graph, employee, stand_id, prepared, drive_map)
+        plan = best_plan(net, employee)
         if plan is None:
             rejected.append(rejection(employee, REASON_NO_ROUTE))
             continue

@@ -106,6 +106,13 @@ async def lifespan(app: FastAPI):
 
     loaded = preload_all()
 
+    # Испытательный полигон досоздаётся и в уже наполненной базе.
+    if os.environ.get("SEED_ON_START", "1") == "1":
+        from seed import ensure_polygon
+
+        with SessionLocal() as db:
+            ensure_polygon(db)
+
     # Аэропорты, добавленные администратором, лежат в базе: их графы тоже
     # поднимаются в память, иначе после перезапуска они перестали бы
     # открываться, хотя запись о них есть.

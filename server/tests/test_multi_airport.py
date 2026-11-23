@@ -68,7 +68,8 @@ class TestMultiAirport(ApiTestCase):
     def test_технический_администратор_видит_все_аэропорты(self):
         token = self.login_to("UUDD", "admin", "admin")
         me = self.get(token, "/api/auth/me")
-        self.assertEqual({a["icao"] for a in me["airports"]}, {"UUEE", "UUDD"})
+        # Плюс испытательный полигон, если его граф собран.
+        self.assertEqual({a["icao"] for a in me["airports"]} - {"VDNH"}, {"UUEE", "UUDD"})
         self.assertEqual(me["airport_icao"], "UUDD")
 
     def test_граф_второго_аэропорта_отдаётся(self):

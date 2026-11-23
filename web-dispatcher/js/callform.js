@@ -108,6 +108,10 @@ function buildCallFormMarkup(options) {
         <input type="checkbox" id="form-urgent">
         <span>Срочный вызов <span class="dim">— встанет первым в списке</span></span>
       </label>
+      <label class="form-check">
+        <input type="checkbox" id="form-tools">
+        <span>Нужен инструмент со склада <span class="dim">— маршрут пройдёт через склад (+30 с)</span></span>
+      </label>
 
       <div id="form-error" class="error" hidden></div>
       <div class="modal-actions">
@@ -595,14 +599,16 @@ async function submitCallForm(form, options) {
     // время сообщения экипажа — от него идёт отсчёт регламента.
     const aircraftId = form.aircraftId;
     const urgent = field(form, "#form-urgent").checked;
+    const needsTools = field(form, "#form-tools").checked;
     const call = options.report
-      ? await Api.acceptReport(options.report.id, code, aircraftId, urgent)
+      ? await Api.acceptReport(options.report.id, code, aircraftId, urgent, needsTools)
       : await Api.createCall(
           aircraftId,
           code,
           // Слова экипажа из единственного поля — они же описание для инженера.
           field(form, "#form-defect-query").value.trim() || null,
-          urgent
+          urgent,
+          needsTools
         );
     closeCallForm(form);
     options.onRegistered(call);

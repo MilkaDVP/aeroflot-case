@@ -28,7 +28,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 
-from algorithm.routing import route_from_point, shortest_path, travel_time_minutes
+from algorithm.routing import route_from_point, shortest_path
 from clock import to_iso_utc, utc_now
 from constants import (
     DEADLINE_MARGIN_MIN,
@@ -40,6 +40,7 @@ from constants import (
     POSITION_STALE_S,
     REGULATION_ARRIVAL_LIMIT_MIN,
     UNASSIGNED_ALERT_AFTER_MIN,
+    VEHICLE_BOARDING_S,
     VEHICLE_IN_USE,
     VEHICLE_RESERVED,
 )
@@ -408,6 +409,14 @@ def live_minutes(call, employee):
     except HTTPException:
         return None
 
+    if call.needs_tools and call.tools_taken_at is None:
+        # Инструмент ещё не получен: впереди склад (30 с) и, возможно,
+        # пересадка. Прогноз — по тому же плану, что строится инженеру.
+        from services.assignment import assigned_route
+
+        plan = assigned_route(call, graph)
+        return plan.minutes if plan is not None else None
+
     vehicle = employee.vehicle
     if vehicle is None and call.vehicle is not None and call.pickup_node_id:
         # Пассажир в машине ответственного: считается, что он ещё идёт
@@ -417,24 +426,31 @@ def live_minutes(call, employee):
         walk = route_from_point(
             graph, employee.lat, employee.lon, call.pickup_node_id, MODE_WALK, employee.speed_kmh
         )
-        drive = shortest_path(graph, call.pickup_node_id, call.stand_node_id, MODE_VEHICLE)
+        drive = shortest_path(
+            graph, call.pickup_node_id, call.stand_node_id, MODE_VEHICLE, vehicle.speed_kmh
+        )
         if walk is None or drive is None:
             return None
-        return walk.minutes + travel_time_minutes(drive.distance_m, MODE_VEHICLE, vehicle.speed_kmh)
+        # Посадка и высадка — по 10 с (регламент).
+        return walk.minutes + drive.minutes + 2 * VEHICLE_BOARDING_S / 60
 
     if vehicle is not None and vehicle.status == VEHICLE_RESERVED and call.pickup_node_id:
         walk = route_from_point(
             graph, employee.lat, employee.lon, call.pickup_node_id, MODE_WALK, employee.speed_kmh
         )
-        drive = shortest_path(graph, call.pickup_node_id, call.stand_node_id, MODE_VEHICLE)
+        drive = shortest_path(
+            graph, call.pickup_node_id, call.stand_node_id, MODE_VEHICLE, vehicle.speed_kmh
+        )
         if walk is None or drive is None:
             return None
-        return walk.minutes + travel_time_minutes(drive.distance_m, MODE_VEHICLE, vehicle.speed_kmh)
+        # Посадка и высадка — по 10 с (регламент).
+        return walk.minutes + drive.minutes + 2 * VEHICLE_BOARDING_S / 60
 
     if vehicle is not None and vehicle.status == VEHICLE_IN_USE:
         route = route_from_point(
             graph, employee.lat, employee.lon, call.stand_node_id, MODE_VEHICLE, vehicle.speed_kmh
         )
+        return route.minutes + VEHICLE_BOARDING_S / 60 if route is not None else None
     else:
         route = route_from_point(
             graph, employee.lat, employee.lon, call.stand_node_id, MODE_WALK, employee.speed_kmh

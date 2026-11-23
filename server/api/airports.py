@@ -106,7 +106,11 @@ def get_airport_graph(
         ref_point=graph.ref_point,
         nodes=list(graph.nodes.values()),
         edges=graph.edges,
-        source=airport.source if airport else "builtin",
+        # Граф из геоданных (полигон) — со своими зонами обслуживания.
+        source="geodata" if graph.zones else (airport.source if airport else "builtin"),
+        objects=graph.objects,
+        zones=graph.zones,
+        boundary=graph.boundary,
     )
 
 

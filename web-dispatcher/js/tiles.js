@@ -56,6 +56,7 @@ const GRAPH_CREDITS = {
   builtin: "Граф: OpenStreetMap (ODbL)",
   osm: "Граф: OpenStreetMap (ODbL)",
   manual: "Граф: размечен вручную",
+  geodata: "Граф: геоданные полигона",
 };
 
 /* --- Web Mercator --- */

@@ -242,8 +242,8 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre) {
-    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre];
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -280,6 +280,11 @@ class RouteMap {
     }
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));
+    }
+    // Склад, где получить инструмент, — промежуточная точка маршрута.
+    const warehouse = warehouseNodeId && points.find((point) => point.id === warehouseNodeId);
+    if (warehouse) {
+      this.drawWarehouse(this.project(warehouse));
     }
     if (target) {
       this.drawTarget(this.project(target));
@@ -476,6 +481,17 @@ class RouteMap {
     marker.setAttribute("height", size);
     marker.setAttribute("rx", size * 0.2);
     marker.setAttribute("class", "route-vehicle");
+    this.contentLayer.append(marker);
+  }
+
+  drawWarehouse(point) {
+    const size = this.view.scaleRef * 0.055;
+    const marker = document.createElementNS(SVG_NS, "rect");
+    marker.setAttribute("x", point.x - size / 2);
+    marker.setAttribute("y", point.y - size / 2);
+    marker.setAttribute("width", size);
+    marker.setAttribute("height", size);
+    marker.setAttribute("class", "route-warehouse");
     this.contentLayer.append(marker);
   }
 

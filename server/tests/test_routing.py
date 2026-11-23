@@ -98,9 +98,13 @@ class TestShortestPath(unittest.TestCase):
         self.assertEqual(route.distance_m, 0.0)
 
     def test_дейкстра_от_вершины_ко_всем(self):
-        distances = shortest_paths_from(self.graph, "A", MODE_WALK)
-        self.assertAlmostEqual(distances["D"], 120.0)
-        self.assertAlmostEqual(distances["B"], 100.0)
+        # Проход ко всем вершинам отдаёт время в секундах, а не длину:
+        # подбор сравнивает варианты по времени.
+        seconds = shortest_paths_from(self.graph, "A", MODE_WALK)
+        per_metre = 3.6 / WALK_SPEED_KMH
+        self.assertAlmostEqual(seconds["D"], 120.0 * per_metre)
+        self.assertAlmostEqual(seconds["B"], 100.0 * per_metre)
+        distances = seconds
         # Изолированная вершина недостижима и в словарь не попадает.
         self.assertNotIn("E", distances)
 
