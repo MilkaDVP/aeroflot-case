@@ -549,16 +549,54 @@ function renderChat(call) {
   const follow = list.scrollHeight - list.clientHeight - list.scrollTop <= 3;
   const last = Number(list.dataset.lastId);
   for (const message of call.messages || []) {
-    if (message.id <= last) continue;
-    const item = document.createElement("div");
-    item.className = `chat-item is-${message.author_role}${message.is_problem ? " is-problem" : ""}`;
-    item.textContent =
-      message.author_role === "dispatcher" ? `Диспетчер: ${message.text}`
-        : message.is_problem ? `⚠ ${message.text}` : message.text;
-    list.append(item);
-    list.dataset.lastId = message.id;
+    let item = list.querySelector(`[data-id="${message.id}"]`);
+    if (!item) {
+      if (message.id <= last) continue;
+      item = document.createElement("div");
+      item.className = `chat-item is-${message.author_role}${message.is_problem ? " is-problem" : ""}`;
+      item.dataset.id = message.id;
+      item.textContent =
+        message.author_role === "dispatcher" ? `Диспетчер: ${message.text}`
+          : message.is_problem ? `⚠ ${message.text}` : message.text;
+      list.append(item);
+      list.dataset.lastId = message.id;
+    }
+    if (message.is_problem) renderProblemState(item, message);
   }
   if (follow) list.scrollTop = list.scrollHeight;
+}
+
+/** Под проблемой — её состояние и кнопка: отметить может и инженер, и диспетчер. */
+function renderProblemState(item, message) {
+  const key = message.resolved_at || "open";
+  if (item.dataset.state === key) return;
+  item.dataset.state = key;
+  const resolved = Boolean(message.resolved_at);
+  item.classList.toggle("is-resolved", resolved);
+  item.querySelector(".problem-state")?.remove();
+  const row = document.createElement("div");
+  row.className = "problem-state";
+  const text = document.createElement("span");
+  text.textContent = resolved ? `✓ Исправлено · ${message.resolved_by}` : "Не исправлено";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = resolved ? "Не исправлено" : "Исправлено";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    el("chat-error").hidden = true;
+    try {
+      const call = await Api.setProblem(message.id, !resolved);
+      if (state.call?.call.id !== call.id) return;
+      state.call.call = call;
+      renderChat(call);
+    } catch (error) {
+      showSheetError("chat-error", error);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  row.append(text, button);
+  item.append(row);
 }
 
 /**

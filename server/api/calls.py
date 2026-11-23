@@ -52,6 +52,8 @@ from schemas.call import (
     SuggestResponse,
     UnassignRequest,
     MessageRequest,
+    ProblemRequest,
+    ReadRequest,
     UrgencyRequest,
     WaypointsRequest,
 )
@@ -213,6 +215,7 @@ def to_response(call, db=None, now=None):
         parent_call_id=call.parent_call_id,
         support=support.support_summary(call) if call.parent_call_id is None else [],
         messages=support.messages_of(call),
+        read_message_id=support.root_of(call).read_message_id or 0,
         **claims.summary(call, now),
     )
 
@@ -727,6 +730,34 @@ def send_message(
     """Сообщение диспетчера инженерам вызова: его увидят в телефоне."""
     call = load_call(db, context, call_id)
     support.add_message(db, call, AUTHOR_DISPATCHER, context.user.full_name, payload.text)
+    db.commit()
+    return to_response(support.root_of(call), db)
+
+
+@router.post("/{call_id}/problem", response_model=CallResponse, summary="Проблема исправлена или нет")
+def set_problem(
+    call_id: int,
+    payload: ProblemRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    call = load_call(db, context, call_id)
+    if not support.set_problem(db, call, payload.message_id, payload.resolved, context.user.full_name):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Проблема не найдена")
+    db.commit()
+    return to_response(support.root_of(call), db)
+
+
+@router.post("/{call_id}/read", response_model=CallResponse, summary="Сообщения прочитаны")
+def mark_read(
+    call_id: int,
+    payload: ReadRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    call = load_call(db, context, call_id)
+    if not support.mark_read(db, call, payload.message_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     db.commit()
     return to_response(support.root_of(call), db)
 

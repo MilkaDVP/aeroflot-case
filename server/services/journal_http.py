@@ -33,7 +33,7 @@ INTAKE_PATTERNS = (
 # Успех этих запросов не пишется: поток данных или явная запись в коде.
 QUIET_PATTERNS = (
     re.compile(r"/location$"),
-    re.compile(r"/(claim|release)$"),
+    re.compile(r"/(claim|release|read)$"),
     re.compile(r"^/api/intake/"),
     re.compile(r"^/api/auth/login$"),
     re.compile(r"/suggest$"),

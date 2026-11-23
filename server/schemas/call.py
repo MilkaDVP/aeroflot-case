@@ -116,6 +116,7 @@ class CallResponse(BaseModel):
     support: list[dict] = []
     # Переписка инженеров с диспетчером по вызову, старые первыми.
     messages: list[dict] = []
+    read_message_id: int = 0
     # Кто из диспетчеров разбирает вызов, пока он ждёт назначения.
     claimed_by_login: str | None = None
     claimed_by_name: str | None = None
@@ -243,6 +244,19 @@ class EngineerMessageRequest(MessageRequest):
     """Сообщение инженера: обычное или о проблеме."""
 
     is_problem: bool = False
+
+
+class ProblemRequest(BaseModel):
+    """Отметка по проблеме: исправлена или ещё нет."""
+
+    message_id: int
+    resolved: bool
+
+
+class ReadRequest(BaseModel):
+    """До какого сообщения диспетчер прочитал переписку."""
+
+    message_id: int
 
 
 class ClaimRequest(BaseModel):

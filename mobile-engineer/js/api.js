@@ -134,6 +134,8 @@ const Api = {
   setStage: (stage) => request("POST", "/api/me/stage", { stage }),
   sendMessage: (text, isProblem = false) =>
     request("POST", "/api/me/message", { text, is_problem: isProblem }),
+  setProblem: (message_id, resolved) =>
+    request("POST", "/api/me/problem", { message_id, resolved }),
   setAog: (aog) => request("POST", "/api/me/aog", { aog }),
   setTools: (taken) => request("POST", "/api/me/tools", { taken }),
   waypointDone: (node_id = null) => request("POST", "/api/me/waypoint", { node_id }),

@@ -33,7 +33,7 @@ from models.call_message import AUTHOR_ENGINEER
 from models.employee import Employee
 from models.engineer_action import EngineerAction
 from schemas.auth import MessageResponse
-from schemas.call import CallResponse, EngineerMessageRequest
+from schemas.call import CallResponse, EngineerMessageRequest, ProblemRequest
 from services import mentor, support
 from services.assignment import (
     advance_after_close,
@@ -483,5 +483,22 @@ def send_message(
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
     support.add_message(db, call, AUTHOR_ENGINEER, employee.full_name, payload.text,
                         is_problem=payload.is_problem)
+    db.commit()
+    return call_to_response(call)
+
+
+@router.post("/problem", response_model=CallResponse, summary="Проблема исправлена или нет")
+def set_problem(
+    payload: ProblemRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(get_context),
+):
+    """Инженер отмечает проблему по текущему вызову исправленной или нет."""
+    employee = load_own_employee(context, db)
+    call = working_call_of(db, employee)
+    if call is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
+    if not support.set_problem(db, call, payload.message_id, payload.resolved, employee.full_name):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Проблема не найдена")
     db.commit()
     return call_to_response(call)

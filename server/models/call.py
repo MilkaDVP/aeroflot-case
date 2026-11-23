@@ -99,6 +99,8 @@ class Call(Base):
     mel_category: Mapped[str | None] = mapped_column(String(1))
     missing_tools: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     aog: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Последнее сообщение инженера, прочитанное диспетчером.
+    read_message_id: Mapped[int | None] = mapped_column(nullable=True)
     # Этап работ у борта (constants.WORK_STAGES); пусто до прибытия.
     work_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     # Первое прибытие исполнителя. Отделено от eta_at: инженера, ждущего

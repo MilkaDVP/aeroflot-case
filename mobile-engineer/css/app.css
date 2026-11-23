@@ -930,6 +930,10 @@ details[open] .detail-label::after { content: " ⌄"; }
 .report .chat-list:empty::before { content: "Сообщений пока нет"; margin: auto; color: var(--text-muted); font-size: 14px; }
 .problem-open { border-color: var(--warn); color: var(--warn); }
 .chat-item.is-problem { border: 1px solid var(--danger); background: rgba(242, 86, 77, 0.16); }
+.chat-item.is-problem.is-resolved { border-color: var(--ok); background: rgba(53, 196, 106, 0.12); }
+.problem-state { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+.problem-state span { flex: 1; }
+.problem-state button { min-height: 44px; padding: 4px 12px; font-size: 13px; }
 #problem-input {
   width: 100%; min-height: 110px; padding: 12px; margin-bottom: 10px; resize: vertical; font: inherit;
   color: var(--text); background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: var(--radius);

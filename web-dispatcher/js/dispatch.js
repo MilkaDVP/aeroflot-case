@@ -225,6 +225,11 @@ async function refresh() {
       renderAssignedCard(state.selectedCall);
       updateAssignButton();
     }
+    // Вызов ждёт назначения: сам подбор опрос не трогает, но переписка
+    // и проблемы прежнего исполнителя обновляются.
+    if (selected && isAssignable(selected) && state.suggestion && state.selectedCall?.id === selected.id) {
+      renderPendingChat(elements.suggestBody, selected, chatActions);
+    }
     elements.connStatus.textContent = `обновлено ${new Date().toLocaleTimeString("ru-RU")}`;
   } catch (error) {
     elements.connStatus.textContent = error.detail || "нет связи с сервером";
@@ -420,6 +425,7 @@ async function selectCall(call, { keepView = false } = {}) {
     state.suggestion = suggestion;
     state.picked = suggestion.best ? [suggestion.best.employee_id] : [];
     renderSuggestion(elements.suggestBody, suggestion);
+    renderPendingChat(elements.suggestBody, state.selectedCall, chatActions);
     refreshExecutorMenu();
     updateAssignButton();
     airportMap.drawEmployees(state.employees, employeeClass);
@@ -1039,11 +1045,35 @@ async function sendCallMessage(call, text) {
     state.selectedCall = updated;
     const input = document.getElementById("message-input");
     if (input && input.value.trim() === text) input.value = "";
-    renderAssignedCard(updated, true);
+    if (isAssignable(updated)) renderPendingChat(elements.suggestBody, updated, chatActions);
+    else renderAssignedCard(updated, true);
   } catch (error) {
     showToast(error.detail, true);
   }
 }
+
+/** Проблема исправлена или снова открыта. */
+async function setCallProblem(call, messageId, resolved) {
+  try {
+    await Api.setProblem(call.id, messageId, resolved);
+    await refresh();
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+}
+
+/** Переписка открыта на экране: плашка сообщений уходит из списка сразу. */
+async function readCallMessages(call, messageId) {
+  renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
+  try {
+    await Api.markRead(call.id, messageId);
+  } catch (error) {
+    // Не отметилось — следующий опрос попробует ещё раз.
+    if (readIds.get(call.id) === messageId) readIds.delete(call.id);
+  }
+}
+
+const chatActions = { onSend: sendCallMessage, onProblem: setCallProblem, onRead: readCallMessages };
 
 /* --- Регистрация вызова --- */
 
@@ -1187,7 +1217,7 @@ async function rejectReport(report) {
 }
 
 function renderAssignedCard(call, scrollToEnd = false) {
-  renderAssignedPanel(elements.suggestBody, call, sendCallMessage, scrollToEnd);
+  renderAssignedPanel(elements.suggestBody, call, chatActions, scrollToEnd);
   refreshExecutorMenu();
 }
 

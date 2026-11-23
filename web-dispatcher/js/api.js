@@ -236,6 +236,9 @@ const Api = {
       override_reason,
       travel: travel || "auto",
     }),
+  setProblem: (callId, message_id, resolved) =>
+    request("POST", `/api/calls/${callId}/problem`, { message_id, resolved }),
+  markRead: (callId, message_id) => request("POST", `/api/calls/${callId}/read`, { message_id }),
   sendMessage: (callId, text) => request("POST", `/api/calls/${callId}/message`, { text }),
   setUrgency: (callId, urgent) =>
     request("POST", `/api/calls/${callId}/urgency`, { urgent }),

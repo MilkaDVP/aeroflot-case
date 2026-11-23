@@ -743,23 +743,66 @@ function whoLine(call) {
  *
  * Поле ввода и список сообщений живут до смены вызова.
  */
-function renderAssignedPanel(container, call, onSend, scrollToEnd) {
-  const summary = widget("Исполнитель", [buildProblem(call), buildAssignmentBlock(call), buildTeam(call)]);
-  const list = container.querySelector(".messages");
-  if (list?.dataset.callId === String(call.id)) {
-    container.firstElementChild.replaceWith(summary);
-    updateMessages(list, call.messages, scrollToEnd);
-    setDrawerBadge(container.querySelector('[data-drawer="chat"]'), engineerMessageCount(call));
+function renderAssignedPanel(container, call, actions, scrollToEnd) {
+  const summary = widget("Исполнитель",
+    [buildProblem(call, actions), buildAssignmentBlock(call), buildTeam(call)], "assigned-summary");
+  const current = container.firstElementChild;
+  if (current?.classList.contains("assigned-summary") && updateChat(container, call, actions, scrollToEnd)) {
+    current.replaceWith(summary);
     return;
   }
-  const chat = buildMessages(call, onSend);
-  const chatDrawer = drawer("chat", "Связь с инженером", [chat], engineerMessageCount(call));
+  container.replaceChildren(summary);
+  appendChat(container, call, actions);
+}
+
+/**
+ * Переписка и проблемы вызова, который снова ждёт назначения: инженера
+ * сняли, а его сообщения остались.
+ */
+function renderPendingChat(container, call, actions) {
+  if (!call.messages?.length && !call.aog) return;
+  const problem = buildProblem(call, actions);
+  container.querySelector(":scope > .problem-block")?.remove();
+  if (problem) container.firstElementChild.after(problem);
+  if (!updateChat(container, call, actions)) appendChat(container, call, actions);
+}
+
+function appendChat(container, call, actions) {
+  const chat = buildMessages(call, actions);
+  const box = drawer("chat", "Связь с инженером", [chat], unreadMessages(call).length);
+  box.call = call;
   // Развернули — переписка прокручивается к последнему сообщению.
-  chatDrawer.addEventListener("drawer-toggle", (event) => {
-    if (event.detail) updateMessages(chat.querySelector(".messages"), call.messages, true);
+  box.addEventListener("drawer-toggle", (event) => {
+    if (event.detail) updateChat(container, box.call, actions, true);
   });
-  container.replaceChildren(summary, chatDrawer);
-  updateMessages(chat.querySelector(".messages"), call.messages, true);
+  container.append(box);
+  updateChat(container, call, actions, true);
+}
+
+/** Обновляет открытую переписку; false — она ещё не построена для этого вызова. */
+function updateChat(container, call, actions, scrollToEnd) {
+  const list = container.querySelector(".messages");
+  if (list?.dataset.callId !== String(call.id)) return false;
+  const box = container.querySelector('[data-drawer="chat"]');
+  box.call = call;
+  updateMessages(list, call, actions, scrollToEnd);
+  const unread = unreadMessages(call);
+  if (unread.length && drawerOpen.chat && !document.hidden) {
+    const lastId = unread.at(-1).id;
+    readIds.set(call.id, lastId);
+    actions.onRead(call, lastId);
+  }
+  setDrawerBadge(box, unreadMessages(call).length);
+  return true;
+}
+
+// Прочитанное на этом экране — до подтверждения сервером: иначе плашка
+// мигнула бы, если опрос ушёл раньше отметки.
+const readIds = new Map();
+
+function unreadMessages(call) {
+  const read = Math.max(call.read_message_id || 0, readIds.get(call.id) || 0);
+  return (call.messages || []).filter((item) => item.author_role === "engineer" && item.id > read);
 }
 
 function linkButton(text, onClick, extraClass) {
@@ -769,10 +812,6 @@ function linkButton(text, onClick, extraClass) {
   button.textContent = text;
   button.addEventListener("click", onClick);
   return button;
-}
-
-function engineerMessageCount(call) {
-  return (call.messages || []).filter((item) => item.author_role === "engineer").length;
 }
 
 /** Вторые инженеры вызова: кто, на каком шаге, когда будет. */
@@ -812,7 +851,7 @@ function supportStatus(member) {
  * Инженер пишет свободным текстом — «нужен подъёмник», «запчасть будет
  * к 15:00», — потому что реальных ситуаций больше, чем готовых статусов.
  */
-function buildMessages(call, onSend) {
+function buildMessages(call, actions) {
   const box = document.createElement("div");
   const list = document.createElement("div");
   list.className = "messages";
@@ -830,24 +869,30 @@ function buildMessages(call, onSend) {
     event.preventDefault();
     const text = input.value.trim();
     if (text) {
-      onSend(call, text);
+      actions.onSend(call, text);
     }
   });
   box.append(form);
   return box;
 }
 
-function updateMessages(list, messages, scrollToEnd) {
+function updateMessages(list, call, actions, scrollToEnd) {
+  const messages = call.messages || [];
   const follow = scrollToEnd || list.scrollHeight - list.clientHeight - list.scrollTop <= 3;
   const last = Number(list.dataset.lastId || 0);
   if (!messages.length && !list.firstChild) {
     list.innerHTML = '<div class="messages-empty">Сообщений нет</div>';
   }
   for (const message of messages) {
-    if (message.id <= last) continue;
-    list.querySelector(".messages-empty")?.remove();
-    list.append(buildMessage(message));
-    list.dataset.lastId = message.id;
+    let item = list.querySelector(`[data-id="${message.id}"]`);
+    if (!item) {
+      if (message.id <= last) continue;
+      list.querySelector(".messages-empty")?.remove();
+      item = buildMessage(message);
+      list.append(item);
+      list.dataset.lastId = message.id;
+    }
+    if (message.is_problem) updateProblemState(item, call, message, actions);
   }
   if (follow) list.scrollTop = list.scrollHeight;
 }
@@ -855,12 +900,42 @@ function updateMessages(list, messages, scrollToEnd) {
 function buildMessage(message) {
   const item = document.createElement("div");
   item.className = `message is-${message.author_role}${message.is_problem ? " is-problem" : ""}`;
+  item.dataset.id = message.id;
   item.innerHTML = `
     <span class="message-meta">${escapeHtml(message.author_name)} ·
       <span class="num">${formatClock(message.created_at)}</span></span>
     <span class="message-text">${escapeHtml(message.text)}</span>
   `;
   return item;
+}
+
+/** Под сообщением о проблеме — её состояние и кнопка, меняющая его. */
+function updateProblemState(item, call, message, actions) {
+  const key = message.resolved_at || "open";
+  if (item.dataset.state === key) return;
+  item.dataset.state = key;
+  item.classList.toggle("is-resolved", Boolean(message.resolved_at));
+  item.querySelector(".problem-state")?.remove();
+  const row = document.createElement("div");
+  row.className = "problem-state";
+  const text = document.createElement("span");
+  text.textContent = message.resolved_at ? `✓ Исправлено · ${message.resolved_by}` : "⚠ Не исправлено";
+  row.append(text, problemButton(call, message, actions));
+  item.append(row);
+}
+
+function problemButton(call, message, actions) {
+  const resolved = Boolean(message.resolved_at);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "problem-button";
+  button.textContent = resolved ? "Не исправлено" : "Исправлено";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    await actions.onProblem(call, message.id, !resolved);
+    button.disabled = false;
+  });
+  return button;
 }
 
 /** Вторые инженеры на карточке вызова в списке — по строке на каждого. */
@@ -876,20 +951,16 @@ function supportLines(call) {
 }
 
 /**
- * Проблема, о которой сообщил инженер: AOG или сообщение о проблеме без
- * ответа. Обычные сообщения чата вызов не подсвечивают. Ответ
- * диспетчера снимает подсветку по сообщению; AOG снимает сам инженер.
+ * Проблемы вызова: AOG и сообщения инженера о проблеме, пока их не
+ * отметили исправленными — диспетчер или инженер. Ответ в чате
+ * подсветку не снимает; AOG снимает сам инженер.
  */
+function openProblems(call) {
+  return (call.messages || []).filter((item) => item.is_problem && !item.resolved_at);
+}
+
 function callProblem(call) {
-  const reasons = [];
-  if (call.aog) reasons.push("AOG");
-  const messages = call.messages || [];
-  const lastProblem = messages.filter((item) => item.is_problem).at(-1);
-  const lastDispatcher = messages.filter((item) => item.author_role !== "engineer").at(-1);
-  if (lastProblem && (!lastDispatcher || lastDispatcher.id < lastProblem.id)) {
-    reasons.push(`«${lastProblem.text}»`);
-  }
-  return reasons;
+  return [...(call.aog ? ["AOG"] : []), ...openProblems(call).map((item) => `«${item.text}»`)];
 }
 
 function problemFlag(call) {
@@ -898,25 +969,29 @@ function problemFlag(call) {
   return `<span class="flag flag-problem" title="${escapeHtml(reasons.join(" · "))}">⚠ Проблема</span>`;
 }
 
-/** Красный блок над исполнителем: что случилось и что ответить. */
-function buildProblem(call) {
-  const reasons = callProblem(call);
-  if (!reasons.length) return null;
+/** Красный блок в правой колонке: что случилось и кнопка «Исправлено». */
+function buildProblem(call, actions) {
+  if (!callProblem(call).length) return null;
   const box = document.createElement("div");
   box.className = "problem-block";
-  box.innerHTML = `<b>⚠ Проблема</b>${reasons.map((text) => `<div>${escapeHtml(text)}</div>`).join("")}`;
+  box.innerHTML = `<b>⚠ Проблема</b>${call.aog ? "<div>AOG</div>" : ""}`;
+  for (const message of openProblems(call)) {
+    const row = document.createElement("div");
+    row.className = "problem-state";
+    const text = document.createElement("span");
+    text.textContent = message.text;
+    row.append(text, problemButton(call, message, actions));
+    box.append(row);
+  }
   return box;
 }
 
-/**
- * Значок сообщений инженеров: сколько их, последнее — во всплывающей
- * подсказке. Сам текст читают в «Связи с инженером».
- */
+/** Значок непрочитанных сообщений инженеров; последнее — в подсказке. */
 function messageFlag(call) {
-  const fromEngineers = (call.messages || []).filter((item) => item.author_role === "engineer");
-  if (!fromEngineers.length) return "";
-  const last = fromEngineers[fromEngineers.length - 1];
-  return `<span class="flag flag-msg" title="${escapeHtml(`${last.author_name}: ${last.text}`)}">✉ ${fromEngineers.length}</span>`;
+  const unread = unreadMessages(call);
+  if (!unread.length) return "";
+  const last = unread.at(-1);
+  return `<span class="flag flag-msg" title="${escapeHtml(`${last.author_name}: ${last.text}`)}">✉ ${unread.length}</span>`;
 }
 
 /**

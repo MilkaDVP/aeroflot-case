@@ -2383,8 +2383,8 @@ svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
 .call .call-top { flex-wrap: wrap; }
 .call .call-board, .call .call-deadline { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 
-/* Проблема у борта: вызов горит красным, пока диспетчер не ответит
-   или инженер не снимет AOG. */
+/* Проблема: вызов горит красным, пока её не отметят исправленной
+   (или инженер не снимет AOG). */
 .call.has-problem {
   border-color: var(--danger);
   border-left-color: var(--danger);
@@ -2396,6 +2396,11 @@ svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
   50% { box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.45); }
 }
 .message.is-problem { border: 1px solid var(--danger); background: rgba(229, 72, 77, 0.14); }
+.message.is-problem.is-resolved { border-color: var(--ok); background: rgba(53, 196, 106, 0.1); }
+.problem-state { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; }
+.problem-state span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.problem-block .problem-state { font-size: inherit; }
+.problem-button { flex: none; padding: 4px 10px; font-size: 12px; }
 .flag-problem { color: #fff; background: var(--danger); font-weight: 600; }
 .problem-block {
   border: 1px solid var(--danger); background: rgba(229, 72, 77, 0.14);

@@ -190,6 +190,49 @@ class TestMessages(SupportCase):
             self.me(engineer, "message", {"text": f"Сообщение {number}"})
         self.assertTrue(any(item["is_problem"] for item in self.call(call["id"])["messages"]))
 
+    def send_problem(self):
+        call, engineer = self.sokolov_at_aircraft()
+        self.me(engineer, "message", {"text": "Течь стойки", "is_problem": True})
+        return call, engineer, self.call(call["id"])["messages"][-1]["id"]
+
+    def dispatch_post(self, call, action, body):
+        return self.client.post(f"/api/calls/{call['id']}/{action}", json=body,
+                                headers=auth_header(self.dispatcher))
+
+    def test_ответ_диспетчера_не_закрывает_проблему(self):
+        call, _, _ = self.send_problem()
+        self.dispatch_post(call, "message", {"text": "Принял"})
+        self.assertIsNone(self.call(call["id"])["messages"][0]["resolved_at"])
+
+    def test_проблему_отмечают_обе_стороны(self):
+        call, engineer, problem = self.send_problem()
+        done = self.dispatch_post(call, "problem", {"message_id": problem, "resolved": True})
+        self.assertEqual(done.status_code, 200, done.text)
+        self.assertTrue(done.json()["messages"][0]["resolved_at"])
+        again = self.me(engineer, "problem", {"message_id": problem, "resolved": False})
+        self.assertIsNone(again.json()["messages"][0]["resolved_at"])
+        self.me(engineer, "problem", {"message_id": problem, "resolved": True})
+        self.assertEqual(self.call(call["id"])["messages"][0]["resolved_by"], "Соколов А. В.")
+
+    def test_чужое_или_обычное_сообщение_проблемой_не_отметить(self):
+        call, engineer, problem = self.send_problem()
+        self.me(engineer, "message", {"text": "Обычное"})
+        plain = self.call(call["id"])["messages"][-1]["id"]
+        other = self.register(board="VP-BES")
+        self.assertEqual(self.dispatch_post(
+            call, "problem", {"message_id": plain, "resolved": True}).status_code, 404)
+        self.assertEqual(self.dispatch_post(
+            other, "problem", {"message_id": problem, "resolved": True}).status_code, 404)
+
+    def test_прочитанное_запоминается_и_не_откатывается(self):
+        call, engineer, first = self.send_problem()
+        self.me(engineer, "message", {"text": "Ещё"})
+        second = self.call(call["id"])["messages"][-1]["id"]
+        self.assertEqual(self.call(call["id"])["read_message_id"], 0)
+        self.assertEqual(self.dispatch_post(call, "read", {"message_id": second}).status_code, 200)
+        self.dispatch_post(call, "read", {"message_id": first})
+        self.assertEqual(self.call(call["id"])["read_message_id"], second)
+
     def test_диспетчер_отвечает_и_инженер_видит(self):
         call, engineer = self.sokolov_at_aircraft()
         self.me(engineer, "message", {"text": "Нужен подъёмник"})

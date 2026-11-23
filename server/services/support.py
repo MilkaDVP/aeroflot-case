@@ -103,6 +103,28 @@ def add_message(db, call, author_role, author_name, text, *, is_problem=False):
     return message
 
 
+def set_problem(db, call, message_id, resolved, actor_name):
+    """Отмечает проблему вызова исправленной или снова открытой. Нет такой — False."""
+    message = db.get(CallMessage, message_id)
+    if message is None or not message.is_problem or message.call_id != root_of(call).id:
+        return False
+    # Повторное нажатие не меняет, кто и когда исправил.
+    if resolved != (message.resolved_at is not None):
+        message.resolved_at = utc_now() if resolved else None
+        message.resolved_by = actor_name if resolved else None
+    return True
+
+
+def mark_read(db, call, message_id):
+    """Диспетчер прочитал переписку до этого сообщения; назад отметка не идёт."""
+    root = root_of(call)
+    message = db.get(CallMessage, message_id)
+    if message is None or message.call_id != root.id:
+        return False
+    root.read_message_id = max(root.read_message_id or 0, message_id)
+    return True
+
+
 def messages_of(call):
     """Последние сообщения по вызову, старые первыми."""
     session = object_session(call)
@@ -115,15 +137,16 @@ def messages_of(call):
         .limit(MESSAGES_SHOWN)
         .all()
     )
-    # Проблема без ответа не должна пропасть за длинной перепиской.
-    if len(rows) == MESSAGES_SHOWN and all(row.author_role == "engineer" for row in rows):
-        older = session.query(CallMessage).filter(
-            CallMessage.call_id == root_of(call).id, CallMessage.id < rows[-1].id
-        ).order_by(CallMessage.id.desc())
-        problem = older.filter(CallMessage.is_problem).first()
-        reply = older.filter(CallMessage.author_role != "engineer").first()
-        if problem and (reply is None or reply.id < problem.id):
-            rows.append(problem)
+    # Проблемы показываются всегда: их отмечают исправленными с обеих
+    # сторон, и длинная переписка не должна их вытеснить.
+    if len(rows) == MESSAGES_SHOWN:
+        rows += (
+            session.query(CallMessage)
+            .filter(CallMessage.call_id == root_of(call).id,
+                    CallMessage.id < rows[-1].id, CallMessage.is_problem)
+            .order_by(CallMessage.id.desc())
+            .all()
+        )
     return [
         {
             "id": row.id,
@@ -131,6 +154,8 @@ def messages_of(call):
             "author_name": row.author_name,
             "text": row.text,
             "is_problem": row.is_problem,
+            "resolved_at": to_iso_utc(row.resolved_at),
+            "resolved_by": row.resolved_by,
             "created_at": to_iso_utc(row.created_at),
         }
         for row in reversed(rows)
