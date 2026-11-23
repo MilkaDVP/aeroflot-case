@@ -45,9 +45,9 @@ class JournalCase(DeadlineCase):
             login = db.query(User).filter(User.employee_id == employee_id).one().login
         return self.login(login, "engineer")
 
-    def act(self, token, action, call_id):
+    def act(self, token, action, call_id, **fields):
         response = self.client.post(
-            "/api/me/status", json={"action": action, "call_id": call_id}, headers=auth_header(token)
+            "/api/me/status", json={"action": action, "call_id": call_id, **fields}, headers=auth_header(token)
         )
         self.assertEqual(response.status_code, 200, response.text)
 
@@ -58,6 +58,7 @@ class JournalCase(DeadlineCase):
         engineer = self.engineer_token(best["employee_id"])
         self.act(engineer, "accepted", call["id"])
         self.act(engineer, "arrived", call["id"])
+        self.act(engineer, "assessment", call["id"], mel_category="B")
         self.act(engineer, "closed", call["id"])
         return call, best
 

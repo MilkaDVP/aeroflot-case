@@ -2376,3 +2376,9 @@ svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
 .nt-seg.is-on { border-color: var(--route); background: var(--route-soft); color: var(--text); }
 .nt-hint { font-size: 11.5px; color: var(--text-dim); min-height: 0; }
 .nt-hint:empty { display: none; }
+
+.call-badges { display: grid; justify-items: start; gap: 2px; }
+.call-badges:empty { display: none; }
+.call-badges .flag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.call .call-top { flex-wrap: wrap; }
+.call .call-board, .call .call-deadline { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }

@@ -55,11 +55,14 @@ class RouteMap {
     this.onTap = onTap;
     this.reference = null;
     this.view = null;
-    this.showImagery = true;
+    this.showImagery = false;
 
     this.tileLayer = group("layer-tiles");
     this.contentLayer = group("layer-content");
-    this.svg.append(this.tileLayer, this.contentLayer);
+    this.grid = this.svg.querySelector("#map-grid");
+    this.graphLayer = group("airport-network");
+    this.svg.insertBefore(this.tileLayer, this.grid);
+    this.svg.append(this.graphLayer, this.contentLayer);
 
     // Свой вид инженера переживает обновления данных: карта больше не
     // возвращается к автоматическому охвату на каждом опросе.
@@ -216,6 +219,13 @@ class RouteMap {
       scaleRef: Math.min(width, height),
     };
     this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
+    const spacing = 50 * 2 ** Math.round(Math.log2(this.view.scaleRef / 600));
+    const pattern = this.svg.querySelector("#map-grid-pattern");
+    pattern.setAttribute("width", spacing);
+    pattern.setAttribute("height", spacing);
+    pattern.firstElementChild.setAttribute("d", `M 0 ${spacing} V 0 H ${spacing}`);
+    for (const [attr, value] of Object.entries({x:this.view.minX, y:this.view.minY, width, height}))
+      this.grid.setAttribute(attr, value);
     if (this.onViewChange) this.onViewChange(this.isUserView());
   }
 
@@ -227,6 +237,28 @@ class RouteMap {
   scheduleRerender() {
     clearTimeout(this.rerenderTimer);
     this.rerenderTimer = setTimeout(() => this.rerender(), 120);
+  }
+
+  setGraph(graph) {
+    this.graphOrigin = graph?.ref_point || graph?.nodes[0];
+    this.graphLayer.replaceChildren();
+    if (this.graphOrigin) {
+      this.reference = this.graphOrigin;
+      const nodes = new Map(graph.nodes.map(n => [n.id, this.project(n)]));
+      const segments = [];
+      for (const edge of graph.edges) {
+        const a = nodes.get(edge.from_id), b = nodes.get(edge.to_id);
+        if (a && b) segments.push(`M${a.x} ${a.y}L${b.x} ${b.y}`);
+      }
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", segments.join(" "));
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#80a4b5");
+      path.setAttribute("stroke-width", "1.4");
+      path.setAttribute("vector-effect", "non-scaling-stroke");
+      this.graphLayer.append(path);
+    }
+    this.rerender();
   }
 
   setImagery(enabled) {
@@ -242,8 +274,8 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId) {
-    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId];
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining = routePoints) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -257,6 +289,7 @@ class RouteMap {
     if (pickupVehicle) {
       all.push(pickupVehicle);
     }
+    fallback ||= this.graphOrigin;
     const usingFallback = all.length === 0 && Boolean(fallback);
     if (usingFallback) {
       all.push(fallback);
@@ -270,13 +303,13 @@ class RouteMap {
       return;
     }
 
-    this.reference = centre || all[0];
+    this.reference = this.graphOrigin || centre || all[0];
     const extent = centre ? [centre] : all;
     this.fit(extent.map((point) => this.project(point)), !centre && points.length > 0, centre || usingFallback);
     this.drawTiles();
 
     if (points.length >= 2) {
-      this.drawLegs(points, pickupNodeId);
+      this.drawLegs(remaining || [], pickupNodeId);
     }
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));
@@ -495,6 +528,14 @@ class RouteMap {
     this.contentLayer.append(marker);
   }
 
+  setHeading(value) {
+    this.heading = Number.isFinite(value) ? value : null;
+    if (this.arrow) {
+      this.arrow.style.display = this.heading === null ? "none" : "";
+      this.arrow.setAttribute("transform", `rotate(${this.heading || 0})`);
+    }
+  }
+
   drawSelf(point) {
     const halo = document.createElementNS(SVG_NS, "circle");
     halo.setAttribute("cx", point.x);
@@ -508,7 +549,14 @@ class RouteMap {
     marker.setAttribute("r", this.view.scaleRef * 0.028);
     marker.setAttribute("class", "route-self");
 
-    this.contentLayer.append(halo, marker);
+    const direction = group("route-direction");
+    direction.setAttribute("transform", `translate(${point.x} ${point.y}) scale(${this.view.scaleRef * 0.003})`);
+    this.arrow = document.createElementNS(SVG_NS, "path");
+    this.arrow.setAttribute("d", "M0 -16 L5 -7 L0 -9 L-5 -7 Z");
+    this.arrow.setAttribute("fill", "#00d8ff");
+    direction.append(this.arrow);
+    this.setHeading(this.heading);
+    this.contentLayer.append(halo, marker, direction);
   }
 
   /** Касание по карте — координаты для режима имитации. */

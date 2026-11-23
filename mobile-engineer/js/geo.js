@@ -50,7 +50,7 @@ class Locator {
     this.stopGps();
     this.watchId = navigator.geolocation.watchPosition(
       (position) => this.mode === "gps" && this.publish(position.coords.latitude, position.coords.longitude,
-                                 position.coords.accuracy, position.timestamp),
+                                 position.coords.accuracy, position.timestamp, position.coords.heading),
       (error) => this.mode === "gps" && this.onError(describeGeoError(error)),
       GEO_OPTIONS
     );
@@ -83,11 +83,11 @@ class Locator {
    * а возраст фиксации: часы телефона могут расходиться с сервером на
    * минуты, а разность двух моментов на одном устройстве от этого не зависит.
    */
-  publish(lat, lon, accuracy, measuredAt) {
+  publish(lat, lon, accuracy, measuredAt, heading = null) {
     this.last = {
       lat,
       lon,
-      accuracy,
+      accuracy, heading,
       measuredAt: measuredAt || Date.now(),
       source: this.mode,
     };

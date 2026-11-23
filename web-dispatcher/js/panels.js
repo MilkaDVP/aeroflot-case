@@ -183,10 +183,9 @@ function buildCallCard(call, selectedId, onSelect) {
   item.innerHTML = `
     <div class="call-top">
       <span class="call-board">${escapeHtml(call.board_number)}</span>
-      ${callFlags(call)}
-      ${messageFlag(call)}
       ${deadlineLabel(call)}
     </div>
+    <div class="call-badges">${callFlags(call)}${messageFlag(call)}</div>
     <div class="call-where">
       ${escapeHtml(call.aircraft_type)} · ${call.stand_ref ? `ст. ${escapeHtml(call.stand_ref)}` : "вне стоянки"} ·
       <span class="mark"${term("mark")}>${escapeHtml(call.required_mark)}</span>
@@ -479,7 +478,10 @@ function buildCandidateRow(candidate, ctx) {
  */
 function travelChoice(candidate, order, ctx) {
   const options = [];
-  if (candidate.vehicle_call_sign) {
+  const person = ctx.employees?.find(e => e.id === candidate.employee_id);
+  if (person?.has_vehicle) {
+    options.push(["auto", "Авто"], ["current_vehicle", person.vehicle_call_sign], ["walk", "пешком"]);
+  } else if (candidate.vehicle_call_sign) {
     options.push(["auto", candidate.pickup ? `через ${candidate.vehicle_call_sign}` : candidate.vehicle_call_sign]);
     options.push(["walk", "пешком"]);
   }
@@ -582,6 +584,8 @@ function busyStageLine(busy) {
  */
 function callFlags(call) {
   return (
+    (call.missing_tools ? '<span class="flag">Не хватает инструмента</span>' : "") +
+    (call.mel_category ? `<span class="flag">MEL ${escapeHtml(call.mel_category)}</span>` : "") +
     (call.aog ? `<span class="flag flag-aog"${term("aog")}>AOG</span>` : "") +
     (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "") +
     (call.needs_tools && !call.tools_taken_at

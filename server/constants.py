@@ -43,7 +43,8 @@ DEADLINE_MARGIN_MIN = 2
 TRAVEL_AUTO = "auto"
 TRAVEL_WALK = "walk"
 TRAVEL_WITH_LEAD = "with_lead"
-TRAVEL_MODES = (TRAVEL_AUTO, TRAVEL_WALK, TRAVEL_WITH_LEAD)
+TRAVEL_CURRENT = "current_vehicle"
+TRAVEL_MODES = (TRAVEL_CURRENT, TRAVEL_AUTO, TRAVEL_WALK, TRAVEL_WITH_LEAD)
 
 # Перевод длительностей: опоздание от часа показывается часами.
 MINUTES_IN_HOUR = 60

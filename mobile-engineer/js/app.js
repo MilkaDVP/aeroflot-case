@@ -40,7 +40,7 @@ let heartbeatTimer = null;
 // Порядок в жизненном цикле вызова: назначен -> принял -> прибыл -> завершил.
 const ACTIONS = {
   assigned: { label: "Принять вызов", action: "accepted" },
-  accepted: { label: "Я у борта", action: "arrived" },
+
   arrived: { label: "Закрыть вызов", action: "closed" },
 };
 
@@ -228,6 +228,7 @@ el("shift-logout").addEventListener("click", logout);
  * на карте как доступного.
  */
 function enterWork() {
+  localNavigation.load(state.user.airport_icao, graph => routeMap.setGraph(graph));
   showScreen("work");
   // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
   window.addEventListener("online", refresh);
@@ -235,6 +236,7 @@ function enterWork() {
   refresh();
   pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
   function tick() {
+    checkAircraftArrival();
     updateCountdown();
     const remaining = Date.parse(state.user?.shift_ends_at) - Date.now();
     el("extend-shift").hidden = !(remaining <= 15 * 60000);
@@ -246,7 +248,12 @@ function enterWork() {
 
 /* --- Опрос вызова --- */
 
-async function refresh() {
+let refreshing;
+function refresh() {
+  if (!refreshing) refreshing = refreshOnce().finally(() => { refreshing = null; });
+  return refreshing;
+}
+async function refreshOnce() {
   try {
     // Сначала досылаем накопленное: иначе ответ сервера не учёл бы
     // действия, нажатые без связи, и «откатил» бы экран назад.
@@ -266,6 +273,7 @@ async function refresh() {
     const payload = await Api.currentCall();
     // Сервер отдаёт либо вызов с маршрутом, либо сообщение «вызовов нет».
     const previous = state.call ? state.call.call : null;
+    if (Outbox.items.length) return;
     state.returnLeg = payload?.instruction && !payload.call ? payload : null;
     state.call = payload && payload.call ? payload : null;
     state.offline = false;
@@ -308,7 +316,9 @@ async function goOffline() {
     const snapshot = await OfflineStore.get(KEY_SNAPSHOT);
     if (snapshot && snapshot.employeeId === state.user.employee_id && state.call === null) {
       state.call = snapshot.payload;
-      state.returnLeg = snapshot.returnLeg || null;
+      // На телефоне может оставаться снимок от версии с возвратом пешком.
+      state.returnLeg = snapshot.returnLeg?.instruction?.startsWith("Вернитесь на место ожидания")
+        ? null : snapshot.returnLeg || null;
       state.snapshotAt = snapshot.at;
     }
     state.offline = true;
@@ -361,7 +371,7 @@ async function flushOutbox() {
  */
 function applyLocally(action) {
   const call = state.call.call;
-  if (action === "closed") {
+  if (action === "closed" || action === "declined") {
     state.call = null;
     return;
   }
@@ -396,7 +406,19 @@ function renderWork() {
   const hasCall = Boolean(state.call);
   el("idle-block").hidden = hasCall;
   el("call-block").hidden = !hasCall;
-  el("call-action").hidden = !hasCall;
+  const current = state.call?.call;
+  el("call-action").hidden = !current || !ACTIONS[current.status];
+  el("decline-call").hidden = current?.status !== "assigned";
+  el("repair-panel").hidden = current?.status !== "arrived";
+  if (current?.status === "arrived") {
+    const form = el("repair-form");
+    const key = [current.id, current.mel_category].join("/");
+    if (form.dataset.key !== key) {
+      el("repair-mel").value = current.mel_category || "";
+      form.dataset.key = key;
+    }
+    el("missing-tools").checked = !!current.missing_tools;
+  }
   el("chat-open").hidden = !hasCall;
   if (!hasCall) {
     closeSheet("chat-sheet");
@@ -413,6 +435,11 @@ function renderWork() {
 
   const call = state.call.call;
   el("call-stand").textContent = call.stand_ref || "—";
+  const details = el("call-details");
+  if (details.dataset.call !== String(call.id)) details.open = false;
+  details.dataset.call = call.id;
+  el("dock-board").textContent = call.board_number;
+  el("dock-stand").textContent = call.stand_ref ? "Ст. " + call.stand_ref : "Вне стоянки";
   el("call-board").textContent = call.board_number;
   el("call-type").textContent = call.aircraft_type;
   el("call-defect").textContent = call.defect_name;
@@ -441,7 +468,7 @@ function renderWork() {
 
   const step = ACTIONS[call.status];
   el("call-action").textContent = step ? step.label : "Ожидание";
-  el("call-action").disabled = !step;
+  el("call-action").disabled = !step || (step.action === "closed" && !call.mel_category);
 
   el("work-status").textContent = statusTitle(call.status);
   el("work-status-dot").className = "status-dot busy";
@@ -689,6 +716,8 @@ function updateCountdown() {
     ? new Date(call.control.deadline_at).getTime()
     : new Date(call.created_at).getTime() + CONFIG.regulationLimitMin * 60000;
   const leftMin = (deadline - Date.now()) / 60000;
+  el("dock-deadline").textContent = call.status === "arrived" ? "У борта" :
+    leftMin < 0 ? `+${Math.ceil(-leftMin)} мин` : `Осталось ${Math.floor(leftMin)} мин`;
 
   const block = el("deadline-block");
   const value = el("deadline-minutes");
@@ -792,13 +821,16 @@ function targetPoint() {
  * координат ещё нет — карта центрируется на аэропорте, чтобы человеку
  * было куда ткнуть пальцем в режиме имитации.
  */
-function drawRoute() {
-  const points = state.call?.route_points || state.returnLeg?.route_points || [];
+function drawRoute(position = state.position) {
+  const payload = state.call || state.returnLeg;
+  const points = state.offline || Date.now() - state.snapshotAt > CONFIG.pollIntervalMs * 2
+    ? localNavigation.route(payload, state.position) : payload?.route_points || [];
   const choosing = locator.mode === "simulation" && !locator.last && state.airportPoint;
+  updateGuidance(nextManeuver(payload, points, state.position));
   routeMap.render(
     points,
     targetPoint(),
-    state.position,
+    position,
     state.airportPoint,
     state.call ? state.call.vehicle : null,
     state.call ? state.call.call.pickup_node_id : null,
@@ -806,12 +838,64 @@ function drawRoute() {
     state.call && !state.call.call.tools_taken_at
       ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
         || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id)
-      : null
+      : null,
+    remainingLine(payload, points, position)
   );
   el("map-hint").hidden = locator.mode !== "simulation";
 }
 
 /* --- Действия инженера --- */
+
+let savingAction = false;
+async function recordAction(action, fields = {}) {
+  const call = state.call?.call;
+  if (!call || savingAction) return;
+  savingAction = true;
+  try {
+    await Outbox.add(action, call.id, fields);
+    if (state.call?.call.id === call.id) {
+      if (action === "assessment" || action === "equipment") Object.assign(call, fields);
+      else if (action === "checkpoint") {
+        if (fields.checkpoint_id === "vehicle") state.call.vehicle.pickup = false;
+        else {
+          const waypoint = call.waypoints.find(p => p.node_id === fields.checkpoint_id && !p.done_at);
+          if (waypoint) {
+            waypoint.done_at = new Date().toISOString();
+            if (waypoint.kind === "warehouse") call.tools_taken_at = waypoint.done_at;
+          }
+        }
+      } else applyLocally(action);
+      saveSnapshot();
+      renderWork();
+    }
+    refresh();
+  } catch (error) { showToast(error.detail || error.message, true); }
+  finally { savingAction = false; }
+}
+el("decline-call").onclick = async () => {
+  const id = state.call?.call.id;
+  if (await askConfirm("Вернуть вызов диспетчеру?", "Отказаться") && state.call?.call.id === id && state.call.call.status === "assigned") await recordAction("declined");
+};
+el("repair-form").onsubmit = event => {
+  event.preventDefault();
+  recordAction("assessment", {mel_category: el("repair-mel").value});
+};
+el("missing-tools").onchange = event => recordAction("equipment", {missing_tools: event.target.checked});
+
+let arrivalKey = "", insideSince = 0;
+function checkAircraftArrival() {
+  const payload = state.call, call = payload?.call, pos = locator.last, target = payload?.aircraft_point;
+  const key = [call?.id, target?.lat, target?.lon, pos?.source].join("/");
+  const valid = call?.status === "accepted" && pos && target && !payload.instruction &&
+    !payload.vehicle?.pickup && !(call.waypoints || []).some(p => !p.done_at) &&
+    (pos.source !== "gps" || (Date.now() - pos.measuredAt <= 15000 && pos.accuracy <= 25)) &&
+    haversineM(pos.lat, pos.lon, target.lat, target.lon) <= 25;
+  if (!valid || key !== arrivalKey) insideSince = 0;
+  arrivalKey = key;
+  if (!valid) return;
+  insideSince ||= Date.now();
+  if (Date.now() - insideSince >= 10000) recordAction("arrived");
+}
 
 el("call-action").addEventListener("click", async () => {
   const call = state.call && state.call.call;
@@ -861,13 +945,45 @@ el("call-action").addEventListener("click", async () => {
  * GPS выдаёт точки чаще, чем нужно диспетчеру, а каждая отправка —
  * это радио и батарея. Ограничение частоты здесь, а не на сервере.
  */
+let animationFrame = 0, displayedPosition = null;
+function animatePosition(position, previous) {
+  cancelAnimationFrame(animationFrame);
+  if (!previous || haversineM(previous.lat, previous.lon, position.lat, position.lon) > 150) {
+    displayedPosition = position;
+    drawRoute(position);
+    return;
+  }
+  const start = performance.now();
+  const from = displayedPosition || previous;
+  function frame(now) {
+    const fraction = Math.min(1, (now-start)/450);
+    displayedPosition = {...position, lat:from.lat+(position.lat-from.lat)*fraction,
+      lon:from.lon+(position.lon-from.lon)*fraction};
+    drawRoute(displayedPosition);
+    if (fraction < 1) animationFrame = requestAnimationFrame(frame);
+  }
+  animationFrame = requestAnimationFrame(frame);
+}
 function onPosition(position) {
+  const previous = state.position;
   state.position = position;
+  const payload = state.call;
+  if ((state.offline || Date.now() - state.snapshotAt > 2 * CONFIG.pollIntervalMs) &&
+      payload?.call.status === "accepted" && !payload.instruction &&
+      (position.source !== "gps" || (position.accuracy <= 25 && Date.now() - position.measuredAt <= 15000))) {
+    const wp = payload.call.waypoints?.find(p => !p.done_at);
+    const node = wp && localNavigation.nodes?.get(wp.node_id);
+    const near = p => p && haversineM(position.lat, position.lon, p.lat, p.lon) <= 25;
+    const id = payload.vehicle?.pickup && near(payload.vehicle) ? "vehicle" : near(node) ? wp.node_id : null;
+    if (id) recordAction("checkpoint", {checkpoint_id: id, lat: position.lat, lon: position.lon});
+  }
+  if (position.source === "gps" && sensorHeading === null) routeMap.setHeading(position.heading);
+  checkAircraftArrival();
   if (!el("geo-notice").hidden) {
     clearGeoNotice();
   }
   updateDistance();
-  drawRoute();
+  animatePosition(position, previous);
   if (!state.call) {
     renderIdle();
   }
@@ -892,7 +1008,8 @@ function sendPosition(position) {
     position.lat,
     position.lon,
     position.source,
-    Math.round(fixAgeS)
+    Math.round(fixAgeS),
+    position.accuracy
   ).catch(() => {
     // Молча: связь на перроне пропадает, следующая отправка пройдёт.
   });
@@ -915,7 +1032,7 @@ function onGeoError(message) {
   // Отказ GPS на перроне — обычное дело, а не авария: вместо красной
   // плашки поверх маршрута — спокойная строка с действием.
   el("geo-notice").hidden = false;
-  el("geo-mode").textContent = "Место: нет GPS";
+  el("geo-mode").textContent = "GPS";
   el("geo-mode").classList.add("is-warn");
   el("geo-error").hidden = false;
   el("geo-error").textContent = message;
@@ -925,7 +1042,7 @@ function onGeoError(message) {
 function clearGeoNotice() {
   el("geo-notice").hidden = true;
   el("geo-mode").classList.remove("is-warn");
-  el("geo-mode").textContent = locator.mode === "simulation" ? "Место: вручную" : "Место: GPS";
+  el("geo-mode").textContent = locator.mode === "simulation" ? "Ручной" : "GPS";
 }
 
 /** Из строки «GPS недоступен»: сразу ручной режим и подсказка, что делать. */
@@ -972,9 +1089,9 @@ function bindEvents() {
 
   // Переключатель подложки: снимок требует сети, схема работает всегда.
   el("map-toggle").addEventListener("click", () => {
-    const toImagery = el("map-toggle").textContent === "Спутник";
+    const toImagery = !routeMap.showImagery;
     routeMap.setImagery(toImagery);
-    el("map-toggle").textContent = toImagery ? "Схема" : "Спутник";
+    el("map-toggle").setAttribute("aria-pressed", String(toImagery));
     drawRoute();
   });
 
@@ -998,7 +1115,32 @@ function bindEvents() {
   }
 }
 
+let sensorHeading = null, lastAlpha = null;
+function updateOrientation(event) {
+  if (locator?.mode !== "gps" || !state.onShift) return;
+  const alpha = event.alpha;
+  if (Number.isFinite(event.webkitCompassHeading) && event.webkitCompassHeading >= 0)
+    sensorHeading = event.webkitCompassHeading;
+  else if (event.absolute && Number.isFinite(alpha)) sensorHeading = 360 - alpha;
+  else if (Number.isFinite(alpha) && lastAlpha !== null) {
+    const base = sensorHeading ?? state.position?.heading;
+    if (Number.isFinite(base)) sensorHeading = (base + lastAlpha - alpha + 360) % 360;
+  }
+  if (Number.isFinite(alpha)) lastAlpha = alpha;
+  if (Number.isFinite(sensorHeading)) routeMap.setHeading(sensorHeading + (screen.orientation?.angle || 0));
+}
+function enableOrientation() {
+  const type = window.DeviceOrientationEvent;
+  if (!type) return;
+  const attach = () => window.addEventListener("ondeviceorientationabsolute" in window
+    ? "deviceorientationabsolute" : "deviceorientation", updateOrientation);
+  if (typeof type.requestPermission === "function") {
+    if (navigator.userActivation?.isActive) type.requestPermission().then(s => { if (s === "granted") attach(); }).catch(() => {});
+  } else attach();
+}
 function setGeoMode(mode) {
+  sensorHeading = lastAlpha = null;
+  routeMap.setHeading(null);
   for (const button of document.querySelectorAll("#geo-switch button")) {
     button.classList.toggle("active", button.dataset.mode === mode);
   }
@@ -1006,11 +1148,12 @@ function setGeoMode(mode) {
   el("geo-error").hidden = true;
 
   if (mode === "gps") {
+    enableOrientation();
     locator.startGps();
-    el("geo-mode").textContent = "Место: GPS";
+    el("geo-mode").textContent = "GPS";
     el("geo-explain").textContent = "Ваше место определяет приёмник телефона.";
   } else {
-    el("geo-mode").textContent = "Место: вручную";
+    el("geo-mode").textContent = "Ручной";
     el("geo-mode").classList.remove("is-warn");
     el("geo-notice").hidden = true;
     el("geo-explain").textContent = "Нажмите «Готово» и коснитесь карты там, где вы стоите.";
@@ -1084,6 +1227,7 @@ el("extend-shift").onclick = async () => {
 };
 
 async function logout() {
+  updateGuidance(null);
   try {
     await Api.logout();
   } catch (error) {
@@ -1102,6 +1246,13 @@ async function logout() {
 }
 
 function stopWork() {
+  cancelAnimationFrame(animationFrame);
+  displayedPosition = null;
+  updateGuidance(null);
+  window.removeEventListener("deviceorientationabsolute", updateOrientation);
+  window.removeEventListener("deviceorientation", updateOrientation);
+  sensorHeading = lastAlpha = null;
+  insideSince = 0;
   window.removeEventListener("online", refresh);
   clearInterval(pollTimer);
   clearInterval(countdownTimer);

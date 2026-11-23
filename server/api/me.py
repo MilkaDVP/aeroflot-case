@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from typing import Literal
 from api.calls import to_response as call_to_response
 from auth.dependencies import Context, get_context
 from clock import utc_now
@@ -57,6 +58,10 @@ ACTION_CLOSED = "closed"
 # проверялся; с отложенной отправкой это стало важно: действия, накопленные
 # без связи, приходят пачкой, и каждое обязано лечь на своё место.
 ACTION_ALLOWED_FROM = {
+    "checkpoint": ("accepted",),
+    "declined": ("assigned",),
+    "assessment": ("arrived",),
+    "equipment": ("arrived",),
     ACTION_ACCEPTED: ("assigned",),
     ACTION_ARRIVED: ("assigned", "accepted"),
     ACTION_CLOSED: ("arrived",),
@@ -79,6 +84,11 @@ class EngineerStatusRequest(BaseModel):
     action: str = Field(description="accepted, arrived или closed")
     # Идентификатор действия, выданный телефоном: повторная отправка того
     # же действия (ответ потерялся, связь мигнула) не применится дважды.
+    checkpoint_id: str | None = None
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    mel_category: Literal["A", "B", "C", "D"] | None = None
+    missing_tools: bool | None = None
     action_id: str | None = Field(default=None, min_length=8, max_length=64)
     # К какому вызову относится действие. Пока телефон был без связи,
     # диспетчер мог снять вызов: чужой вызов действие не тронет.
@@ -102,6 +112,7 @@ class CurrentCallResponse(BaseModel):
     отрисовки одной ломаной.
     """
 
+    aircraft_point: dict | None = None
     instruction: str | None = None
     call: CallResponse
     route_points: list[dict]
@@ -171,7 +182,12 @@ def current_call(context: Context = Depends(get_context), db: Session = Depends(
             return ReturnNavigation(message=leg["instruction"], **leg)
         return MessageResponse(message=ERROR_NO_ACTIVE_CALL)
 
+    aircraft = call.aircraft
+    node = get_graph(call.airport_icao).node(call.stand_node_id)
+    point = ({"lat": aircraft.lat, "lon": aircraft.lon} if aircraft and aircraft.lat is not None and aircraft.lon is not None
+             else {"lat": node["lat"], "lon": node["lon"]} if node else None)
     return CurrentCallResponse(
+        aircraft_point=point,
         call=call_to_response(call),
         instruction=leg["instruction"] if leg else None,
         route_points=leg["route_points"] if leg else route_points(call),
@@ -194,7 +210,7 @@ def update_status(
     ними означало бы, что диспетчер видит на карте не то, что происходит.
     После завершения следующий вызов из очереди сразу становится текущим.
     """
-    if payload.action not in ENGINEER_ACTIONS:
+    if payload.action not in ACTION_ALLOWED_FROM:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"Действие должно быть одним из: {', '.join(ENGINEER_ACTIONS)}",
@@ -214,6 +230,8 @@ def update_status(
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
     if payload.call_id is not None and payload.call_id != call.id:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_OTHER_CALL)
+    if payload.action == ACTION_ARRIVED and call.status == CALL_ARRIVED and payload.call_id == call.id:
+        return call_to_response(call)
     if call.status not in ACTION_ALLOWED_FROM[payload.action]:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -226,22 +244,65 @@ def update_status(
         raise HTTPException(409, "Сначала заберите назначенный транспорт")
     now = utc_now()
     performed = now - timedelta(seconds=payload.age_s or 0)
-    call_status, employee_status = ENGINEER_ACTIONS[payload.action]
-    call.status = call_status
-
-    if payload.action == ACTION_CLOSED:
-        call.closed_at = performed
-        advance_after_close(db, employee, call, was_working=True)
-        if call.parent_call_id is None:
-            # Основной инженер закрыл вызов — работы окончены для всех.
+    if payload.action == "declined":
+        from services.assignment import unassign
+        unassign(db, call, "Инженер отказался от вызова")
+        if call.parent_call_id:
+            call.status, call.closed_at = CALL_CLOSED, performed
+        else:
             support.close_support(db, call, performed)
+    elif payload.action == "checkpoint":
+        from algorithm.geo import haversine_m
+        from services.assignment import mark_waypoint_done, remaining_waypoints, assigned_route, update_assigned_route
+        from constants import VEHICLE_IN_USE
+        graph = get_graph(call.airport_icao)
+        if payload.lat is None or payload.lon is None or employee.return_vehicle:
+            raise HTTPException(409, "Нельзя подтвердить точку маршрута")
+        if payload.checkpoint_id == "vehicle":
+            vehicle = call.vehicle
+            if not vehicle or vehicle.employee_id != employee.id or vehicle.status != VEHICLE_RESERVED:
+                raise HTTPException(409, "Назначение транспорта изменилось")
+            if haversine_m(payload.lat, payload.lon, vehicle.lat, vehicle.lon) > 25:
+                raise HTTPException(409, "Точка вне стоянки транспорта")
+            vehicle.status = VEHICLE_IN_USE
+        else:
+            pending = remaining_waypoints(call)
+            node = graph.node(payload.checkpoint_id)
+            if not node or not pending or pending[0] != payload.checkpoint_id:
+                raise HTTPException(409, "Маршрут изменился")
+            if haversine_m(payload.lat, payload.lon, node["lat"], node["lon"]) > 25:
+                raise HTTPException(409, "Точка вне маршрута")
+            mark_waypoint_done(call, pending[0], performed)
+        plan = assigned_route(call, graph)
+        if plan:
+            update_assigned_route(call, plan, reset_eta=False)
+    elif payload.action == "assessment":
+        if not payload.mel_category:
+            raise HTTPException(422, "Укажите категорию MEL")
+        call.mel_category = payload.mel_category
+    elif payload.action == "equipment":
+        if payload.missing_tools is None:
+            raise HTTPException(422, "Укажите наличие инструмента")
+        call.missing_tools = payload.missing_tools
     else:
-        employee.status = employee_status
-        if payload.action == ACTION_ARRIVED:
-            # Прибытие засчитывается по моменту нажатия, а не доставки:
-            # инженер, прибывший вовремя без связи, регламент не нарушил.
-            if mark_arrived(db, employee, call, performed):
-                mentor.review_arrival(db, call, employee, performed)
+        if payload.action == ACTION_CLOSED and not call.mel_category:
+            raise HTTPException(409, "Сначала укажите категорию MEL")
+        call_status, employee_status = ENGINEER_ACTIONS[payload.action]
+        call.status = call_status
+
+        if payload.action == ACTION_CLOSED:
+            call.closed_at = performed
+            advance_after_close(db, employee, call, was_working=True)
+            if call.parent_call_id is None:
+                # Основной инженер закрыл вызов — работы окончены для всех.
+                support.close_support(db, call, performed)
+        else:
+            employee.status = employee_status
+            if payload.action == ACTION_ARRIVED:
+                # Прибытие засчитывается по моменту нажатия, а не доставки:
+                # инженер, прибывший вовремя без связи, регламент не нарушил.
+                if mark_arrived(db, employee, call, performed):
+                    mentor.review_arrival(db, call, employee, performed)
 
     if payload.action_id:
         db.add(

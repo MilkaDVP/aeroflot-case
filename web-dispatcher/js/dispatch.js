@@ -99,6 +99,15 @@ async function start() {
 
     state.graph = await Api.airportGraph(user.airport_icao);
     airportMap.render(state.graph);
+    const trailKey = selectionKey() + ".trails." + JSON.stringify(state.graph.ref_point);
+    try {
+      airportMap.trails = new Map(JSON.parse(sessionStorage.getItem(trailKey) || "[]"));
+    } catch { /* При недоступном хранилище след собирается в памяти вкладки. */ }
+    window.addEventListener("pagehide", () => {
+      try {
+        sessionStorage.setItem(trailKey, JSON.stringify([...airportMap.trails]));
+      } catch { /* Вкладка продолжает работать при исчерпании квоты. */ }
+    });
     applyBasemap(savedBasemap());
     new MapSearch(document.querySelector(".map-tools"), airportMap, () => ({
       graph: state.graph,
@@ -221,6 +230,7 @@ async function refresh() {
 }
 
 function renderAll() {
+  airportMap.drawCallTrails(state.allCalls, state.employees, state.selectedCall?.id);
   renderAlerts(state.calls);
   renderCalls(elements.callsList, state.calls, state.selectedCall?.id, selectCall);
   renderShiftStats(state.employees, state.vehicles);
@@ -361,6 +371,7 @@ async function loadExtraCandidates(call) {
 async function selectCall(call, { keepView = false } = {}) {
   closePopover();
   state.selectedCall = call;
+  airportMap.drawCallTrails(state.allCalls, state.employees, call.id);
   sessionStorage.setItem(selectionKey(), call.id);
   document.getElementById("call-actions").hidden = false;
   state.suggestion = null;
@@ -499,6 +510,7 @@ function leadVehicle() {
   if (!lead || state.travel[leadId] === "walk") {
     return null;
   }
+  if (state.travel[leadId] === "current_vehicle") return state.employees.find(e => e.id === leadId)?.vehicle_call_sign;
   return lead.vehicle_call_sign || null;
 }
 
@@ -507,6 +519,7 @@ function panelContext() {
   return {
     picked: state.picked,
     travel: state.travel,
+    employees: state.employees,
     leadVehicle: leadVehicle(),
     adding: !isAssignable(state.selectedCall),
     onPick: pickCandidate,
@@ -921,6 +934,7 @@ async function unassignSelected() {
 async function afterAction(callId) {
   clearSuggestion();
   state.selectedCall = null;
+  airportMap.drawCallTrails(state.allCalls, state.employees, null);
   await refresh();
   const fresh = state.calls.find((item) => item.id === callId);
   if (fresh) {

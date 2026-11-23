@@ -35,14 +35,7 @@ const EMPTY_VIEW_HALF_M = 1500;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 128;
 
-// След хранит точки за это время и не короче этого шага между точками.
-const TRAIL_WINDOW_MS = 3 * 60 * 1000;
 const TRAIL_MIN_STEP_M = 3;
-
-/** Точка следа ещё свежая; момент «сейчас» приходит через this. */
-function isRecentTrailPoint(point) {
-  return this - point.at <= TRAIL_WINDOW_MS;
-}
 
 function trailPoint(point) {
   return `${point.x},${point.y}`;
@@ -105,7 +98,7 @@ class AirportMap {
     this.setupObjectDrag();
 
     this.tiles = null;
-    // Следы перемещения: идентификатор сотрудника -> последние точки.
+    // Следы перемещения: идентификатор вызова -> участки пройденного пути.
     this.trails = new Map();
     // Догрузка тайлов откладывается до конца жеста: во время
     // перетаскивания пересчитывать их на каждое движение мыши незачем.
@@ -519,7 +512,6 @@ class AirportMap {
         const override = this.overrides.get(`employee:${employee.id}`);
         return override ? { ...employee, lat: override.lat, lon: override.lon } : employee;
       });
-    this.drawTrails(placed);
     const offsets = spreadOverlapping(placed);
 
     for (const employee of placed) {
@@ -852,9 +844,6 @@ class AirportMap {
     } else {
       this.overrides.set(key, position);
     }
-    if (kind === "employee") {
-      this.trails.delete(item.id);
-    }
 
     const done = () => {
       this.overrides.delete(key);
@@ -896,55 +885,47 @@ class AirportMap {
     this.placeMarker(marker, Number(marker.dataset.x), Number(marker.dataset.y));
   }
 
-  /**
-   * Короткий след перемещения сотрудников за последние минуты.
-   *
-   * Точка на карте отвечает на вопрос «где он», а след — «куда и как
-   * быстро он движется»: по нему видно, что инженер едет к борту,
-   * стоит или свернул не туда, ещё до того, как изменится прогноз.
-   * След собирается из опросов в памяти рабочего места; машина, на
-   * которой едет инженер, движется вместе с ним, и отдельный след
-   * ей не нужен.
-   */
-  drawTrails(employees) {
-    const now = Date.now();
-    const seen = new Set();
-
-    for (const employee of employees) {
-      seen.add(employee.id);
-      // Точка, поставленная вручную (перенос на карте), — не движение:
-      // след от старого места к новому выглядел бы как пройденный путь.
-      // Такой след сбрасывается и начинается заново с настоящих координат.
-      if (employee.location_source === "manual") {
-        this.trails.delete(employee.id);
-        continue;
-      }
-      const position = this.projectLatLon(employee.lat, employee.lon);
-      const trail = this.trails.get(employee.id) || [];
-      const last = trail[trail.length - 1];
-      // Новая точка добавляется, только если сотрудник сдвинулся
-      // заметнее погрешности: дрожание GPS следом не считается.
-      if (!last || Math.hypot(last.x - position.x, last.y - position.y) > TRAIL_MIN_STEP_M) {
-        trail.push({ x: position.x, y: position.y, at: now });
-      }
-      this.trails.set(employee.id, trail.filter(isRecentTrailPoint, now));
-    }
-    for (const id of [...this.trails.keys()]) {
-      if (!seen.has(id)) {
-        this.trails.delete(id);
-      }
-    }
-
+  // Каждый действующий вызов ведёт историю своего исполнителя с момента наблюдения.
+  drawCallTrails(calls, employees, selectedId) {
+    const byEmployee = new Map(employees.map(person => [person.id, person]));
+    const open = new Set();
     const layer = this.layers.trails;
     layer.replaceChildren();
-    for (const trail of this.trails.values()) {
-      if (trail.length < 2) {
-        continue;
+    for (const call of calls) {
+      if (["closed", "cancelled"].includes(call.status)) continue;
+      open.add(call.id);
+      const working = ["assigned", "accepted", "arrived"].includes(call.status);
+      const engineer = working && byEmployee.get(call.assigned_employee_id);
+      let trail = this.trails.get(call.id);
+      if (engineer && engineer.lat != null && engineer.lon != null) {
+        if (!trail) {
+          trail = {segments: [], employeeId: null};
+          this.trails.set(call.id, trail);
+        }
+        if (trail.employeeId !== engineer.id) {
+          trail.segments.push([]);
+          trail.employeeId = engineer.id;
+        }
+        const points = trail.segments.at(-1);
+        const point = this.projectLatLon(engineer.lat, engineer.lon);
+        const last = points.at(-1);
+        if (!last || Math.hypot(point.x - last.x, point.y - last.y) > TRAIL_MIN_STEP_M) {
+          points.push(point);
+        }
+      } else if (trail) {
+        trail.employeeId = null;
       }
-      const line = document.createElementNS(SVG_NS, "polyline");
-      line.setAttribute("points", trail.map(trailPoint).join(" "));
-      line.setAttribute("class", "trail");
-      layer.append(line);
+      if (!trail || (call.parent_call_id || call.id) !== selectedId) continue;
+      for (const points of trail.segments) {
+        if (points.length < 2) continue;
+        const line = document.createElementNS(SVG_NS, "polyline");
+        line.setAttribute("points", points.map(trailPoint).join(" "));
+        line.setAttribute("class", "trail");
+        layer.append(line);
+      }
+    }
+    for (const id of this.trails.keys()) {
+      if (!open.has(id)) this.trails.delete(id);
     }
   }
 

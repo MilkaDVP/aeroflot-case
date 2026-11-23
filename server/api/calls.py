@@ -187,6 +187,8 @@ def to_response(call, db=None, now=None):
         reported_at=to_iso_utc(call.reported_at),
         source=call.source,
         urgent=bool(call.urgent),
+        mel_category=call.mel_category,
+        missing_tools=call.missing_tools,
         aog=bool(call.aog),
         work_stage=call.work_stage,
         work_stage_title=WORK_STAGES.get(call.work_stage),

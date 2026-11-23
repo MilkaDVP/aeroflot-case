@@ -87,6 +87,7 @@ async function request(method, path, body) {
   let response;
   try {
     response = await fetch(CONFIG.apiBase + path, {
+      signal: AbortSignal.timeout(8000),
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -124,6 +125,7 @@ const Api = {
   logout: () => request("POST", "/api/auth/logout"),
   me: () => request("GET", "/api/auth/me"),
 
+  airportGraph: icao => request("GET", "/api/airports/" + encodeURIComponent(icao)),
   currentCall: () => request("GET", "/api/me/current-call"),
   // extra — идентификатор действия, вызов и возраст: для отложенной отправки.
   setStatus: (action, extra) =>
@@ -138,11 +140,12 @@ const Api = {
   setShift: (employeeId, onShift, extend = false) =>
     request("POST", `/api/employees/${employeeId}/shift`, { on_shift: onShift, extend }),
   // source — gps или simulation, fixAgeS — сколько секунд назад точка измерена.
-  sendLocation: (employeeId, lat, lon, source, fixAgeS) =>
+  sendLocation: (employeeId, lat, lon, source, fixAgeS, accuracy) =>
     request("POST", `/api/employees/${employeeId}/location`, {
       lat,
       lon,
       source,
       fix_age_s: fixAgeS,
+      accuracy_m: accuracy,
     }),
 };

@@ -173,6 +173,7 @@ class TestSwitch(StageCase):
     def test_после_закрытия_возвращается_к_прежнему_борту(self):
         first, second, engineer = self.switch_sokolov()
         self.me(engineer, "status", {"action": "arrived"})
+        self.me(engineer, "status", {"action": "assessment", "mel_category": "A"})
         self.me(engineer, "status", {"action": "closed"})
 
         back = self.call(first["id"])

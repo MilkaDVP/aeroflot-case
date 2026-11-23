@@ -98,8 +98,8 @@ const Outbox = {
     this.items = (await OfflineStore.get(KEY_OUTBOX)) || [];
   },
 
-  async add(action, callId) {
-    const item = { id: newActionId(), action, call_id: callId, at: Date.now() };
+  async add(action, callId, fields = {}) {
+    const item = { id: newActionId(), action, fields, call_id: callId, at: Date.now() };
     this.items.push(item);
     await OfflineStore.set(KEY_OUTBOX, this.items);
     return item;
@@ -112,12 +112,13 @@ const Outbox = {
       const item = this.items[0];
       try {
         await Api.setStatus(item.action, {
+          ...item.fields,
           action_id: item.id,
           call_id: item.call_id,
           age_s: Math.max(0, Math.round((Date.now() - item.at) / 1000)),
         });
       } catch (error) {
-        if (error.status === 0) {
+        if (error.status === 0 || error.status >= 500) {
           break;
         }
         rejected.push({ item, detail: error.detail });

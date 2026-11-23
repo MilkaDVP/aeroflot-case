@@ -5,7 +5,7 @@ from types import SimpleNamespace as Obj
 from unittest.mock import patch
 
 from algorithm.geo import EARTH_RADIUS_M
-from constants import MODE_VEHICLE, MODE_WALK
+from constants import MODE_VEHICLE
 from services import assignment as service
 
 
@@ -71,7 +71,7 @@ class TestRouteBoundary(unittest.TestCase):
         self.person.vehicle = Obj(lat=.01, lon=.02)
         self.person.waiting_lat, self.person.waiting_lon = .03, .04
         for vehicle, waiting, mode in ((False, False, None), (True, False, MODE_VEHICLE),
-                                       (False, True, MODE_WALK), (True, True, MODE_VEHICLE)):
+                                       (False, True, None), (True, True, MODE_VEHICLE)):
             with self.subTest(vehicle=vehicle, waiting=waiting):
                 self.person.return_vehicle, self.person.return_to_waiting = vehicle, waiting
                 target = service.return_destination(self.person)

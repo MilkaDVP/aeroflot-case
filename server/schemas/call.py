@@ -77,6 +77,8 @@ class CallResponse(BaseModel):
     source: str | None = None
     urgent: bool = False
     # AOG ставит только инженер после осмотра.
+    mel_category: str | None = None
+    missing_tools: bool = False
     aog: bool = False
     work_stage: str | None = None
     work_stage_title: str | None = None

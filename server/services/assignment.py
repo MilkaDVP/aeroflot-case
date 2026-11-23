@@ -40,6 +40,7 @@ from constants import (
     STAGE_WAITING_PARTS,
     STATUS_ASSIGNED,
     STATUS_FREE,
+    TRAVEL_CURRENT,
     TRAVEL_WALK,
     TRAVEL_WITH_LEAD,
     STATUSES_BUSY,
@@ -207,6 +208,10 @@ def plan_route(db, employee, stand_node_id, graph, travel=None, ride_vehicle=Non
     """
     if employee.lat is None or employee.lon is None:
         return None, None
+    if travel == TRAVEL_CURRENT:
+        if not employee.has_vehicle:
+            raise HTTPException(409, "У инженера больше нет этого транспорта")
+        return plan_for(graph, employee.as_algorithm_dict(), stand_node_id, [], depots, waypoints), None
     if travel == TRAVEL_WALK:
         return plan_walk(graph, employee.as_algorithm_dict(), stand_node_id, depots, waypoints), None
     if travel == TRAVEL_WITH_LEAD:
@@ -411,7 +416,7 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
         employee.return_vehicle = bool(employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE)
         if not employee.return_vehicle:
             release_vehicle(employee)
-        employee.return_to_waiting = employee.waiting_lat is not None
+        employee.return_to_waiting = False
         employee.status = STATUS_FREE
         employee.busy_until = None
         return
@@ -455,6 +460,9 @@ def unassign(db, call, reason):
 
     # Через связь, а не через внешний ключ: сессия не перечитывает объекты
     # после коммита, и previous_employee остался бы пустым в ответе.
+    call.near_aircraft_since = call.last_aircraft_fix = None
+    call.mel_category = None
+    call.missing_tools = False
     call.allow_previous_employee = False
     call.previous_employee = employee
     call.unassign_reason = reason
@@ -608,8 +616,6 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
 def return_destination(employee):
     if employee.return_vehicle and employee.vehicle:
         return employee.vehicle.lat, employee.vehicle.lon, MODE_VEHICLE, "Верните спецтранспорт на исходную стоянку"
-    if employee.return_to_waiting and employee.waiting_lat is not None:
-        return employee.waiting_lat, employee.waiting_lon, MODE_WALK, "Вернитесь на место ожидания"
     return None
 
 
@@ -638,6 +644,33 @@ def route_geometry(call, graph):
     return nodes
 
 
+def check_aircraft_arrival(db, employee, accuracy_m=None):
+    from services import mentor
+    from constants import STATUS_BUSY
+    call = working_call_of(db, employee)
+    if not call or call.status != "accepted":
+        return
+    point = get_graph(call.airport_icao).node(call.stand_node_id)
+    if call.aircraft and call.aircraft.lat is not None and call.aircraft.lon is not None:
+        point = {"lat": call.aircraft.lat, "lon": call.aircraft.lon}
+    at = employee.location_at
+    if (not point or not at or (utc_now() - at).total_seconds() > 15 or employee.return_vehicle
+            or (accuracy_m is not None and accuracy_m > WAYPOINT_DONE_RADIUS_M)
+            or any(not w.get("done_at") for w in call.waypoints or [])
+            or (call.vehicle and call.vehicle.status == VEHICLE_RESERVED)
+            or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"]) > WAYPOINT_DONE_RADIUS_M):
+        call.near_aircraft_since = call.last_aircraft_fix = None
+        return
+    if not call.last_aircraft_fix or (at - call.last_aircraft_fix).total_seconds() > 15:
+        call.near_aircraft_since = at
+    call.last_aircraft_fix = at
+    if (at - call.near_aircraft_since).total_seconds() >= 10:
+        call.status = CALL_ARRIVED
+        employee.status = STATUS_BUSY
+        if mark_arrived(db, employee, call, at):
+            mentor.review_arrival(db, call, employee, at)
+
+
 def refresh_navigation(db, employee):
     from algorithm.geo import distance_to_segment
     target = return_destination(employee)
@@ -652,8 +685,6 @@ def refresh_navigation(db, employee):
             employee.return_vehicle = False
             if call and call.vehicle and call.vehicle.status == VEHICLE_RESERVED and not call.vehicle.employee:
                 call.vehicle.employee = employee
-        else:
-            employee.return_to_waiting = False
     if not call or call.status == CALL_ARRIVED:
         return
     graph = get_graph(employee.airport_icao)

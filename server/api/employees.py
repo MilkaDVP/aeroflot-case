@@ -385,12 +385,15 @@ def update_location(
         )
 
     if (context.user.role != ROLE_ENGINEER and employee.status in (STATUS_FREE, STATUS_OFFLINE)
-            and not employee.return_vehicle and not employee.return_to_waiting):
+            and not employee.return_vehicle):
         employee.waiting_lat, employee.waiting_lon = payload.lat, payload.lon
     changed = record_position(employee, payload.lat, payload.lon, payload.source, payload.fix_age_s)
     from services.assignment import refresh_navigation
     if changed:
         refresh_navigation(db, employee)
+        if context.user.role == ROLE_ENGINEER:
+            from services.assignment import check_aircraft_arrival
+            check_aircraft_arrival(db, employee, payload.accuracy_m)
     db.commit()
     return to_response(employee)
 
