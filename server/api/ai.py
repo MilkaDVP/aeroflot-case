@@ -22,7 +22,9 @@
 
 import json
 
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -34,7 +36,7 @@ from database import get_db
 from models.call import Call
 from models.user import DISPATCH_ROLES
 from services import claim as claims
-from services import gigachat
+from services import agent, gigachat
 from services.deadline import assess
 
 router = APIRouter(prefix="/api/ai", tags=["ИИ-диспетчер"])
@@ -330,6 +332,53 @@ def ai_ask(
             source="rules",
         )
     return AskResponse(answer=answer, source="gigachat")
+
+
+class AgentMessage(BaseModel):
+    """Реплика разговора: просьба или результаты действий — user, ход агента — assistant."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=agent.MAX_CONTENT)
+
+
+class AgentRequest(BaseModel):
+    # Просьба первым полем: её видно в журнале действий.
+    command: str = Field(min_length=1, max_length=1000)
+    messages: list[AgentMessage] = Field(min_length=1, max_length=agent.MAX_MESSAGES)
+
+
+ROLE_WORDS = {
+    "dispatcher": "диспетчер",
+    "shift_supervisor": "начальник смены",
+    "local_admin": "администратор аэропорта",
+}
+
+
+@router.post("/agent", summary="Просьба ИИ-агенту")
+@router.post("/agent/step", summary="Следующий ход ИИ-агента")
+def ai_agent(
+    payload: AgentRequest,
+    request: Request,
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+    airport: Context = Depends(require_airport),
+):
+    """
+    Один ход агента: действия, которые экран выполнит от имени диспетчера
+    и пришлёт результат следующим ходом, и ответ, когда всё сделано.
+    Просьба пишется в журнал, промежуточные ходы (/agent/step) — нет:
+    сами действия попадают туда как обычные действия диспетчера.
+    """
+    messages = [item.model_dump() for item in payload.messages]
+    if len(json.dumps(messages, ensure_ascii=False)) > agent.MAX_TOTAL:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Слишком длинный разговор — начните новую просьбу")
+    if not gigachat.configured():
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GigaChat не подключён")
+    role = ROLE_WORDS.get(context.user.role, context.user.role)
+    reply = agent.step(agent.system_prompt(airport, role), messages,
+                       first=not request.url.path.endswith("/step"))
+    if reply is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GigaChat сейчас не отвечает")
+    return reply
 
 
 @router.get("/plan", response_model=PlanResponse, summary="План ИИ-диспетчера")

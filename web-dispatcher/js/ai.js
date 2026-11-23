@@ -6,11 +6,12 @@
  *   одна главная кнопка «Назначить всех, кто успевает»;
  *   карточка на каждый вызов: кто поедет и через сколько будет у борта,
  *   «Назначить», значки «на карте» и «открыть»;
- *   внизу — «Спросить ИИ»: свободный вопрос об обстановке.
+ *   внизу — агент: просьба словами, он выполняет её на экране (agent.js).
  *
  * Пока панель открыта, план обновляется сам (без нового пояснения).
  * Значок на кнопке показывает, сколько вызовов можно назначить сразу.
- * Назначает всегда человек; захват вызова и права проверяет сервер.
+ * Агент действует от имени диспетчера; права проверяет сервер, важные
+ * действия подтверждает человек.
  */
 
 const AI_REFRESH_MS = 15000;
@@ -80,7 +81,7 @@ const AiPanel = {
     this.button.classList.remove("active");
     this.button.setAttribute("aria-expanded", "false");
     clearInterval(this.refreshTimer);
-    if (this.onPreview) this.onPreview(null);
+    if (this.onPreview && !this.working) this.onPreview(null);
     this.updateBadge();
   },
 
@@ -102,8 +103,8 @@ const AiPanel = {
       <form class="ai-ask" id="ai-ask">
         <div class="ai-answers" id="ai-answers"></div>
         <div class="ai-ask-row">
-          <input id="ai-question" maxlength="500" autocomplete="off" placeholder="Спросить ИИ…">
-          <button type="submit" class="primary" aria-label="Спросить">➤</button>
+          <input id="ai-question" maxlength="1000" autocomplete="off" placeholder="Что сделать?">
+          <button type="submit" class="primary" id="ai-send" aria-label="Выполнить">➤</button>
         </div>
       </form>`;
     this.root.querySelector("#ai-close").addEventListener("click", () => this.close());
@@ -111,6 +112,7 @@ const AiPanel = {
     this.root.querySelector("#ai-assign-all").addEventListener("click", () => this.assignAll());
     this.root.querySelector("#ai-ask").addEventListener("submit", (event) => this.ask(event));
     this.renderAnswers();
+    if (this.working) this.setWorking(true);
   },
 
   async load(explain) {
@@ -280,48 +282,93 @@ const AiPanel = {
     await this.load(false);
   },
 
-  /* --- Спросить ИИ --- */
+  /* --- Агент --- */
 
   async ask(event) {
     event.preventDefault();
+    // Пока агент работает, та же кнопка его останавливает.
+    if (this.working) {
+      Agent.stop();
+      this.setWorking(true, true);
+      return;
+    }
     const input = this.root.querySelector("#ai-question");
     const question = input.value.trim();
     if (!question) return;
     input.value = "";
-    this.answers.push({ question, answer: null });
+    const entry = { question, answer: null, steps: [] };
+    this.answers.push(entry);
+    this.answers = this.answers.slice(-10);
+    this.setWorking(true);
     this.renderAnswers();
-    const entry = this.answers[this.answers.length - 1];
     try {
-      const result = await Api.aiAsk(question);
-      entry.answer = result.answer;
-      entry.source = result.source;
+      entry.answer = await Agent.run(question, (title) => {
+        const step = { title, note: "", kind: "working" };
+        entry.steps.push(step);
+        this.renderAnswers();
+        return (note, kind) => {
+          step.note = note;
+          step.kind = kind;
+          this.renderAnswers();
+        };
+      });
+      entry.source = "gigachat";
+      entry.idle = !entry.steps.some((step) => step.kind === "done");
     } catch (error) {
-      entry.answer = error.detail || "Не удалось получить ответ";
+      entry.answer = error.detail || "Не удалось выполнить";
       entry.source = "error";
+      // Без GigaChat агент не работает, но план по правилам остаётся.
+      if (error.status === 503 && !entry.steps.length) {
+        try {
+          entry.answer = (await Api.aiAsk(question.slice(0, 500))).answer;
+        } catch (again) { /* остаётся исходная ошибка */ }
+      }
     }
+    this.setWorking(false);
     this.renderAnswers(true);
+    if (!this.root.hidden) this.load(false);
+  },
+
+  setWorking(working, stopping) {
+    this.working = working;
+    const button = this.root.querySelector("#ai-send");
+    if (!button) return;
+    button.textContent = working ? "■" : "➤";
+    button.disabled = Boolean(stopping);
+    button.setAttribute("aria-label", working ? "Остановить" : "Выполнить");
   },
 
   renderAnswers(typeLast) {
     const box = this.root.querySelector("#ai-answers");
     if (!box) return;
     box.replaceChildren();
-    // Последние три вопроса — больше в панели не нужно.
-    const recent = this.answers.slice(-3);
-    recent.forEach((entry, index) => {
+    this.answers.forEach((entry, index) => {
       const item = document.createElement("div");
       item.className = "ai-qa";
       item.innerHTML = `<div class="ai-q">${escapeHtml(entry.question)}</div>`;
+      for (const step of entry.steps || []) {
+        const row = document.createElement("div");
+        row.className = `ai-step is-${step.kind}`;
+        row.textContent = step.note && step.kind !== "done" ? `${step.title} — ${step.note}` : step.title;
+        item.append(row);
+      }
       const answer = document.createElement("div");
       answer.className = `ai-a ${entry.source === "gigachat" ? "is-live" : ""}`;
       if (entry.answer === null) {
         answer.innerHTML = '<div class="ai-thinking"><span></span><span></span><span></span></div>';
-      } else if (typeLast && index === recent.length - 1) {
+      } else if (typeLast && index === this.answers.length - 1) {
         typeText(answer, entry.answer);
       } else {
         answer.textContent = entry.answer;
       }
       item.append(answer);
+      if (entry.idle) {
+        // Что бы ни написала модель, факт говорит экран.
+        const note = document.createElement("div");
+        note.className = "ai-idle";
+        note.textContent = "Действий не выполнено";
+        item.append(note);
+      }
       box.append(item);
     });
     box.scrollTop = box.scrollHeight;

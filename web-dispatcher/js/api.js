@@ -196,6 +196,9 @@ const Api = {
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   // План ИИ-диспетчера; explain=false — без пояснения GigaChat (быстрее).
   aiPlan: (explain = true) => request("GET", `/api/ai/plan?explain=${explain}`),
+  // Ход ИИ-агента: первый — просьба, дальше результаты действий.
+  aiAgent: (command, messages, next) =>
+    request("POST", next ? "/api/ai/agent/step" : "/api/ai/agent", { command, messages }),
   aiAsk: (question) => request("POST", "/api/ai/ask", { question }),
 
   // Журнал событий: просмотр, типы, целостность, выгрузка файлом.

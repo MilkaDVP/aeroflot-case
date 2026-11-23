@@ -2083,13 +2083,13 @@
 
 .ai-icon-action:hover { color: #fff; border-color: var(--ai-blue); }
 
-/* «Спросить ИИ». */
+/* ИИ-агент: просьба, шаги, ответ. */
 .ai-ask {
   border-top: 1px solid var(--ai-line);
   padding: var(--gap-sm) var(--gap);
 }
 
-.ai-answers { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.ai-answers { max-height: 38vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .ai-answers:empty { display: none; }
 
 .ai-qa { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
@@ -2116,6 +2116,12 @@
   line-height: 1.45;
 }
 
+.ai-idle { font-size: var(--fs-xs); color: var(--text-dim); padding-left: 10px; }
+.ai-step { padding-left: 18px; position: relative; font-size: var(--fs-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.ai-step::before { content: "•"; position: absolute; left: 4px; color: var(--ai-sky); }
+.ai-step.is-done::before { content: "✓"; color: var(--ok); }
+.ai-step.is-failed::before { content: "!"; color: var(--danger); font-weight: 700; }
+.ai-step.is-cancelled::before { content: "×"; color: var(--warn); }
 .ai-ask-row { display: flex; gap: 6px; }
 .ai-ask-row input {
   flex: 1;

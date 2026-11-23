@@ -1,5 +1,5 @@
 """
-Клиент GigaChat — только для пояснений ИИ-диспетчера.
+Клиент GigaChat: пояснения ИИ-диспетчера и ходы ИИ-агента.
 
 Решения (кого отправить на какой вызов) принимает встроенный алгоритм
 подбора: допуск, маршрут, 15-минутный регламент. GigaChat лишь пересказывает
@@ -10,6 +10,8 @@
     GIGACHAT_AUTH_KEY   ключ авторизации из личного кабинета (Basic, base64)
     GIGACHAT_SCOPE      область доступа, по умолчанию GIGACHAT_API_PERS
     GIGACHAT_MODEL      модель, по умолчанию GigaChat
+    GIGACHAT_AGENT_MODEL модель ИИ-агента, по умолчанию GigaChat-2-Max;
+                        недоступна — агент работает на GIGACHAT_MODEL
     GIGACHAT_ENABLED    0 — выключить GigaChat при заданном ключе
     GIGACHAT_VERIFY_SSL 0 — не проверять сертификат сервера (только локально)
     GIGACHAT_CA_BUNDLE  путь к сертификату «Минцифры» (Russian Trusted Root CA),
@@ -28,6 +30,7 @@ import httpx
 OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 TIMEOUT_S = 20
+AGENT_TIMEOUT_S = 45
 # Токен живёт 30 минут; обновляем чуть раньше, чтобы не поймать отказ.
 TOKEN_MARGIN_S = 60
 
@@ -102,6 +105,40 @@ def _access_token(client):
         # expires_at приходит в миллисекундах.
         _token["expires_at"] = body.get("expires_at", 0) / 1000 or time.time() + 1800
         return _token["value"]
+
+
+def chat(messages, temperature=0.1, max_tokens=900):
+    """
+    Ответ модели на разговор целиком или None, если GigaChat недоступен.
+    """
+    if not configured():
+        _last_error["text"] = "GigaChat не настроен или выключен"
+        return None
+    base = os.environ.get("GIGACHAT_MODEL", "GigaChat")
+    models = dict.fromkeys([os.environ.get("GIGACHAT_AGENT_MODEL", "GigaChat-2-Max"), base])
+    try:
+        with httpx.Client(timeout=AGENT_TIMEOUT_S, verify=_verify()) as client:
+            token = _access_token(client)
+            for model in models:
+                response = client.post(
+                    CHAT_URL,
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                )
+                # Модель недоступна по тарифу или исчерпан её лимит.
+                if response.status_code not in (402, 403, 404, 429):
+                    break
+            response.raise_for_status()
+            _last_error["text"] = None
+            return response.json()["choices"][0]["message"]["content"]
+    except Exception as error:  # сеть, сертификат, лимиты, формат ответа
+        _last_error["text"] = f"{type(error).__name__}: {str(error)[:200]}"
+        return None
 
 
 def complete(system, user, temperature=0.2, max_tokens=400):
