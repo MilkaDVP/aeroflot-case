@@ -27,6 +27,7 @@ from api import (
     reference,
     reports,
     shift,
+    track,
     vehicles,
 )
 from database import SessionLocal, begin_dispatch_write, create_all
@@ -145,6 +146,7 @@ app.include_router(shift.router)
 app.include_router(drill.router)
 app.include_router(reports.router)
 app.include_router(vehicles.router)
+app.include_router(track.router)
 app.include_router(admin_airports.router)
 
 

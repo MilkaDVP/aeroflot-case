@@ -486,6 +486,8 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None):
     employee.location_source = source
     employee.location_at = now - age
     employee.seen_at = now
+    employee.location_accuracy_m = None
+    employee.location_speed_mps = None
     employee.updated_at = now
 
     pick_up_if_near(employee)
