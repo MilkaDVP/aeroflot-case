@@ -283,7 +283,17 @@ def move_aircraft(
         if aircraft.stand_node_id == target["id"] and not was_free:
             return aircraft_response(graph, aircraft)
 
-    stand = target
+    apply_aircraft_move(db, graph, aircraft, target)
+    db.commit()
+    return aircraft_response(graph, aircraft)
+
+
+def apply_aircraft_move(db, graph, aircraft, stand):
+    """
+    Привязывает борт к вершине stand и перестраивает маршруты открытых
+    по нему вызовов. Общая часть ручной перестановки и приёма треков
+    (POST /api/v1/track). Нет маршрута — HTTPException 409.
+    """
     aircraft.stand_node_id = stand["id"]
     calls = db.query(Call).filter(
         Call.aircraft_id == aircraft.id, Call.status.in_(ACTIVE_CALL_STATUSES)
@@ -303,8 +313,6 @@ def move_aircraft(
     for employee in employees:
         if not replan_queue(db, employee):
             raise HTTPException(status.HTTP_409_CONFLICT, "Нет маршрута между вызовами в очереди")
-    db.commit()
-    return aircraft_response(graph, aircraft)
 
 
 @router.delete(

@@ -25,6 +25,7 @@ from api import (
     reference,
     reports,
     shift,
+    track,
     users,
     vehicles,
 )
@@ -179,6 +180,7 @@ app.include_router(admin_airports.router)
 app.include_router(ai.router)
 app.include_router(events.router)
 app.include_router(users.router)
+app.include_router(track.router)
 
 
 @app.get("/api/health", tags=["Служебное"], summary="Проверка живости")
