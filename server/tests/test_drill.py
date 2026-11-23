@@ -5,9 +5,9 @@
 такты в тестах выключены, поэтому результат не зависит от часов.
 """
 
+from tests.test_api import auth_header
 from database import SessionLocal
 from services import drill
-from tests.test_api import auth_header
 from tests.test_mentor import MentorCase
 
 
