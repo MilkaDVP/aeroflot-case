@@ -159,6 +159,8 @@ def advance(db, call, dt_s, now):
     employee = call.assigned_employee
     if employee is None or employee.held or not employee.is_training:
         return False
+    if not call.route_node_ids and not reroute_after_move(db, employee):
+        return False
     if not call.route_node_ids:
         return False
 

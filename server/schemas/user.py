@@ -20,6 +20,7 @@ class UserCreateRequest(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
+    airport_icao: str | None = None
     login: str | None = Field(default=None, min_length=1)
     """Правка учётной записи: ФИО, новый пароль, роль. Всё необязательно."""
 

@@ -659,12 +659,19 @@ function accountRow(user) {
       // Инженер правится вместе с карточкой (квалификация, допуски), а она
       // есть только в аэропорту сессии. Сюда попадают инженеры, чья
       // карточка не загружена: аэропорт не выбран или он другой.
-      const edit = actionButton("Изменить", "", () => {});
-      edit.disabled = true;
-      edit.title = state.user.airport_icao
-        ? `Инженер аэропорта ${user.airport_icao}: переключите аэропорт в шапке, чтобы изменить квалификацию`
-        : "Выберите аэропорт в шапке, чтобы изменить квалификацию и допуски";
-      actions.append(edit);
+      actions.append(actionButton("Изменить", "", async () => {
+        try {
+          await Api.selectAirport(user.airport_icao, state.user.shift || "day");
+          state.user = await Api.me();
+          state.graph = null;
+          fillAirportSwitch();
+          await loadUsers();
+          const employee = state.people.employees.find(item => item.id === user.employee_id);
+          if (employee) startEngineerEdit(employee, user);
+        } catch (error) {
+          window.alert(error.detail);
+        }
+      }));
     } else {
       actions.append(actionButton("Изменить", "", () => startAccountEdit(user)));
     }
@@ -779,7 +786,7 @@ function syncUserForm() {
   }
   el("user-note").dataset.airportHint = needAirport ? "1" : "";
   // Инженер заводится в аэропорту сессии: места берутся из его схемы.
-  el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || editing !== null;
+  el("user-airport-box").hidden = engineer || el("user-role").value === "admin" || (editing !== null && state.user.role !== "admin");
 
   el("user-login-row").hidden = editing !== null && !canManageAccounts();
   el("user-login").required = !engineer && editing === null;
@@ -822,6 +829,7 @@ function startAccountEdit(user) {
   fillRoleSelect(user.role);
   el("user-password").value = "";
   el("user-password-label").textContent = "Новый пароль (пусто — не менять)";
+  el("user-airport").value = user.airport_icao || el("user-airport").value;
   el("user-login").value = user.login;
   openUserEdit(`Изменить: ${user.login}`);
 }
@@ -848,6 +856,7 @@ function startEngineerEdit(employee, account) {
     el("user-valid").value = mark.valid_until;
   }
   el("user-place").value = nearestPlaceId(employee) || el("user-place").value;
+  el("user-place").dataset.original = el("user-place").value;
   el("user-on-shift").checked = employee.always_on_shift;
   // Занятого снять со смены может только технический администратор:
   // сервер вернёт его вызовы к подбору (services/shifts.end_shift).
@@ -950,6 +959,7 @@ async function saveAccount(user) {
   const changes = { full_name: el("user-name").value.trim(), login: el("user-login").value.trim() };
   if (el("user-password").value) changes.password = el("user-password").value;
   if (el("user-role").value !== user.role) changes.role = el("user-role").value;
+  if (state.user.role === "admin" && el("user-role").value !== "admin" && el("user-airport").value !== user.airport_icao) changes.airport_icao = el("user-airport").value;
   const updated = await Api.updateUser(user.id, changes);
   return `${updated.login}: изменения сохранены`;
 }
@@ -989,7 +999,7 @@ async function saveEngineer({ employee, account }) {
   }
   // Начальнику смены сервер разрешает только смену и статус.
   const changes = canManageAccounts()
-    ? { full_name: card.full_name, shift: card.shift, qualifications: card.qualifications }
+    ? { full_name: card.full_name, shift: card.shift, qualifications: [...card.qualifications, ...employee.qualifications.slice(1)] }
     : { shift: card.shift };
   // Снятие со смены передаётся и для занятого (его вызов вернётся к
   // подбору); «на смене» для занятого не шлём — он и так на смене.
@@ -1000,7 +1010,7 @@ async function saveEngineer({ employee, account }) {
     if (el("user-password").value) changes.password = el("user-password").value;
   }
   const updated = await Api.updateEmployee(employee.id, changes);
-  if (employee.lat !== card.lat || employee.lon !== card.lon) {
+  if (el("user-place").value !== el("user-place").dataset.original) {
     await Api.sendLocation(employee.id, card.lat, card.lon);
   }
 

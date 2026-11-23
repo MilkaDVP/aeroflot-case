@@ -222,6 +222,14 @@ def update_user(
         user.role = payload.role
         if payload.role == ROLE_ADMIN:
             user.airports.clear()
+    if payload.airport_icao is not None:
+        if actor.role != ROLE_ADMIN or user.role in (ROLE_ADMIN, ROLE_ENGINEER):
+            raise HTTPException(403, ERROR_FOREIGN)
+        airport = db.get(Airport, payload.airport_icao.upper())
+        if airport is None:
+            raise HTTPException(404, ERROR_NO_AIRPORT.format(icao=payload.airport_icao))
+        user.airports = [airport]
+        drop_sessions(db, user)
     if payload.login and payload.login.strip() != user.login:
         login = payload.login.strip()
         if not login or db.query(User.id).filter_by(login=login).first():
