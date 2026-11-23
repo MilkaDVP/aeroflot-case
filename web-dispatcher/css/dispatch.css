@@ -68,24 +68,6 @@
   cursor: help;
 }
 
-/* Жёлтый, а не красный: учения — не тревога, но диспетчер обязан
-   видеть, что картина на карте учебная. */
-.drill-badge {
-  padding: 3px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
-  background: var(--warn-soft);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-}
-
-.drill-badge[hidden] {
-  display: none;
-}
-
 /* --- Панели --- */
 
 .panel {
@@ -1423,8 +1405,6 @@
   stroke: var(--danger);
   stroke-dasharray: 2 2;
 }
-
-/* --- Режим учений --- */
 
 /* --- Входящие сообщения экипажа --- */
 

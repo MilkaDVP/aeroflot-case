@@ -11,6 +11,7 @@ const state = {
   user: null,
   call: null,
   position: null,
+  returnLeg: null,
   // Последние отправленные координаты: чтобы не слать одно и то же.
   sentAt: 0,
   onShift: false,
@@ -265,6 +266,7 @@ async function refresh() {
     const payload = await Api.currentCall();
     // Сервер отдаёт либо вызов с маршрутом, либо сообщение «вызовов нет».
     const previous = state.call ? state.call.call : null;
+    state.returnLeg = payload?.instruction && !payload.call ? payload : null;
     state.call = payload && payload.call ? payload : null;
     state.offline = false;
     state.snapshotAt = Date.now();
@@ -289,6 +291,7 @@ async function refresh() {
 function saveSnapshot() {
   OfflineStore.set(KEY_SNAPSHOT, {
     payload: state.call,
+    returnLeg: state.returnLeg,
     at: state.snapshotAt,
     employeeId: state.user.employee_id,
   });
@@ -305,6 +308,7 @@ async function goOffline() {
     const snapshot = await OfflineStore.get(KEY_SNAPSHOT);
     if (snapshot && snapshot.employeeId === state.user.employee_id && state.call === null) {
       state.call = snapshot.payload;
+      state.returnLeg = snapshot.returnLeg || null;
       state.snapshotAt = snapshot.at;
     }
     state.offline = true;
@@ -429,8 +433,8 @@ function renderWork() {
   // Машина — главное указание в пути: без подсказки инженер пойдёт
   // пешком и опоздает, хотя маршрут посчитан через машину.
   const vehicle = state.call.vehicle;
-  el("call-vehicle").hidden = !vehicle;
-  el("call-vehicle").textContent = vehicleInstruction(vehicle);
+  el("call-vehicle").hidden = !vehicle && !state.call.instruction;
+  el("call-vehicle").textContent = state.call.instruction || vehicleInstruction(vehicle);
   el("call-eta").textContent =
     call.eta_minutes === null ? "—" : `${formatMinutes(call.eta_minutes)} мин`;
 
@@ -591,7 +595,7 @@ function vehicleInstruction(vehicle) {
 }
 
 function renderIdle() {
-  el("work-status").textContent = state.onShift ? "на смене, свободен" : "на смене";
+  el("work-status").textContent = state.returnLeg?.instruction || (state.onShift ? "на смене, свободен" : "на смене");
   el("work-status-dot").className = "status-dot";
   el("idle-coords").textContent = state.position
     ? `${state.position.lat.toFixed(5)}, ${state.position.lon.toFixed(5)}`
@@ -721,7 +725,7 @@ function updateDistance() {
 
 /** Точка назначения — последний узел маршрута, то есть стоянка борта. */
 function targetPoint() {
-  const points = state.call ? state.call.route_points : null;
+  const points = state.call?.route_points || state.returnLeg?.route_points;
   return points && points.length ? points[points.length - 1] : null;
 }
 
@@ -733,7 +737,7 @@ function targetPoint() {
  * было куда ткнуть пальцем в режиме имитации.
  */
 function drawRoute() {
-  const points = state.call ? state.call.route_points : [];
+  const points = state.call?.route_points || state.returnLeg?.route_points || [];
   const choosing = locator.mode === "simulation" && !locator.last && state.airportPoint;
   routeMap.render(
     points,
@@ -808,7 +812,7 @@ function onPosition(position) {
     renderIdle();
   }
 
-  if (Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+  if (position.source === "simulation" || Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
     sendPosition(position);
   }
 }
@@ -842,7 +846,7 @@ function sendPosition(position) {
  * так сервер отличает «на связи, но GPS потерян» от «на связи и стоит».
  */
 function sendHeartbeat() {
-  if (locator.last && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+  if (locator.last?.source === "gps" && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
     sendPosition(locator.last);
   }
 }
@@ -1028,6 +1032,7 @@ async function logout() {
   state.onShift = false;
   stopWork();
   Session.clear();
+  state.returnLeg = null;
   state.user = null;
   state.position = null;
   state.sentAt = 0;

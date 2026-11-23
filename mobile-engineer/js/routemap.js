@@ -366,7 +366,7 @@ class RouteMap {
    * заметном перемещении. Кэш здесь усложнил бы код без выигрыша.
    */
   drawTiles() {
-    this.tileLayer.replaceChildren();
+    const existing = new Map(Array.from(this.tileLayer.querySelectorAll("[data-key]"), tile => [tile.dataset.key, tile]));
     if (!this.showImagery || !this.view) {
       return;
     }
@@ -395,23 +395,22 @@ class RouteMap {
 
     for (let cx = Math.max(0, columns[0]); cx <= Math.min(columns[1], limit - 1); cx += 1) {
       for (let cy = Math.max(0, rows[0]); cy <= Math.min(rows[1], limit - 1); cy += 1) {
-        const image = document.createElementNS(SVG_NS, "image");
-        image.setAttribute(
-          "href",
-          ESRI_IMAGERY.replace("{z}", zoom).replace("{x}", cx).replace("{y}", cy)
-        );
+        const key = [zoom, cx, cy].join("/");
+        const image = existing.get(key) || satelliteTile(ESRI_IMAGERY, zoom, cx, cy);
+        existing.delete(key);
+        image.dataset.key = key;
         image.setAttribute("x", (cx * TILE_SIZE - worldX0) * resolution);
         image.setAttribute("y", (cy * TILE_SIZE - worldY0) * resolution);
         image.setAttribute("width", tileSpanM + bleed);
         image.setAttribute("height", tileSpanM + bleed);
         image.setAttribute("preserveAspectRatio", "none");
-        image.setAttribute("class", "map-tile");
-        image.addEventListener("load", () => image.classList.add("loaded"));
-        this.tileLayer.append(image);
+        image.classList.add("map-tile");
+        if (!image.parentNode) this.tileLayer.append(image);
       }
     }
 
-    const scrim = document.createElementNS(SVG_NS, "rect");
+    for (const tile of existing.values()) tile.remove();
+    const scrim = this.tileLayer.querySelector(".map-scrim") || document.createElementNS(SVG_NS, "rect");
     scrim.setAttribute("x", this.view.minX);
     scrim.setAttribute("y", this.view.minY);
     scrim.setAttribute("width", this.view.width);

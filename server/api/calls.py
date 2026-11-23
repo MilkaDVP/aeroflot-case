@@ -29,8 +29,10 @@ from models.call import STATUS_CLOSED as CALL_CLOSED
 from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import STATUS_SUGGESTED as CALL_SUGGESTED
-from services.drill import is_enabled
-from models.employee import RouteParticipant
+from models.employee import Employee
+from models.vehicle import Vehicle
+from constants import VEHICLE_FREE, VEHICLE_RESERVED, VEHICLE_IN_USE
+from services.assignment import assigned_route, update_assigned_route, release_vehicle
 from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
@@ -223,9 +225,8 @@ def defect_summary(call):
 
 def shift_employees(db, context):
     """Сотрудники аэропорта сессии в виде словарей для алгоритма."""
-    employees = db.query(RouteParticipant).filter_by(
+    employees = db.query(Employee).filter_by(
         archived=False, airport_icao=context.airport_icao,
-        is_training=is_enabled(db, context.airport_icao),
     ).all()
     return [employee.as_algorithm_dict() for employee in employees]
 
@@ -240,7 +241,7 @@ def candidates_for(db, context, call):
     с причиной снятия, чтобы решение можно было пересмотреть.
     """
     employees = shift_employees(db, context)
-    if call.previous_employee_id is None:
+    if call.previous_employee_id is None or call.allow_previous_employee:
         return employees, None
 
     removed = None
@@ -297,7 +298,7 @@ def describe_busy(db, entry):
     в 14:40», но и чем человек занят: того, кто ждёт запчасти, можно
     переключить без вреда, а того, кто вскрыл агрегат, — нельзя.
     """
-    employee = db.get(RouteParticipant, entry["employee_id"])
+    employee = db.get(Employee, entry["employee_id"])
     working = working_call_of(db, employee) if employee is not None else None
     if working is None:
         return
@@ -506,12 +507,10 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         ride_vehicle = lead.vehicle
         if ride_vehicle is None:
             raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_LEAD_VEHICLE)
-    employee = db.get(RouteParticipant, payload.employee_id)
+    employee = db.get(Employee, payload.employee_id)
     if employee is None or employee.archived:
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
     check_same_airport(context, employee.airport_icao)
-    if employee.is_training != is_enabled(db, context.airport_icao):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Исполнитель недоступен в текущем режиме")
     check_permit(call, employee)
 
     # Подбор выполняется перед каждым назначением. Предложение системы
@@ -569,11 +568,50 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         # Своя машина, если она есть, остаётся там, где стоит: в этот
         # вызов она не входит, и на карточке её быть не должно.
         call.vehicle = None
+        if employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE:
+            employee.return_vehicle = True
+        else:
+            release_vehicle(employee)
     elif ride_vehicle is not None:
         # Машина остаётся за ответственным: он её забирает и отвечает за
         # неё; второй едет пассажиром, поэтому за ним она не числится.
         call.vehicle = ride_vehicle
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
+
+
+@router.post("/{call_id}/transport", response_model=CallResponse)
+def change_transport(call_id: int, vehicle_id: int | None = None,
+                     db: Session = Depends(get_dispatch_db),
+                     context: Context = Depends(require_roles(*DISPATCH_ROLES))):
+    call = load_call(db, context, call_id)
+    claims.ensure_can_change(db, call, context.user)
+    employee = call.assigned_employee
+    if not employee or call.status not in ("assigned", "accepted"):
+        raise HTTPException(409, "Транспорт меняют у инженера в пути")
+    if call.vehicle_id == vehicle_id:
+        return to_response(call, db)
+    target = db.get(Vehicle, vehicle_id) if vehicle_id else None
+    if vehicle_id is not None and (not target or target.archived or target.airport_icao != call.airport_icao
+                                   or (target.status != VEHICLE_FREE and target != employee.vehicle)):
+        raise HTTPException(409, "Машина недоступна")
+    if call.vehicle and call.vehicle.status == VEHICLE_RESERVED and not call.vehicle.employee:
+        call.vehicle.status = VEHICLE_FREE
+    old = employee.vehicle
+    employee.return_vehicle = bool(old and old != target and old.status == VEHICLE_IN_USE)
+    if old and old != target and not employee.return_vehicle:
+        release_vehicle(employee)
+    call.vehicle = target
+    call.require_vehicle_pickup = target is not None and target.status != VEHICLE_IN_USE
+    if target and target != old:
+        target.status = VEHICLE_RESERVED
+        if not employee.return_vehicle:
+            target.employee = employee
+    plan = assigned_route(call, get_graph(call.airport_icao))
+    if not plan:
+        raise HTTPException(409, ERROR_NO_ROUTE)
+    update_assigned_route(call, plan)
+    db.commit()
+    return to_response(call, db)
 
 
 @router.post(
@@ -603,7 +641,7 @@ def add_support(
         item.assigned_employee_id for item in support.support_calls(root)
     ]
     if payload.employee_id in team:
-        employee = db.get(RouteParticipant, payload.employee_id)
+        employee = db.get(Employee, payload.employee_id)
         raise HTTPException(
             status.HTTP_409_CONFLICT, ERROR_ALREADY_ON_CALL.format(name=employee.full_name)
         )

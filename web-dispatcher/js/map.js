@@ -33,7 +33,7 @@ const VIEW_PADDING_M = 120;
 const EMPTY_VIEW_HALF_M = 1500;
 
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 30;
+const MAX_ZOOM = 128;
 
 // След хранит точки за это время и не короче этого шага между точками.
 const TRAIL_WINDOW_MS = 3 * 60 * 1000;
@@ -513,6 +513,7 @@ class AirportMap {
 
   /** Можно ли переносить объект. Машину — только свободную. */
   canMove(kind, item) {
+    if (kind === "employee") return item.location_source !== "gps";
     return kind !== "vehicle" || item.status === "free";
   }
 
@@ -842,10 +843,7 @@ class AirportMap {
       // Точка, поставленная вручную (перенос на карте), — не движение:
       // след от старого места к новому выглядел бы как пройденный путь.
       // Такой след сбрасывается и начинается заново с настоящих координат.
-      // Учебного инженера сервер ведёт по маршруту тоже «ручными» точками —
-      // это настоящее движение, и след у него остаётся (его ручной перенос
-      // мышью сбрасывает след при отпускании, см. drop()).
-      if (employee.location_source === "manual" && !employee.is_training) {
+      if (employee.location_source === "manual") {
         this.trails.delete(employee.id);
         continue;
       }
@@ -892,8 +890,7 @@ class AirportMap {
     if (known.length === 0) {
       return false;
     }
-    // Маршрут из одной вершины. Если известно, где исполнитель (учебный
-    // инженер после ручного переноса, сотрудник у самого борта), линия
+    // Маршрут из одной вершины. Если известно, где исполнитель, линия
     // идёт от его текущего места; иначе он уже у борта — отмечен конец.
     if (known.length === 1) {
       const target = this.nodesById.get(known[0]);

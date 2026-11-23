@@ -222,6 +222,19 @@ def update_user(
         user.role = payload.role
         if payload.role == ROLE_ADMIN:
             user.airports.clear()
+    if payload.airport_icao is not None:
+        if actor.role != ROLE_ADMIN or user.role in (ROLE_ADMIN, ROLE_ENGINEER):
+            raise HTTPException(403, ERROR_FOREIGN)
+        airport = db.get(Airport, payload.airport_icao.upper())
+        if airport is None:
+            raise HTTPException(404, ERROR_NO_AIRPORT.format(icao=payload.airport_icao))
+        user.airports = [airport]
+        drop_sessions(db, user)
+    if payload.login and payload.login.strip() != user.login:
+        login = payload.login.strip()
+        if not login or db.query(User.id).filter_by(login=login).first():
+            raise HTTPException(409, ERROR_LOGIN_TAKEN.format(login=login))
+        user.login = login
     if payload.full_name:
         user.full_name = payload.full_name.strip()
     if payload.password:
@@ -272,6 +285,9 @@ def force_logout(
 
 def drop_sessions(db, user):
     # Вместе с сеансами освобождаются вызовы, которые человек разбирал.
+    if user.employee and not user.employee.always_on_shift:
+        from services.shifts import end_shift
+        end_shift(db, user.employee, "Сеанс завершён")
     claims.release_all(db, user.id)
     db.query(AuthSession).filter(AuthSession.user_id == user.id).delete(
         synchronize_session=False

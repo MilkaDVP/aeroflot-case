@@ -141,6 +141,7 @@ function extractDetail(payload, status) {
 }
 
 const Api = {
+  changeTransport: (id, vehicle) => request("POST", `/api/calls/${id}/transport${vehicle ? "?vehicle_id=" + vehicle : ""}`),
   login: (login, password) => request("POST", "/api/auth/login", { login, password }),
   logout: () => request("POST", "/api/auth/logout"),
   me: () => request("GET", "/api/auth/me"),
@@ -150,8 +151,8 @@ const Api = {
   airports: () => request("GET", "/api/airports"),
   airportGraph: (icao) => request("GET", `/api/airports/${icao}`),
 
+  adminRoster: () => request("GET", "/api/employees/roster"),
   airportRoster: () => request("GET", "/api/employees?all_shifts=true"),
-  mapParticipants: () => request("GET", "/api/employees?include_training=true"),
   employees: (shift) =>
     request("GET", shift ? `/api/employees?shift=${shift}` : "/api/employees"),
   // Имитация координат с рабочего экрана: задание разрешает задавать
@@ -232,11 +233,6 @@ const Api = {
   rejectReport: (reportId, reason) =>
     request("POST", `/api/reports/${reportId}/reject`, { reason }),
 
-  // Режим учений: состояние, переключение (администратор), задержка сотрудника.
-  drillState: () => request("GET", "/api/drill"),
-  setDrill: (enabled) => request("POST", "/api/drill", { enabled }),
-  holdEmployee: (employeeId, held) =>
-    request("POST", `/api/drill/hold/${employeeId}`, { held }),
 
   // Лента Наставника и итог смены одним ответом.
 

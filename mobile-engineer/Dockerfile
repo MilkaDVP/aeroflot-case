@@ -9,6 +9,7 @@ COPY mobile-engineer/nginx.conf /etc/nginx/conf.d/default.conf
 COPY mobile-engineer/index.html mobile-engineer/manifest.json \
      mobile-engineer/sw.js /usr/share/nginx/html/
 COPY mobile-engineer/css/ /usr/share/nginx/html/css/
+COPY web-dispatcher/js/satellite.js /usr/share/nginx/html/js/satellite.js
 COPY mobile-engineer/js/ /usr/share/nginx/html/js/
 COPY mobile-engineer/icons/ /usr/share/nginx/html/icons/
 

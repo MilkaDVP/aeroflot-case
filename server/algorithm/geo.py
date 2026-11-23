@@ -11,6 +11,19 @@ import math
 EARTH_RADIUS_M = 6371008.8
 
 
+def distance_to_segment(lat, lon, a, b):
+    scale = math.cos(math.radians(lat))
+    def offset(point):
+        return (math.radians(point["lon"] - lon) * EARTH_RADIUS_M * scale,
+                math.radians(point["lat"] - lat) * EARTH_RADIUS_M)
+    x, y = offset(a)
+    end_x, end_y = offset(b)
+    dx, dy = end_x - x, end_y - y
+    length2 = dx * dx + dy * dy
+    t = max(0, min(1, -(x * dx + y * dy) / length2)) if length2 else 0
+    return math.hypot(x + t * dx, y + t * dy)
+
+
 def haversine_m(lat1, lon1, lat2, lon2):
     """Расстояние между двумя точками по поверхности Земли, в метрах."""
     phi1 = math.radians(lat1)

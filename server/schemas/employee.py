@@ -32,9 +32,7 @@ class EmployeeResponse(BaseModel):
     location_at: str | None = None
     location_source: str | None = None
     seen_at: str | None = None
-    # Задержан на месте в режиме учений.
-    is_training: bool = False
-    held: bool = False
+    always_on_shift: bool = False
 
 
 class EmployeeCreateRequest(BaseModel):
@@ -65,6 +63,9 @@ class EmployeeUpdateRequest(BaseModel):
 
     full_name: str | None = None
     shift: str | None = None
+    always_on_shift: bool | None = None
+    login: str | None = None
+    password: str | None = None
     status: str | None = None
     speed_kmh: float | None = None
     qualifications: list[QualificationSchema] | None = None

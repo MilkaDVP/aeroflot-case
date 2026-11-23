@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,7 +19,6 @@ from api import (
     airports,
     auth,
     calls,
-    drill,
     employees,
     me,
     reference,
@@ -31,9 +29,7 @@ from api import (
 )
 from database import SessionLocal, begin_dispatch_write, create_all
 from graph_registry import load_from_database, preload_all
-from constants import DRILL_MAX_STEP_S, DRILL_TICK_S
 from services.shifts import expire_shifts, initialize_shift_clocks
-from services import drill as drill_service
 from services.defects import ensure_builtin_defects
 
 # Веб-диспетчер и PWA раздаются отдельными статическими сервисами, поэтому
@@ -42,31 +38,21 @@ from services.defects import ensure_builtin_defects
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
 
-async def drill_loop():
-    """Раз в несколько секунд продвигает сотрудников в аэропортах с учениями."""
-    last = time.monotonic()
+async def shift_loop():
     while True:
-        await asyncio.sleep(DRILL_TICK_S)
-        now = time.monotonic()
-        dt_s = min(now - last, DRILL_MAX_STEP_S)
-        last = now
-        # Работа с базой синхронная — в отдельном потоке, чтобы такт
-        # не задерживал обработку запросов.
-        await asyncio.to_thread(drill_tick, dt_s)
+        await asyncio.sleep(2)
+        await asyncio.to_thread(update_shifts)
 
 
-def drill_tick(dt_s):
-    """Один такт учений по всем аэропортам, где они включены."""
+def update_shifts():
     db = SessionLocal()
     try:
         begin_dispatch_write(db)
         expire_shifts(db)
-        for icao in drill_service.enabled_airports(db):
-            drill_service.step(db, icao, dt_s)
         db.commit()
     except Exception as error:  # такт не должен ронять сервер
         db.rollback()
-        print(f"Учения: такт пропущен — {error}")
+        print(f"Не удалось обновить смены — {error}")
     finally:
         db.close()
 
@@ -88,9 +74,9 @@ async def lifespan(app: FastAPI):
     # Наполнение базы при первом запуске. Жюри разворачивает проект одной
     # командой и сразу видит рабочую систему, а не пустые экраны.
     if os.environ.get("SEED_ON_START", "1") == "1":
-        from seed import seed_if_empty
+        from seed import initialize_base
 
-        seed_if_empty()
+        initialize_base()
 
     loaded = preload_all()
 
@@ -102,8 +88,6 @@ async def lifespan(app: FastAPI):
         initialize_shift_clocks(db)
         expire_shifts(db)
         custom = load_from_database(db)
-        for icao in drill_service.enabled_airports(db):
-            drill_service.ensure_training_team(db, icao)
         db.commit()
     finally:
         db.close()
@@ -112,14 +96,12 @@ async def lifespan(app: FastAPI):
     if custom:
         print(f"Аэропорты из базы: {', '.join(custom)}")
 
-    # Такты режима учений. Задача живёт всё время работы сервера, но
-    # что-то делает только там, где администратор учения включил.
-    ticker = None
-    if os.environ.get("DRILL_LOOP", "1") == "1":
-        ticker = asyncio.create_task(drill_loop())
-    yield
-    if ticker is not None:
+    ticker = asyncio.create_task(shift_loop())
+    try:
+        yield
+    finally:
         ticker.cancel()
+        await asyncio.gather(ticker, return_exceptions=True)
 
 
 app = FastAPI(
@@ -147,7 +129,6 @@ app.include_router(calls.router)
 app.include_router(me.router)
 app.include_router(reference.router)
 app.include_router(shift.router)
-app.include_router(drill.router)
 app.include_router(reports.router)
 app.include_router(vehicles.router)
 app.include_router(admin_airports.router)

@@ -287,7 +287,7 @@ class TestNoSilentRelease(ApiTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["status"], "assigned")
 
-    def test_уйти_со_смены_с_незакрытым_вызовом_нельзя(self):
+    def test_уход_со_смены_освобождает_инженера(self):
         _, sokolov_id = self.assign_sokolov()
         engineer = self.login("sokolov", "engineer")
         response = self.client.post(
@@ -295,7 +295,8 @@ class TestNoSilentRelease(ApiTestCase):
             json={"on_shift": False},
             headers=auth_header(engineer),
         )
-        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "offline")
 
     def test_повторный_подбор_не_переписывает_историю_назначения(self):
         # После назначения Соколов занят, и новый подбор предложил бы
