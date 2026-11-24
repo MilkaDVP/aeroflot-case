@@ -33,7 +33,7 @@ from models.event_log import TRIGGERS, EventLog
 from models.report import REPORT_ACCEPTED, REPORT_NEW, REPORT_REJECTED, Report
 from models.shift_event import ShiftEvent
 from models.vehicle import Vehicle
-from services import journal, mentor, polygon, tracking
+from services import drill, journal, mentor, polygon, tracking
 
 KEEP_BACKUPS = 5
 BACKUP_MARK = ".before-clear-"
@@ -92,6 +92,7 @@ def clear(db, shift):
     if db.query(Employee.id).filter_by(airport_icao=polygon.ICAO).first():
         polygon.reset(db, shift)
     tracking.forget_points()
+    drill.stop_all()
     db.flush()
     return {"backup": name, **counts}
 

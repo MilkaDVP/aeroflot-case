@@ -20,6 +20,13 @@
       <!-- Только полигон ВДНХ, администратор аэропорта -->
       <button type="button" id="polygon-reset" hidden>Сбросить полигон</button>
       <button type="button" id="report-open">Отчёт</button>
+      <!-- Учения: значок видят все, переключает администратор аэропорта -->
+      <span class="drill-badge" id="drill-badge" hidden>Учения</span>
+      <select id="drill-speed" class="drill-speed" title="Скорость учений" aria-label="Скорость учений" hidden>
+        <option value="1">1×</option><option value="2">2×</option><option value="4">4×</option>
+        <option value="8">8×</option><option value="16">16×</option><option value="32">32×</option>
+      </select>
+      <button type="button" id="drill-toggle" hidden>Начать учения</button>
       <!-- ИИ-диспетчер: план назначений по всем ждущим вызовам -->
       <button type="button" id="ai-toggle" class="ai-toggle" aria-expanded="false" hidden>ИИ-диспетчер</button>
       <span class="clock" id="clock">--:--:--</span>

@@ -22,7 +22,7 @@ from models.employee import Employee
 from models.report import REPORT_NEW, REPORT_REJECTED, Report
 from models.user import AuthSession, User
 from models.vehicle import Vehicle
-from services import tracking
+from services import drill, tracking
 
 ICAO = "VDNH"
 LAYERS = AIRPORTS_DIR.parent / "geodata" / "vdnh"
@@ -53,6 +53,7 @@ def reset(db, shift):
     db.flush()
     # Иначе первая точка после сброса сравнивалась бы со старым местом.
     tracking.forget_points()
+    drill.forget_trips()
     return {
         "engineers": len(layer("engineers_positions")),
         "vehicles": len(layer("service_vehicles_positions")),
