@@ -209,6 +209,9 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
+  // Стиль оформления системы — меняет технический администратор.
+  uiStyle: () => request("GET", "/api/ui"),
+  setUiStyle: (style) => request("PUT", "/api/ui", { style }),
   // Подготовка стенда: очистка базы и случайные данные (тех. администратор).
   clearStand: (confirm) => request("POST", "/api/admin/stand/clear", { confirm }),
   randomStand: (days, count) => request("POST", "/api/admin/stand/random", { days, count }),

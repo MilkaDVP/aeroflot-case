@@ -17,7 +17,7 @@
 
 // Номер версии меняется вместе со сменой стратегии: activate удалит
 // кэш прежней версии, и старая оболочка не всплывёт при отказе сети.
-const CACHE_NAME = "oto-engineer-v28";
+const CACHE_NAME = "oto-engineer-v29";
 
 // Сколько ждать сеть, прежде чем открыть оболочку из кэша. На перроне
 // связь не пропадает мгновенно, а «висит»: без предела приложение
@@ -28,6 +28,8 @@ const SHELL = [
   "index.html",
   "manifest.json",
   "css/app.css",
+  "css/aeroflot-themes.css",
+  "js/theme-switch.js",
   "js/offline.js",
   "js/api.js",
   "js/geo.js",

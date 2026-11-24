@@ -14,6 +14,7 @@ from models.employee import Employee
 from models.engineer_action import EngineerAction
 from models.event_log import EventLog
 from models.report import Report
+from models.setting import Setting
 from models.shift_event import ShiftEvent
 from models.user import AuthSession, User
 from models.vehicle import Vehicle
@@ -29,6 +30,7 @@ __all__ = [
     "EngineerAction",
     "EventLog",
     "Report",
+    "Setting",
     "ShiftEvent",
     "User",
     "Vehicle",

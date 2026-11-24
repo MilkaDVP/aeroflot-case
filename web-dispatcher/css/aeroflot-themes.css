@@ -1,0 +1,218 @@
+/* ==========================================================================
+ * АэроКвант × Аэрофлот — темы оформления
+ *
+ * Подключается ПОСЛЕ css/theme.css (диспетчер) и engineer/css/app.css (PWA).
+ * Тема выбирается атрибутом data-theme на <html> — выставляет
+ * js/theme-switch.js (стиль выбирает технический администратор, тему —
+ * каждый себе).
+ *
+ *   legacy  — исходная тема: без атрибута или data-theme="legacy"
+ *             действуют старые значения из :root, откат = убрать атрибут.
+ *   night   — новая дежурная navy-тема (рекомендуемая по умолчанию).
+ *   day     — новая дневная светлая тема.
+ *
+ * Имена переменных совпадают с theme.css / app.css — компоненты менять
+ * не нужно. Контрасты текста в обеих новых темах ≥ 4,5:1 (WCAG AA).
+ * ========================================================================== */
+
+/* ---------- Ночная (новая) ---------- */
+[data-theme="night"] {
+  color-scheme: dark;
+
+  /* Поверхности: глубокий флотский navy вместо нейтрального серого. */
+  --bg-deep: #04091c;
+  --bg-panel: #0a1330;
+  --bg-raised: #0e1a3f;
+  --bg-hover: #132250;
+  --border: #233257;
+  --border-strong: #1b2c63;
+
+  /* Текст. */
+  --text: #eef2fc;
+  --text-muted: #97a3cc;
+  --text-dim: #6b77a3;
+
+  /* Статусы — те же смыслы, тона переподобраны под navy. */
+  --ok: #35c46a;
+  --neutral: #6e7fa8;
+  --warn: #e3a72c;
+  --danger: #f2564d;
+  --route: #5aa2ff;
+  --busy: #a371f7;
+
+  --danger-text: #ff8080;
+  --danger-strong: #c8102e;   /* красный флага под белый текст */
+
+  /* Оранжевый ливреи — цвет действий (главные кнопки, маршрут, фокус). */
+  --route-strong: #e06c00;
+  --route-strong-hover: #f07f14;
+
+  --ok-soft: rgba(53, 196, 106, .14);
+  --warn-soft: rgba(227, 167, 44, .14);
+  --danger-soft: rgba(242, 86, 77, .16);
+  --route-soft: rgba(90, 162, 255, .16);
+  --busy-soft: rgba(163, 113, 247, .14);
+
+  /* Карта. */
+  --map-bg: #070e26;
+  --taxiway: #1b2c63;
+  --taxiway-strong: #2a3c74;
+  --stand: #3f5680;
+}
+
+/* Тёмный текст на оранжевой кнопке: белый не дотягивает до контраста. */
+[data-theme="night"] button.primary { color: #1a0c00; }
+
+/* ---------- Дневная (новая) ---------- */
+[data-theme="day"] {
+  color-scheme: light;
+
+  --bg-deep: #eef1f6;
+  --bg-panel: #ffffff;
+  --bg-raised: #f1f4fa;
+  --bg-hover: #e6ebf5;
+  --border: #d3d9e8;
+  --border-strong: #b8c1d8;
+
+  --text: #0f1a33;
+  --text-muted: #4a567a;
+  --text-dim: #5c6884;
+
+  /* Статусы затемнены до читаемости на белом. */
+  --ok: #178a5e;
+  --neutral: #75819b;
+  --warn: #b07d0a;
+  --danger: #d92038;
+  --route: #1d5fd1;
+  --busy: #7a4fd0;
+
+  --danger-text: #b3122a;
+  --danger-strong: #d92038;
+
+  /* Днём главная кнопка — флотский синий: на белом оранжевый с белым
+     текстом не проходит контраст, синий проходит (5,8:1). */
+  --route-strong: #1d5fd1;
+  --route-strong-hover: #174da8;
+
+  --ok-soft: rgba(23, 138, 94, .12);
+  --warn-soft: rgba(176, 125, 10, .12);
+  --danger-soft: rgba(217, 32, 56, .10);
+  --route-soft: rgba(29, 95, 209, .10);
+  --busy-soft: rgba(122, 79, 208, .12);
+
+  /* Светлая карта. */
+  --map-bg: #edf0f7;
+  --taxiway: #b4bfd9;
+  --taxiway-strong: #93a1c6;
+  --stand: #7e8fb5;
+}
+
+/* Плашки поверх карты: в theme.css у них жёстко зашит тёмный фон —
+   в дневной теме перекрашиваем в светлый, в ночной тонируем в navy. */
+[data-theme="day"] .map-legend { background: rgba(255, 255, 255, .92); }
+[data-theme="day"] .map-credit { background: rgba(255, 255, 255, .75); }
+[data-theme="night"] .map-legend { background: rgba(10, 19, 48, .92); }
+[data-theme="night"] .map-credit { background: rgba(4, 9, 28, .7); }
+
+/* Кнопка ИИ-диспетчера: белый текст зашит в dispatch.css, на светлой
+   подложке не читается. */
+[data-theme="day"] .ai-toggle { color: var(--route); }
+[data-theme="day"] .ai-toggle.active { color: #fff; }
+
+/* Плашки поверх карты в PWA инженера: в app.css фон зашит тёмным. */
+[data-theme="day"] .map-toggle,
+[data-theme="day"] .map-controls button {
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 3px 10px rgba(15, 26, 51, .15);
+}
+[data-theme="day"] .alerts > * { background: rgba(255, 255, 255, .94); }
+[data-theme="day"] .sheet-backdrop { background: rgba(15, 26, 51, .35); }
+[data-theme="night"] .map-toggle,
+[data-theme="night"] .map-controls button { background: rgba(10, 19, 48, .92); }
+[data-theme="night"] .alerts > * { background: rgba(10, 19, 48, .94); }
+
+/* ---------- Дополнения к пакету: места с зашитым цветом ---------- */
+
+/* Второстепенный текст ночной темы: на панелях не дотягивал до 4,5:1. */
+[data-theme="night"] { --text-dim: #8591bd; }
+/* Жёлтый и зелёный текст дневной темы — туда же. */
+[data-theme="day"] { --warn: #8a5f00; --ok: #11704b; }
+[data-theme="night"] .primary { color: #1a0c00; }
+[data-theme="day"] .primary { color: #fff; }
+
+[data-theme="day"] .basemap-switch { background: rgba(255, 255, 255, .92); }
+[data-theme="night"] .basemap-switch { background: rgba(10, 19, 48, .92); }
+[data-theme="day"] .map-search-icon.is-aircraft { color: #4a6484; }
+[data-theme="day"] .schedule-editor input,
+[data-theme="day"] .report-dates input { color-scheme: light; }
+[data-theme="day"] .modal-backdrop,
+[data-theme="day"] .dialog-backdrop { background: rgba(15, 26, 51, .4); }
+
+/* Схема карты на светлом фоне. */
+[data-theme="day"] .aircraft { fill: #3e5a7c; }
+[data-theme="day"] .route-end-label { fill: var(--text); stroke: #fff; }
+[data-theme="day"] .area-boundary { stroke: rgba(29, 95, 209, .5); }
+[data-theme="day"] .area-terminal,
+[data-theme="day"] .area-object { fill: rgba(74, 86, 122, .14); stroke: rgba(74, 86, 122, .55); }
+[data-theme="day"] .area-runway { fill: rgba(15, 26, 51, .06); stroke: rgba(15, 26, 51, .35); }
+[data-theme="day"] .taxiway.road-service,
+[data-theme="day"] .road.road-service { stroke: #7386a3; }
+[data-theme="day"] .taxiway.road-pedestrian,
+[data-theme="day"] .road.road-pedestrian { stroke: #4f9a6e; }
+[data-theme="day"] .taxiway.road-taxi,
+[data-theme="day"] .road.road-taxi { stroke: rgba(168, 116, 0, .6); }
+[data-theme="day"] .taxiway.road-runway,
+[data-theme="day"] .road.road-runway { stroke: rgba(15, 26, 51, .28); }
+/* На спутнике снимок тёмный в любой теме — подписи и дороги прежние. */
+[data-theme="day"] .map.has-basemap .route-end-label { fill: #fff; stroke: #0b0f14; }
+[data-theme="day"] .map.has-basemap .aircraft { fill: #93a7bb; }
+[data-theme="day"] .map.has-basemap .taxiway.road-service,
+[data-theme="day"] .route-map.has-imagery .road.road-service { stroke: rgba(150, 196, 240, .55); }
+[data-theme="day"] .map.has-basemap .taxiway.road-pedestrian,
+[data-theme="day"] .route-map.has-imagery .road.road-pedestrian { stroke: rgba(120, 220, 160, .7); }
+[data-theme="day"] .map.has-basemap .taxiway.road-taxi,
+[data-theme="day"] .route-map.has-imagery .road.road-taxi { stroke: rgba(240, 190, 80, .45); }
+[data-theme="day"] .map.has-basemap .taxiway.road-runway,
+[data-theme="day"] .route-map.has-imagery .road.road-runway { stroke: rgba(255, 255, 255, .45); }
+
+/* ИИ-панель остаётся тёмной в любой теме: внутри неё белый текст. */
+[data-theme="day"] .ai-panel {
+  color-scheme: dark;
+  --bg-deep: #0b0f14; --bg-panel: #121820; --bg-raised: #1a222c; --bg-hover: #222c38;
+  --border: #2a3542; --border-strong: #3a4756;
+  --text: #e4ecf4; --text-muted: #8b9bad; --text-dim: #7b8a9a;
+  --ok: #35c46a; --warn: #e3a72c; --danger: #f2564d; --danger-text: #ff766d; --route: #3d8bfd;
+  color: var(--text);
+}
+[data-theme="day"] .ai-toggle::before { color: var(--route); }
+[data-theme="day"] .ai-toggle.active::before { color: #fff; }
+
+/* Приложение инженера. */
+[data-theme="day"] .road { stroke: #a3b0cc; }
+[data-theme="day"] .stand { fill: #fff; stroke: #60759a; }
+[data-theme="day"] .airport-labels text { fill: #33456b; }
+[data-theme="day"] .airport-labels .label-tech { fill: #8a5f00; }
+[data-theme="day"] .tools-note { color: #5b2fb3; }
+[data-theme="day"] .tools-note.is-done { color: var(--ok); }
+[data-theme="night"] .map-search-icon.is-aircraft { color: #97a3cc; }
+
+/* ---------- Кнопка темы ---------- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+.theme-toggle[hidden] { display: none; }
+.theme-toggle.is-floating {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-panel);
+}

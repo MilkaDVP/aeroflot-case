@@ -216,6 +216,7 @@ function showTab(name) {
 
   if (name === "stand") {
     el("stand-airport").textContent = state.user.airport_icao || "аэропорт не выбран";
+    loadStyle();
   } else if (name === "users") {
     loadUsers();
   } else if (name === "shifts") {
@@ -228,6 +229,38 @@ function showTab(name) {
     Journal.open(state.user);
   }
 }
+
+/* --- Оформление --- */
+
+function paintStyle(style) {
+  for (const button of document.querySelectorAll("#style-switch button")) {
+    button.classList.toggle("active", button.dataset.style === style);
+    button.setAttribute("aria-pressed", String(button.dataset.style === style));
+  }
+}
+
+async function loadStyle() {
+  try {
+    const { style } = await Api.uiStyle();
+    paintStyle(style);
+    AeroTheme.setStyle(style);
+  } catch (error) {
+    paintStyle(AeroTheme.style);
+  }
+}
+
+document.getElementById("style-switch").addEventListener("click", async (event) => {
+  const style = event.target.closest("button")?.dataset.style;
+  if (!style) return;
+  try {
+    await Api.setUiStyle(style);
+    paintStyle(style);
+    AeroTheme.setStyle(style);
+    setNote("style-note", "Стиль сохранён для всех", "is-ok");
+  } catch (error) {
+    setNote("style-note", error.detail, "is-error");
+  }
+});
 
 /* --- Подготовка стенда --- */
 
