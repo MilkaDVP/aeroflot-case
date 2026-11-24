@@ -410,7 +410,11 @@ def live_minutes(call, employee):
         return None
 
     pending = any(not item.get("done_at") for item in (call.waypoints or []))
-    if pending or (call.needs_tools and call.tools_taken_at is None):
+    # Едет не на той машине, что назначена (или назначен путь пешком):
+    # сначала её надо вернуть.
+    own = employee.vehicle
+    returning = own is not None and own.status == VEHICLE_IN_USE and own is not call.vehicle
+    if pending or returning or (call.needs_tools and call.tools_taken_at is None):
         # Инструмент ещё не получен: впереди склад (30 с) и, возможно,
         # пересадка. Прогноз — по тому же плану, что строится инженеру.
         from services.assignment import assigned_route

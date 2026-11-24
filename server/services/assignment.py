@@ -25,7 +25,7 @@ from datetime import timedelta
 
 from algorithm.geo import haversine_m
 from algorithm.routing import route_from_point, shortest_path
-from algorithm.transport import STOP_WAREHOUSE, plan_for, plan_via, plan_walk, warehouses
+from algorithm.transport import STOP_WAREHOUSE, plan_after_return, plan_for, plan_via, plan_walk, warehouses
 from clock import to_iso_utc, utc_now
 from fastapi import HTTPException
 from constants import (
@@ -167,14 +167,34 @@ def mark_waypoint_done(call, node_id=None, at=None):
 
 
 def check_waypoints_reached(call, employee, graph):
-    """Инженер подошёл к следующей точке ближе 25 м — она пройдена."""
-    remaining = remaining_waypoints(call)
-    if not remaining or employee.lat is None:
+    """
+    Инженер подошёл к следующей точке ближе 25 м — она пройдена.
+
+    Несколько точек рядом отмечаются сразу: новых координат стоящий
+    на месте инженер может и не прислать. Склад, который система выбрала
+    сама, отмечается так же, как выбранный диспетчером.
+    """
+    if employee.lat is None:
         return False
-    node = graph.node(remaining[0])
-    if node and haversine_m(employee.lat, employee.lon, node["lat"], node["lon"]) <= WAYPOINT_DONE_RADIUS_M:
-        return mark_waypoint_done(call, remaining[0])
-    return False
+
+    def reached(node_id):
+        node = graph.node(node_id)
+        return bool(node) and haversine_m(
+            employee.lat, employee.lon, node["lat"], node["lon"]) <= WAYPOINT_DONE_RADIUS_M
+
+    done = False
+    # Склад системы впереди остальных точек маршрута или точек не осталось.
+    if getattr(call, "needs_tools", False) and call.tools_taken_at is None:
+        chosen = set(remaining_waypoints(call))
+        first = next((s for s in call.route_stops or []
+                      if s.get("kind") == STOP_WAREHOUSE or s.get("node_id") in chosen), None)
+        if first and first["kind"] == STOP_WAREHOUSE and first["node_id"] not in chosen and reached(first["node_id"]):
+            call.tools_taken_at = utc_now()
+            done = True
+    while (remaining := remaining_waypoints(call)) and reached(remaining[0]):
+        mark_waypoint_done(call, remaining[0])
+        done = True
+    return done
 
 
 def depots_for(call, graph):
@@ -241,22 +261,38 @@ def assigned_route(call, graph):
     employee = call.assigned_employee
     if employee.lat is None or employee.lon is None:
         return None
-    person = employee.as_algorithm_dict()
     vehicle = call.vehicle
+    riding = (vehicle is not None and vehicle.employee_id == employee.id
+              and vehicle.status == VEHICLE_IN_USE and not employee.return_vehicle)
+    return plan_with(employee, call, graph, vehicle, riding)
+
+
+def plan_with(employee, call, graph, vehicle, riding):
+    """
+    Путь инженера к борту вызова на заданной машине (None — пешком).
+
+    riding — он уже на ней. Едет на другой машине — сначала отводит её
+    на место: так же ведёт и телефон.
+    """
     depots = depots_for(call, graph)
     waypoints = remaining_waypoints(call)
-    if vehicle is None:
-        return plan_walk(graph, person, call.stand_node_id, depots, waypoints)
-    if vehicle.status == VEHICLE_RESERVED or vehicle.employee_id != employee.id:
-        if depots or waypoints:
-            # Машина ждёт, а впереди ещё точки маршрута: выбор пути между
-            # ними и этой машиной — как при назначении, но только с ней.
-            plan = plan_for(graph, {**person, "vehicle": None}, call.stand_node_id,
-                            [vehicle.as_algorithm_dict()], depots, waypoints)
-            if plan is not None:
-                return plan
-        return plan_via(graph, person, call.stand_node_id, vehicle.as_algorithm_dict(), waypoints)
-    return plan_for(graph, person, call.stand_node_id, [], depots, waypoints)
+    person = employee.as_algorithm_dict()
+    goal = call.stand_node_id
+    if riding:
+        return plan_for(graph, person, goal, [], depots, waypoints)
+
+    def build_plan(start):
+        if vehicle is None:
+            return plan_walk(graph, start, goal, depots, waypoints)
+        # Машина назначена — путь обязан идти через неё: иначе на карте
+        # была бы ходьба, а прибытие ждало бы машину.
+        return plan_via(graph, start, goal, vehicle.as_algorithm_dict(), waypoints, depots)
+
+    own = employee.vehicle
+    if (own is not None and own is not vehicle and own.status == VEHICLE_IN_USE
+            and haversine_m(employee.lat, employee.lon, own.lat, own.lon) > PICKUP_RADIUS_M):
+        return plan_after_return(graph, person, own.as_algorithm_dict(), (own.lat, own.lon), build_plan)
+    return build_plan({**person, "vehicle": None})
 
 
 def update_assigned_route(call, plan, *, reset_eta=True):
@@ -598,10 +634,13 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_
             return False
         if learn_speed and 2 <= seconds <= 90 and employee.lat is not None:
             speed = haversine_m(employee.lat, employee.lon, lat, lon) * 3.6 / seconds
-            if employee.has_vehicle and 1 <= speed <= 80:
-                employee.vehicle.speed_kmh = speed
-            elif not employee.has_vehicle and 1 <= speed <= 12:
-                employee.speed_kmh = speed
+            # Почти стоящий человек — не «медленный»: дрожание GPS давало
+            # 1 км/ч и прогноз в разы больше настоящего. Прежняя скорость
+            # меняется плавно: один рывок не должен перевернуть прогноз.
+            if employee.has_vehicle and 5 <= speed <= 80:
+                employee.vehicle.speed_kmh = smooth(employee.vehicle.speed_kmh, speed)
+            elif not employee.has_vehicle and 2.5 <= speed <= 12:
+                employee.speed_kmh = smooth(employee.speed_kmh, speed)
     employee.lat = lat
     employee.lon = lon
     employee.location_source = source
@@ -609,8 +648,17 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_
     employee.seen_at = now
     employee.updated_at = now
 
-    pick_up_if_near(employee)
+    if pick_up_if_near(employee):
+        employee.just_picked_up = True
     return True
+
+
+SPEED_SMOOTHING = 0.3
+
+
+def smooth(previous, value):
+    """Скользящее среднее скорости."""
+    return value if previous is None else previous + (value - previous) * SPEED_SMOOTHING
 
 
 def return_destination(employee):
@@ -725,8 +773,11 @@ def refresh_navigation(db, employee):
     if not call or call.status == CALL_ARRIVED:
         return
     graph = get_graph(employee.airport_icao)
+    # Сел в машину — пеший участок до неё и отметка «машина» больше не нужны.
+    boarded = getattr(employee, "just_picked_up", False)
+    employee.just_picked_up = False
     # Дошёл до промежуточной точки — она пройдена, маршрут дальше без неё.
-    if check_waypoints_reached(call, employee, graph):
+    if check_waypoints_reached(call, employee, graph) or boarded:
         plan = assigned_route(call, graph)
         if plan:
             update_assigned_route(call, plan, reset_eta=False)
@@ -752,8 +803,10 @@ def pick_up_if_near(employee):
     """
     vehicle = employee.vehicle
     if vehicle is None or vehicle.status != VEHICLE_RESERVED:
-        return
+        return False
     if None in (employee.lat, employee.lon, vehicle.lat, vehicle.lon):
-        return
-    if haversine_m(employee.lat, employee.lon, vehicle.lat, vehicle.lon) <= PICKUP_RADIUS_M:
-        vehicle.status = VEHICLE_IN_USE
+        return False
+    if haversine_m(employee.lat, employee.lon, vehicle.lat, vehicle.lon) > PICKUP_RADIUS_M:
+        return False
+    vehicle.status = VEHICLE_IN_USE
+    return True

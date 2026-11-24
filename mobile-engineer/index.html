@@ -61,7 +61,10 @@
     <span class="status-dot" id="work-status-dot"></span>
     <span id="work-status">на смене</span>
     <span class="spacer"></span>
-    <button class="chip" id="geo-mode">GPS</button>
+    <button class="chip" id="geo-mode" aria-label="Местоположение">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s7-7.2 7-12a7 7 0 1 0-14 0c0 4.800 7 12 7 12z"/><circle cx="12" cy="10" r="2.500"/></svg>
+      <span id="geo-text"></span>
+    </button>
     <button class="chip" aria-label="Меню" id="work-menu">⋯</button>
   </header>
 
@@ -153,8 +156,8 @@
     <div class="dock-actions">
       <button type="button" id="decline-call" class="big" hidden>Отказаться</button>
       <!-- Одно окно на всё, что инженер сообщает диспетчеру -->
-      <button type="button" class="big report-open" id="chat-open" hidden aria-label="Чат с диспетчером">
-        Чат
+      <button type="button" class="big report-open" id="chat-open" hidden aria-label="Чат с диспетчером" title="Чат с диспетчером">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l1.800-3.600A8 8 0 1 1 21 12z"/><path d="M9 10.500h8M9 14h5"/></svg>
         <span class="chip-badge" id="chat-badge" hidden></span>
       </button>
       <button class="big primary action" id="call-action" hidden>—</button>

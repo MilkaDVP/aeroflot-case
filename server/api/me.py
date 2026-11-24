@@ -465,7 +465,7 @@ def waypoint_done(
     if call.status != CALL_ARRIVED and employee.lat is not None:
         plan = assigned_route(call, get_graph(call.airport_icao))
         if plan is not None:
-            update_assigned_route(call, plan)
+            update_assigned_route(call, plan, reset_eta=False)
     db.commit()
     return call_to_response(call)
 

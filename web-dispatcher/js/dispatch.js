@@ -26,6 +26,10 @@ const state = {
   picked: [],
   // Как поедет каждый выбранный: employee_id -> auto, walk, with_lead.
   travel: {},
+  // Пути при выбранном способе поездки: «вызов/инженер/способ» → маршрут.
+  travelRoutes: {},
+  // Предпросмотр смены транспорта назначенного: { callId, vehicleId, plan }.
+  transportPreview: null,
   // Все вызовы с сервера, включая вызовы поддержки (второй инженер).
   // В списке слева — только основные: state.calls.
   allCalls: [],
@@ -224,6 +228,10 @@ async function refresh() {
       }
       renderAssignedCard(state.selectedCall);
       updateAssignButton();
+      notePassedPoints(previous, selected);
+      // Пройденная точка уходит и из блока «Маршрут через точки».
+      const anchor = elements.suggestBody.querySelector('[data-drawer="exec"]');
+      if (anchor && !airportMap.svg.classList.contains("is-picking")) refreshWaypointsDrawer(anchor);
     }
     // Вызов ждёт назначения: сам подбор опрос не трогает, но переписка
     // и проблемы прежнего исполнителя обновляются.
@@ -245,6 +253,15 @@ function renderAll() {
   airportMap.drawAircraft(state.aircraft);
   airportMap.drawVehicles(state.vehicles);
   airportMap.drawEmployees(state.employees, employeeClass);
+}
+
+/** Инженер прошёл точку — диспетчер видит это сразу, а не только в карточке. */
+function notePassedPoints(previous, call) {
+  if (!previous || previous.id !== call.id) return;
+  const before = new Set((previous.waypoints || []).filter((point) => point.done_at).map((point) => point.node_id));
+  const passed = (call.waypoints || []).filter((point) => point.done_at && !before.has(point.node_id)).map((point) => point.name || "точка");
+  if (call.tools_taken_at && !previous.tools_taken_at && !passed.length) passed.push("склад, инструмент получен");
+  if (passed.length) showToast(`${call.assigned_employee_name || call.board_number}: пройдено — ${passed.join(", ")}`);
 }
 
 /**
@@ -377,6 +394,9 @@ async function loadExtraCandidates(call) {
  */
 async function selectCall(call, { keepView = false } = {}) {
   closePopover();
+  // Пути считались от прежнего места инженера и прежних точек.
+  state.travelRoutes = {};
+  state.transportPreview = null;
   state.selectedCall = call;
   airportMap.drawCallTrails(state.allCalls, state.employees, call.id);
   sessionStorage.setItem(selectionKey(), call.id);
@@ -473,15 +493,33 @@ function pickCandidate(candidate) {
   // Ответственный сменился — «ехать с первым» могло потерять смысл.
   dropImpossibleTravel();
   refreshExecutorMenu();
-  airportMap.showRoute(
-    candidate.route && candidate.route.node_ids,
-    candidate.route && candidate.route.pickup_node_id,
-    state.selectedCall && state.selectedCall.stand_node_id,
-    undefined,
-    undefined,
-    candidate.route && candidate.route.stops
-  );
+  // Сняли выбор — на карте остаётся тот, кто выбран, а не снятый.
+  const shown = state.picked.includes(candidate.employee_id) ? candidate
+    : state.suggestion?.candidates.find((item) => item.employee_id === state.picked[0]);
+  if (shown) showCandidateRoute(shown);
+  else if (!isAssignable(state.selectedCall)) showCallRoute(state.selectedCall);
+  else airportMap.markStand(state.selectedCall.stand_node_id);
   updateAssignButton();
+}
+
+function travelKey(employeeId) {
+  const mode = state.travel[employeeId] || "auto";
+  // «С первым» зависит от того, на чём едет первый.
+  return [state.selectedCall?.id, employeeId, mode, mode === "with_lead" ? leadVehicle() : ""].join("/");
+}
+
+/** Путь кандидата выбранным способом; null — обычный расчёт системы. */
+function travelRoute(candidate) {
+  return (state.travel[candidate.employee_id] || "auto") === "auto" ? null
+    : state.travelRoutes[travelKey(candidate.employee_id)] || null;
+}
+
+function showCandidateRoute(candidate) {
+  const call = state.selectedCall;
+  const route = travelRoute(candidate) || candidate.route;
+  if (!call) return;
+  airportMap.showRoute(route?.node_ids, route?.pickup_node_id, call.stand_node_id,
+    undefined, undefined, route?.stops);
 }
 
 /** Диспетчер выбрал, как поедет инженер. */
@@ -489,6 +527,30 @@ function chooseTravel(candidate, mode) {
   state.travel[candidate.employee_id] = mode;
   dropImpossibleTravel();
   refreshExecutorMenu();
+  loadTravelRoutes(candidate);
+}
+
+/**
+ * Маршрут и время под выбранный способ. Смена транспорта первого меняет
+ * и путь тех, кто едет «с первым», поэтому пересчитываются все выбранные.
+ */
+async function loadTravelRoutes(shown) {
+  const call = state.selectedCall;
+  await Promise.all((state.suggestion?.candidates || []).map(async (item) => {
+    const mode = state.travel[item.employee_id] || "auto";
+    const key = travelKey(item.employee_id);
+    if (mode === "auto" || state.travelRoutes[key]) return;
+    try {
+      state.travelRoutes[key] = await Api.routePreview(call.id, {
+        employee_id: item.employee_id, travel: mode, lead_vehicle: mode === "with_lead" ? leadVehicle() : null,
+      });
+    } catch (error) {
+      showToast(error.detail || "Маршрут не построен", true);
+    }
+  }));
+  if (state.selectedCall?.id !== call.id || !state.picked.includes(shown.employee_id)) return;
+  refreshExecutorMenu();
+  showCandidateRoute(shown);
 }
 
 /** «С первым» без машины у первого невозможно — такой выбор сбрасывается. */
@@ -537,6 +599,7 @@ function panelContext() {
     adding: !isAssignable(state.selectedCall),
     onPick: pickCandidate,
     onTravel: chooseTravel,
+    travelRoute,
     queue: queueOptions(),
   };
 }
@@ -555,9 +618,34 @@ function executorNodes() {
       for (const v of state.vehicles.filter(v => v.status === "free" || v.call_sign === call.vehicle_call_sign)) {
         select.add(new Option(v.call_sign, v.id, false, v.call_sign === call.vehicle_call_sign));
       }
-      nodes.push(select, linkButton("Изменить транспорт", async () => {
+      // Выбор сразу виден на карте вместе со временем — до подтверждения.
+      const note = document.createElement("div");
+      note.className = "dim waypoint-note";
+      const describe = () => {
+        const preview = state.transportPreview;
+        if (preview?.callId !== call.id) return;
+        select.value = preview.vehicleId;
+        note.textContent = preview.plan ? `${formatMinutes(preview.plan.minutes)} мин до борта` : "Считаю маршрут…";
+      };
+      describe();
+      select.addEventListener("change", async () => {
+        const preview = { callId: call.id, vehicleId: select.value, plan: null };
+        state.transportPreview = preview;
+        describe();
+        try {
+          preview.plan = await Api.routePreview(call.id, { vehicle_id: select.value ? Number(select.value) : null });
+          if (state.transportPreview !== preview) return;
+          describe();
+          if (state.selectedCall?.id === call.id) showCallRoute(state.selectedCall);
+        } catch (error) {
+          if (state.transportPreview === preview) state.transportPreview = null;
+          note.textContent = error.detail || "Маршрут не построен";
+        }
+      });
+      nodes.push(select, note, linkButton("Изменить транспорт", async () => {
         try {
           await Api.changeTransport(call.id, select.value);
+          state.transportPreview = null;
           await refresh();
           refreshExecutorMenu();
         } catch (error) { showToast(error.detail, true); }
@@ -742,10 +830,16 @@ function queueOptions() {
 function showCallRoute(call) {
   // Исполнитель нужен, чтобы маршрут из одной вершины шёл от его места.
   const employee = state.employees.find((item) => item.id === call.assigned_employee_id);
+  const preview = state.transportPreview;
+  if (preview?.plan && preview.callId === call.id && ["assigned", "accepted"].includes(call.status)) {
+    airportMap.showRoute(preview.plan.node_ids, preview.plan.pickup_node_id, call.stand_node_id,
+      undefined, undefined, preview.plan.stops);
+    return;
+  }
   if (call.status === "assigned" || call.status === "accepted") {
     airportMap.showRoute(
       call.route_node_ids, call.pickup_node_id, call.stand_node_id, undefined, employee,
-      call.tools_taken_at ? [] : call.route_stops
+      pendingStops(call)
     );
   } else if (call.status === "queued") {
     airportMap.showRoute(

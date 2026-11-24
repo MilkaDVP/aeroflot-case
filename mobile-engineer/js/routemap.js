@@ -54,6 +54,7 @@ const SELF_PULSE_MS = 2400;
 // Значки меток, сетка 24×24 (Material Design Icons, Apache 2.0).
 const ICON_PLANE = "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z";
 const ICON_CAR = "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z";
+const ICON_FLAG = "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z";
 const ICON_WRENCH = "M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z";
 
 const ESRI_IMAGERY =
@@ -373,8 +374,8 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining = routePoints) {
-    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining];
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, stops, remaining = routePoints) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, stops, remaining];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -421,10 +422,12 @@ class RouteMap {
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));
     }
-    // Склад, где получить инструмент, — промежуточная точка маршрута.
-    const warehouse = warehouseNodeId && points.find((point) => point.id === warehouseNodeId);
-    if (warehouse) {
-      this.drawWarehouse(this.project(warehouse));
+    // Обязательные точки впереди: склад — гаечный ключ, прочие — флажок.
+    for (const stop of stops || []) {
+      const place = points.find((point) => point.id === stop.id);
+      if (!place) continue;
+      if (stop.warehouse) this.drawWarehouse(this.project(place));
+      else this.addBadge(this.project(place), "route-pass", ICON_FLAG);
     }
     if (target) {
       this.drawTarget(this.project(target));

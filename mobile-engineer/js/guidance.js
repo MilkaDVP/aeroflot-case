@@ -10,7 +10,11 @@ function remainingLine(payload, path, pos) {
   if (!pos || path.length < 2) return path;
   const call = payload?.call;
   const waypoint = call?.waypoints?.find(w => !w.done_at);
-  const pending = new Set(payload?.instruction ? [] : [waypoint?.node_id, payload?.vehicle?.pickup && call?.pickup_node_id].filter(Boolean));
+  // Склад системы, пока инструмент не взят, — тоже обязательная точка:
+  // без него линия «перепрыгивала» на обратную дорогу.
+  const depot = call?.needs_tools && !call.tools_taken_at && call.route_stops?.find(s => s.kind === "warehouse");
+  const pending = new Set(payload?.instruction ? [] : [waypoint?.node_id, depot?.node_id,
+    payload?.vehicle?.pickup && call?.pickup_node_id].filter(Boolean));
   const stop = path.findIndex(p => pending.has(p.id));
   const limit = stop < 0 ? path.length - 1 : stop;
   let next = 0, first = path[0], closest = Infinity;
@@ -76,6 +80,11 @@ function nextManeuver(payload, points, pos) {
   return null;
 }
 
+const VOICE_BODY = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"/>';
+const VOICE_ON = VOICE_BODY + '<path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>';
+const VOICE_OFF = VOICE_BODY + '<path d="M23 9l-6 6M17 9l6 6"/></svg>';
+
 const voice = window.speechSynthesis;
 function navigationVoice(voices, online) {
   const russian = voices.filter(v => /^ru(?:[-_]|$)/i.test(v.lang) && (online || v.localService));
@@ -104,7 +113,7 @@ function updateGuidance(cue) {
   document.getElementById("nav-distance").textContent = line;
   document.getElementById("nav-next").textContent = (near ? "" : "Затем " + cue.icon + " ") + cue.action;
   voiceButton.hidden = !voice || !window.SpeechSynthesisUtterance;
-  voiceButton.textContent = voiceEnabled ? "🔊" : "🔇";
+  voiceButton.innerHTML = voiceEnabled ? VOICE_ON : VOICE_OFF;
   voiceButton.setAttribute("aria-label", voiceEnabled ? "Отключить озвучку" : "Включить озвучку");
   voiceButton.setAttribute("aria-pressed", String(voiceEnabled));
   const band = near ? "now" : cue.metres <= 50 ? "soon" : "ahead";

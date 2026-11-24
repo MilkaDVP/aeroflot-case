@@ -29,6 +29,7 @@ const AiPanel = {
   answers: [],
 
   init(button, root, { onChanged, onOpenCall, onPreview }) {
+    this.loadTalk();
     this.button = button;
     this.root = root;
     this.onChanged = onChanged;
@@ -42,6 +43,37 @@ const AiPanel = {
     });
     this.updateBadge();
     setInterval(() => this.updateBadge(), AI_BADGE_MS);
+  },
+
+  /*
+   * Разговор переживает обновление страницы, но не вкладку: свой у каждого
+   * диспетчера, аэропорта и смены.
+   */
+  loadTalk() {
+    const { login, airport_icao: airport, shift } = Session.user;
+    this.talkKey = `oto.ai.talk.${login}.${airport}.${shift}`;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(this.talkKey) || "[]");
+      this.answers = Array.isArray(saved) ? saved : [];
+    } catch (error) {
+      this.answers = [];
+    }
+  },
+
+  saveTalk() {
+    try {
+      sessionStorage.setItem(this.talkKey, JSON.stringify(this.answers.filter((entry) => entry.answer !== null)));
+    } catch (error) {
+      // Хранилище недоступно — разговор остаётся в памяти страницы.
+    }
+  },
+
+  /** Забыть разговор: модель больше не видит прошлых просьб. */
+  clearTalk() {
+    if (this.working) return;
+    this.answers = [];
+    this.saveTalk();
+    this.renderAnswers();
   },
 
   /** Сколько вызовов можно назначить прямо сейчас — значок на кнопке. */
@@ -91,6 +123,7 @@ const AiPanel = {
         <span class="ai-title">ИИ-диспетчер</span>
         <span class="ai-engine" id="ai-engine"></span>
         <button type="button" class="ai-icon" id="ai-refresh" title="Обновить и заново объяснить" aria-label="Обновить">⟳</button>
+        <button type="button" class="ai-icon" id="ai-clear" title="Новый разговор: забыть прошлые просьбы" aria-label="Новый разговор">✎</button>
         <button type="button" class="ai-icon" id="ai-close" aria-label="Закрыть">×</button>
       </div>
       <div class="ai-body">
@@ -108,6 +141,7 @@ const AiPanel = {
         </div>
       </form>`;
     this.root.querySelector("#ai-close").addEventListener("click", () => this.close());
+    this.root.querySelector("#ai-clear").addEventListener("click", () => this.clearTalk());
     this.root.querySelector("#ai-refresh").addEventListener("click", () => this.load(true));
     this.root.querySelector("#ai-assign-all").addEventListener("click", () => this.assignAll());
     this.root.querySelector("#ai-ask").addEventListener("submit", (event) => this.ask(event));
@@ -296,9 +330,10 @@ const AiPanel = {
     const question = input.value.trim();
     if (!question) return;
     input.value = "";
+    const previous = this.answers.filter((item) => item.answer && (item.source !== "error" || item.actions?.length));
     const entry = { question, answer: null, steps: [] };
     this.answers.push(entry);
-    this.answers = this.answers.slice(-10);
+    this.answers = this.answers.slice(-20);
     this.setWorking(true);
     this.renderAnswers();
     try {
@@ -311,7 +346,7 @@ const AiPanel = {
           step.kind = kind;
           this.renderAnswers();
         };
-      });
+      }, previous);
       entry.source = "gigachat";
       entry.idle = !entry.steps.some((step) => step.kind === "done");
     } catch (error) {
@@ -320,10 +355,16 @@ const AiPanel = {
       // Без GigaChat агент не работает, но план по правилам остаётся.
       if (error.status === 503 && !entry.steps.length) {
         try {
-          entry.answer = (await Api.aiAsk(question.slice(0, 500))).answer;
+          const history = previous.slice(-10).map((item) => ({
+            question: item.question.slice(0, 1000), answer: item.answer.slice(0, 1500),
+          }));
+          entry.answer = (await Api.aiAsk(question.slice(0, 500), history)).answer;
+          entry.source = "rules";
         } catch (again) { /* остаётся исходная ошибка */ }
       }
     }
+    Object.assign(entry, Agent.last);
+    this.saveTalk();
     this.setWorking(false);
     this.renderAnswers(true);
     if (!this.root.hidden) this.load(false);

@@ -75,12 +75,15 @@ def travel_time_minutes(distance_m, mode, speed_kmh=None):
     return (distance_m / 1000.0) / effective_speed * 60.0
 
 
-def shortest_path(graph, start_id, goal_id, mode=MODE_WALK, speed_kmh=None):
+def shortest_path(graph, start_id, goal_id, mode=MODE_WALK, speed_kmh=None, avoid=()):
     """
     Самый быстрый путь между двумя вершинами графа.
 
     Возвращает Route или None, если пути нет: для спецтранспорта такое
     бывает штатно — часть перрона проходима только пешком.
+
+    avoid — уже пройденные вершины: они не запрещены и не удорожают путь,
+    но при равном времени выбирается путь, где их меньше.
     """
     if start_id not in graph.nodes or goal_id not in graph.nodes:
         return None
@@ -89,15 +92,15 @@ def shortest_path(graph, start_id, goal_id, mode=MODE_WALK, speed_kmh=None):
         return Route([start_id], 0.0, mode, 0.0, speed_kmh, 0.0)
 
     speed = agent_speed(mode, speed_kmh)
-    # Время до вершины, длина пути до неё и вершина, из которой пришли.
-    best_time = {start_id: 0.0}
+    # (Время, повторов) до вершины, длина пути до неё и вершина, из которой пришли.
+    best_cost = {start_id: (0.0, 0)}
     length_to = {start_id: 0.0}
     came_from = {}
     visited = set()
-    queue = [(0.0, start_id)]
+    queue = [(0.0, 0, start_id)]
 
     while queue:
-        elapsed, current_id = heapq.heappop(queue)
+        elapsed, repeats, current_id = heapq.heappop(queue)
 
         # Вершина уже раскрыта по более быстрому пути — эта запись устарела.
         if current_id in visited:
@@ -113,12 +116,12 @@ def shortest_path(graph, start_id, goal_id, mode=MODE_WALK, speed_kmh=None):
         for neighbour_id, edge_length, limit in graph.links(current_id, mode):
             if neighbour_id in visited:
                 continue
-            candidate = elapsed + edge_seconds(edge_length, limit, speed)
-            if neighbour_id not in best_time or candidate < best_time[neighbour_id]:
-                best_time[neighbour_id] = candidate
+            cost = (elapsed + edge_seconds(edge_length, limit, speed), repeats + (neighbour_id in avoid))
+            if neighbour_id not in best_cost or cost < best_cost[neighbour_id]:
+                best_cost[neighbour_id] = cost
                 length_to[neighbour_id] = length_to[current_id] + edge_length
                 came_from[neighbour_id] = current_id
-                heapq.heappush(queue, (candidate, neighbour_id))
+                heapq.heappush(queue, (*cost, neighbour_id))
 
     return None
 

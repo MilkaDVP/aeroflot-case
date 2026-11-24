@@ -328,6 +328,22 @@ class TestPolygonApi(ApiTestCase):
         self.assertEqual(changed.status_code, 200, changed.text)
         self.assertIn(through, changed.json()["route_node_ids"])
 
+        # Расчёт лучшего порядка: ничего не меняет, время не хуже названного.
+        for keep in (True, False):
+            planned = self.client.post(
+                f"/api/calls/{call['id']}/waypoints/plan",
+                json={"groups": [[through], warehouses(graph)], "keep_order": keep},
+                headers=auth_header(self.dispatcher))
+            self.assertEqual(planned.status_code, 200, planned.text)
+            if keep:
+                kept = planned.json()
+                self.assertEqual(kept["node_ids"][0], through)
+        self.assertLessEqual(planned.json()["minutes"], kept["minutes"])
+        self.assertEqual(set(planned.json()) >= {"names", "repeats", "direct_minutes", "as_named"}, True)
+        same = next(item for item in self.client.get("/api/calls", headers=auth_header(self.dispatcher)).json()
+                    if item["id"] == call["id"])
+        self.assertEqual([item["node_id"] for item in same["waypoints"]], [depot, through])
+
         # Инженер отмечает точки пройденными — по одной, по порядку.
         from database import SessionLocal
         from models.user import User

@@ -50,11 +50,15 @@ STOP_PASS = "pass"
 # Стоянка спецтехники: здесь пересадка на машину.
 STOP_PARKING = "parking"
 
+# Сначала отвести прежнюю машину на её стоянку.
+STOP_RETURN = "return"
+
 STOP_TITLES = {
     STOP_WAREHOUSE: "получить инструмент",
     STOP_BOARD: "посадка в спецтранспорт",
     STOP_ALIGHT: "высадка",
     STOP_PASS: "через точку",
+    STOP_RETURN: "вернуть машину",
 }
 
 
@@ -102,7 +106,9 @@ class Plan:
         """Узел, где исполнитель садится в машину парка, — начало езды."""
         if not self.pickup:
             return None
-        first_drive = next((leg for leg in self.legs if leg.mode == MODE_VEHICLE), None)
+        # Езда на прежней машине до её стоянки — ещё не та посадка.
+        legs = self.legs[1:] if self.stops and self.stops[0]["kind"] == STOP_RETURN else self.legs
+        first_drive = next((leg for leg in legs if leg.mode == MODE_VEHICLE), None)
         return first_drive.node_ids[0] if first_drive else None
 
     @property
@@ -229,7 +235,10 @@ class Network:
         """Варианты цепочки точек: выбранные диспетчером, и склад — если нужен."""
         if not self.depots:
             return [self.waypoints]
-        return [[depot] + self.waypoints for depot in self.depots]
+        # Склад — в любом месте цепочки: заезжать на него первым, а потом
+        # возвращаться той же дорогой, нужно не всегда.
+        return [self.waypoints[:i] + [depot] + self.waypoints[i:]
+                for depot in self.depots for i in range(len(self.waypoints) + 1)]
 
 
 def seconds(distance_m, mode, speed_kmh=None):
@@ -379,6 +388,9 @@ def build(net, recipe):
     graph = net.graph
     legs = []
     stops = []
+    # Где маршрут уже проходил: из равных по времени путей берётся тот,
+    # что меньше повторяется.
+    passed = set()
     for step in recipe["steps"]:
         if step[0] == "stop":
             _, kind, node_id, dwell, final = step
@@ -386,9 +398,10 @@ def build(net, recipe):
             continue
         kind, origin, destination, approach, speed = step
         mode = MODE_WALK if kind == "walk" else MODE_VEHICLE
-        route = shortest_path(graph, origin, destination, mode, speed)
+        route = shortest_path(graph, origin, destination, mode, speed, passed)
         if route is None:
             return None
+        passed.update(route.node_ids)
         legs.append(Route(route.node_ids, route.distance_m, mode, approach, speed, route.path_seconds))
     return Plan(legs, vehicle=recipe["vehicle"], pickup=recipe["pickup"], stops=stops)
 
@@ -428,7 +441,27 @@ def plan_walk(graph, employee, goal_id, depots=None, waypoints=None):
     return build(net, found[1]) if found else None
 
 
-def plan_via(graph, employee, goal_id, vehicle, waypoints=None):
+def plan_after_return(graph, employee, vehicle, home, build_plan):
+    """
+    Сначала вернуть машину, на которой инженер едет, потом новый путь.
+
+    build_plan(person) строит путь от стоянки возврата. Машина уже
+    на месте — участка возврата нет.
+    """
+    lat, lon = home
+    node, offset = graph.nearest_node(lat, lon, MODE_VEHICLE)
+    if node is None:
+        return None
+    base = build_plan({**employee, "lat": lat, "lon": lon, "vehicle": None})
+    drive = route_from_point(graph, employee["lat"], employee["lon"], node["id"], MODE_VEHICLE,
+                             vehicle.get("speed_kmh"))
+    if base is None or drive is None:
+        return None
+    back = stop(graph, STOP_RETURN, node["id"], VEHICLE_BOARDING_S)
+    return Plan([drive, *base.legs], vehicle=base.vehicle, pickup=base.pickup, stops=[back, *base.stops])
+
+
+def plan_via(graph, employee, goal_id, vehicle, waypoints=None, depots=None):
     """
     Дойти до указанной машины и ехать на ней — вторым в машине ответственного.
 
@@ -437,6 +470,6 @@ def plan_via(graph, employee, goal_id, vehicle, waypoints=None):
     машине, без сравнения с остальными.
     """
     walker = {**employee, "vehicle": None}
-    net = Network(graph, goal_id, [vehicle], None, waypoints)
+    net = Network(graph, goal_id, [vehicle], depots, waypoints)
     found = search(net, walker, fleet_only=True)
     return build(net, found[1]) if found else None

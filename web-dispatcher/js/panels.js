@@ -32,6 +32,27 @@ function transportLabel(candidate) {
   return "пешком";
 }
 
+/** Ещё не пройденные остановки назначенного вызова. */
+function pendingStops(call) {
+  const done = new Set((call.waypoints || []).filter((point) => point.done_at).map((point) => point.node_id));
+  const left = new Set((call.waypoints || []).filter((point) => !point.done_at).map((point) => point.node_id));
+  return (call.route_stops || []).filter((stop) => {
+    if (left.has(stop.node_id)) return true;
+    if (stop.kind === "warehouse" && call.tools_taken_at) return false;
+    return stop.kind === "board" || stop.kind === "return" || stop.final || !done.has(stop.node_id);
+  });
+}
+
+/** Какие точки инженер уже прошёл и когда. */
+function waypointProgress(call) {
+  const points = call.waypoints || [];
+  if (!points.length) return "";
+  const rows = points.map((point) => point.done_at
+    ? `<span class="wp-done">✓ ${escapeHtml(point.name || "точка")} <span class="num">${formatClock(point.done_at)}</span></span>`
+    : `<span class="wp-left">○ ${escapeHtml(point.name || "точка")}</span>`);
+  return `<div class="wp-progress">${rows.join("")}</div>`;
+}
+
 /**
  * Цепочка маршрута через промежуточные точки: «Склад №2 · инструмент 30 с
  * → ТМ-01 · посадка → борт». Пусто, если маршрут без остановок.
@@ -46,6 +67,8 @@ function routeChain(stops, vehicleCallSign) {
       parts.push(`${escapeHtml(vehicleCallSign || "машина")} · посадка ${stop.dwell_s} с`);
     } else if (stop.kind === "pass") {
       parts.push(`через ${escapeHtml(stop.name || "точку")}`);
+    } else if (stop.kind === "return") {
+      parts.push(`вернуть машину · ${escapeHtml(stop.name || "на место")}`);
     } else if (stop.kind === "alight") {
       parts.push(`высадка ${stop.dwell_s} с`);
     }
@@ -433,6 +456,12 @@ function buildEtaBlock(result) {
  * появляется выбор, как он поедет.
  */
 function buildCandidateRow(candidate, ctx) {
+  // Выбран другой способ поездки — время и расстояние по нему.
+  const chosen = ctx.travelRoute?.(candidate);
+  if (chosen) {
+    candidate = { ...candidate, minutes: chosen.minutes, route: chosen, pickup: Boolean(chosen.pickup_node_id),
+      vehicle_call_sign: chosen.vehicle?.call_sign || null, offered: candidate };
+  }
   const row = document.createElement("div");
   row.className = "candidate";
   const order = ctx.picked.indexOf(candidate.employee_id);
@@ -460,10 +489,10 @@ function buildCandidateRow(candidate, ctx) {
         : ""
     }
   `;
-  row.addEventListener("click", () => ctx.onPick(candidate));
+  row.addEventListener("click", () => ctx.onPick(candidate.offered || candidate));
 
   if (order !== -1) {
-    const choice = travelChoice(candidate, order, ctx);
+    const choice = travelChoice(candidate.offered || candidate, order, ctx);
     if (choice) {
       row.append(choice);
     }
@@ -1054,9 +1083,9 @@ function buildAssignmentBlock(call) {
         ? ` · <span class="num">${escapeHtml(call.vehicle_call_sign)}</span>`
         : ""
     }</div>
-    ${call.needs_tools && call.tools_taken_at
-      ? '<div class="route-chain">Инструмент получен</div>'
-      : routeChain(call.route_stops, call.vehicle_call_sign)}
+    ${call.needs_tools && call.tools_taken_at ? '<div class="route-chain">Инструмент получен</div>' : ""}
+    ${["arrived", "closed"].includes(call.status) ? "" : routeChain(pendingStops(call), call.vehicle_call_sign)}
+    ${waypointProgress(call)}
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
     ${
       call.override_reason

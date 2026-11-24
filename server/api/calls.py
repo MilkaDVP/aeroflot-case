@@ -55,10 +55,12 @@ from schemas.call import (
     ProblemRequest,
     ReadRequest,
     UrgencyRequest,
+    TravelPreviewRequest,
+    WaypointPlanRequest,
     WaypointsRequest,
 )
 from services import claim as claims
-from services import journal, mentor
+from services import journal, mentor, waypoint_plan
 from services.assignment import (
     advance_after_close,
     assign_now,
@@ -68,6 +70,7 @@ from services.assignment import (
     is_busy,
     mark_arrived,
     plan_route,
+    plan_with,
     switch_to,
     working_call_of,
     unassign,
@@ -633,6 +636,10 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         call.vehicle = None
         if employee.vehicle and employee.vehicle.status == VEHICLE_IN_USE:
             employee.return_vehicle = True
+            # Сначала отвести машину на место: путь и время — с учётом этого.
+            back = assigned_route(call, graph)
+            if back is not None:
+                update_assigned_route(call, back)
         else:
             release_vehicle(employee)
     elif ride_vehicle is not None:
@@ -640,6 +647,64 @@ def perform_assign(db, context, call, payload, free_choice=False, lead=None):
         # неё; второй едет пассажиром, поэтому за ним она не числится.
         call.vehicle = ride_vehicle
     mentor.review_assignment(db, call, employee, result, context.user, is_override)
+
+
+@router.post("/{call_id}/route-preview", summary="Путь при выбранном способе поездки")
+def route_preview(
+    call_id: int,
+    payload: TravelPreviewRequest,
+    db: Session = Depends(get_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    """
+    Маршрут и время для выбора «пешком / на машине / с первым» до того,
+    как диспетчер его подтвердил. Ничего не меняет.
+    """
+    call = load_call(db, context, call_id)
+    graph = get_graph(call.airport_icao)
+    try:
+        plan = preview_plan(db, call, graph, payload)
+        if plan is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_ROUTE)
+        return plan.as_dict()
+    finally:
+        db.rollback()
+
+
+def preview_plan(db, call, graph, payload):
+    """Тот же расчёт, что и при назначении или смене транспорта."""
+    if payload.employee_id is None:
+        employee = call.assigned_employee
+        if employee is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NOT_ASSIGNED)
+    else:
+        employee = db.get(Employee, payload.employee_id)
+        if employee is None or employee.airport_icao != call.airport_icao:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_EMPLOYEE_NOT_FOUND)
+    if employee.lat is None or employee.lon is None:
+        return None
+
+    if payload.employee_id is None:
+        vehicle = db.get(Vehicle, payload.vehicle_id) if payload.vehicle_id else None
+        if payload.vehicle_id and (vehicle is None or vehicle.airport_icao != call.airport_icao):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Машина недоступна")
+        riding = vehicle is not None and vehicle is employee.vehicle and vehicle.status == VEHICLE_IN_USE
+        return plan_with(employee, call, graph, vehicle, riding)
+
+    if payload.travel not in TRAVEL_MODES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, ERROR_BAD_TRAVEL.format(modes=", ".join(TRAVEL_MODES)))
+    if payload.travel == TRAVEL_WALK:
+        return plan_with(employee, call, graph, None, False)
+    ride = None
+    if payload.travel == TRAVEL_WITH_LEAD:
+        ride = call.vehicle
+        if ride is None and payload.lead_vehicle:
+            ride = db.query(Vehicle).filter_by(
+                airport_icao=call.airport_icao, call_sign=payload.lead_vehicle, archived=False).first()
+        if ride is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, ERROR_NO_LEAD_VEHICLE)
+    return plan_route(db, employee, call.stand_node_id, graph, payload.travel, ride,
+                      depots_for(call, graph), remaining_waypoints(call))[0]
 
 
 @router.post("/{call_id}/transport", response_model=CallResponse)
@@ -838,6 +903,27 @@ def set_waypoints(
             update_assigned_route(call, plan)
     db.commit()
     return to_response(call, db)
+
+
+@router.post("/{call_id}/waypoints/plan", summary="Лучший порядок промежуточных точек")
+def plan_waypoints(
+    call_id: int,
+    payload: WaypointPlanRequest,
+    db: Session = Depends(get_db),
+    context: Context = Depends(require_roles(*DISPATCH_ROLES)),
+):
+    """
+    В каком порядке пройти точки, чтобы путь был самым быстрым. Ничего
+    не меняет: точки записывает запрос «Промежуточные точки».
+    """
+    call = load_call(db, context, call_id)
+    try:
+        return waypoint_plan.plan(
+            db, call, get_graph(call.airport_icao), payload.groups, payload.keep_order,
+            lambda: run_suggestion(db, context, call),
+        )
+    finally:
+        db.rollback()
 
 
 @router.post("/{call_id}/claim", response_model=CallResponse, summary="Взять в работу")

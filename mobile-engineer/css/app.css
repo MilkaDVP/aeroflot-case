@@ -466,6 +466,7 @@ button:disabled { opacity: 0.5; }
 .route-target .marker-body { fill: var(--danger-strong); }
 .route-vehicle .marker-body { fill: var(--route-strong); }
 .route-warehouse .marker-body { fill: #8250df; }
+.route-pass .marker-body { fill: #b7791f; }
 
 .self-ring { fill: #fff; }
 .self-dot { fill: #1fa855; }
@@ -807,7 +808,12 @@ button:disabled { opacity: 0.5; }
 #nav-distance { font-size: 1rem; }
 #nav-next { font-size: .8rem; }
 #nav-guidance > div { min-width: 0; overflow-wrap: anywhere; }
-#nav-voice { font-size: .72rem; padding: 6px; }
+#nav-voice { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; background: rgba(255,255,255,.14); color: #fff; }
+#nav-voice[hidden] { display: none; }
+#nav-voice[aria-pressed="true"] { background: #fff; color: #103f49; }
+#geo-mode { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 40px; }
+#geo-text:empty { display: none; }
+#geo-mode.is-manual { color: var(--route); border-color: var(--route); }
 .work .map-toggle { top: calc(var(--header-y) + 54px); right: var(--edge); }
 .work-dock {
   position: absolute; left: var(--edge); right: var(--edge); bottom: calc(var(--safe-bottom) + 8px);
@@ -908,7 +914,7 @@ details[open] .detail-label::after { content: " ⌄"; }
 .arrival-hint[hidden] { display: none; }
 
 /* --- Кнопка и окно «Сообщить» --- */
-.report-open { position: relative; flex: 0 0 auto !important; padding: 6px 14px !important; background: transparent; }
+.report-open { position: relative; flex: 0 0 auto !important; display: inline-flex; align-items: center; justify-content: center; width: 60px; padding: 6px !important; background: transparent; }
 .report-open[hidden] { display: none; }
 .report-open .chip-badge { top: -6px; right: -6px; }
 .report-marks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }

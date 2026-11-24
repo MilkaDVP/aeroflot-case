@@ -193,13 +193,18 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
+  // Путь и время при выбранном способе поездки, ничего не меняя.
+  routePreview: (callId, body) => request("POST", `/api/calls/${callId}/route-preview`, body),
+  // Лучший порядок точек; groups — списки годных узлов на каждую точку.
+  planWaypoints: (callId, groups, keep_order) =>
+    request("POST", `/api/calls/${callId}/waypoints/plan`, { groups, keep_order }),
   suggest: (callId) => request("POST", `/api/calls/${callId}/suggest`),
   // План ИИ-диспетчера; explain=false — без пояснения GigaChat (быстрее).
   aiPlan: (explain = true) => request("GET", `/api/ai/plan?explain=${explain}`),
   // Ход ИИ-агента: первый — просьба, дальше результаты действий.
   aiAgent: (command, messages, next) =>
     request("POST", next ? "/api/ai/agent/step" : "/api/ai/agent", { command, messages }),
-  aiAsk: (question) => request("POST", "/api/ai/ask", { question }),
+  aiAsk: (question, history = []) => request("POST", "/api/ai/ask", { question, history }),
 
   // Журнал событий: просмотр, типы, целостность, выгрузка файлом.
   events: (params) => request("GET", `/api/events?${new URLSearchParams(params)}`),

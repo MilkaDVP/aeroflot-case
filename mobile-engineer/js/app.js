@@ -455,7 +455,7 @@ function renderWork() {
   el("call-vehicle").hidden = !vehicle && !state.call.instruction;
   el("call-vehicle").textContent = state.call.instruction || vehicleInstruction(vehicle);
   el("call-eta").textContent =
-    call.eta_minutes === null ? "—" : `${formatMinutes(call.eta_minutes)} мин`;
+    timeLeft(call);
   renderTools(call);
 
   const step = actionStep(call);
@@ -470,6 +470,17 @@ function renderWork() {
   renderForecast(call.control);
   renderAtAircraft(call);
   renderChat(call);
+}
+
+/**
+ * Сколько ещё ехать — по живому прогнозу. Время, посчитанное при
+ * назначении, стояло на месте всю дорогу.
+ */
+function timeLeft(call) {
+  if (call.status === "arrived") return "у борта";
+  const forecast = call.control?.forecast_at;
+  const minutes = forecast ? Math.max(0, (Date.parse(forecast) - Date.now()) / 60000) : call.eta_minutes;
+  return minutes === null || minutes === undefined ? "—" : `${formatMinutes(minutes)} мин`;
 }
 
 /**
@@ -902,6 +913,18 @@ function targetPoint() {
   return points && points.length ? points[points.length - 1] : null;
 }
 
+/** Обязательные точки впереди: выбранные диспетчером и склад системы. */
+function pendingPoints(payload) {
+  if (!payload || payload.instruction) return [];
+  const call = payload.call;
+  const points = (call.waypoints || []).filter((point) => !point.done_at)
+    .map((point) => ({ id: point.node_id, warehouse: point.kind === "warehouse" }));
+  const depot = call.needs_tools && !call.tools_taken_at
+    && (call.route_stops || []).find((stop) => stop.kind === "warehouse");
+  if (depot && !points.some((point) => point.id === depot.node_id)) points.push({ id: depot.node_id, warehouse: true });
+  return points;
+}
+
 // Дальше этого от аэропорта человек себя на перроне не увидит.
 const FAR_FROM_AIRPORT_M = 5000;
 
@@ -932,12 +955,9 @@ function drawRoute(position = state.position) {
     position,
     state.airportPoint,
     state.call ? state.call.vehicle : null,
-    state.call ? state.call.call.pickup_node_id : null,
+    state.call?.vehicle?.pickup ? state.call.call.pickup_node_id : null,
     choosing ? state.airportPoint : null,
-    state.call && !state.call.call.tools_taken_at
-      ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
-        || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id)
-      : null,
+    pendingPoints(state.call),
     remainingLine(payload, points, position)
   );
 }
@@ -1187,10 +1207,20 @@ function onGeoError(message) {
   // Отказ GPS на перроне — обычное дело, а не авария: вместо красной
   // плашки поверх маршрута — спокойная строка с действием.
   el("geo-notice").hidden = false;
-  el("geo-mode").textContent = "GPS";
+  setGeoLabel("нет GPS");
   el("geo-mode").classList.add("is-warn");
   el("geo-error").hidden = false;
   el("geo-error").textContent = message;
+}
+
+/** Значок места: рядом — только точность; ручной режим виден цветом значка. */
+function setGeoLabel(text) {
+  const manual = locator.mode === "simulation";
+  el("geo-text").textContent = text;
+  el("geo-mode").classList.toggle("is-manual", manual);
+  el("geo-mode").setAttribute("aria-label",
+    `Местоположение: ${manual ? "вручную" : `GPS${text ? ` ${text}` : ""}`}`);
+  el("geo-mode").title = manual ? "Место указывается вручную" : "Место по GPS";
 }
 
 /** Точность GPS на кнопке: «GPS ±8 м»; плохая — жёлтая. */
@@ -1198,7 +1228,7 @@ function renderAccuracy() {
   const pos = locator.last;
   if (locator.mode !== "gps" || pos?.source !== "gps" || !Number.isFinite(pos.accuracy)) return;
   const old = Date.now() - pos.measuredAt > ARRIVAL_HOLD_MS;
-  el("geo-mode").textContent = old ? "GPS ?" : `GPS ±${Math.max(1, Math.round(pos.accuracy))} м`;
+  setGeoLabel(old ? "?" : `±${Math.max(1, Math.round(pos.accuracy))} м`);
   el("geo-mode").classList.toggle("is-warn", old || pos.accuracy > ARRIVAL_GOOD_M);
 }
 
@@ -1206,7 +1236,7 @@ function renderAccuracy() {
 function clearGeoNotice() {
   el("geo-notice").hidden = true;
   el("geo-mode").classList.remove("is-warn");
-  el("geo-mode").textContent = locator.mode === "simulation" ? "Ручной" : "GPS";
+  setGeoLabel("");
 }
 
 /** Из строки «GPS недоступен»: сразу ручной режим и подсказка, что делать. */
@@ -1224,7 +1254,7 @@ function switchToManualPlace() {
  */
 function onMapTap(point) {
   if (locator.mode !== "simulation") {
-    showToast("Указать место пальцем: GPS вверху → «Вручную»");
+    showToast("Указать место пальцем: значок места вверху → «Вручную»");
     return;
   }
   // Экран стоит на месте — переезжает только точка инженера.
@@ -1326,14 +1356,15 @@ function setGeoMode(mode) {
   if (mode === "gps") {
     enableOrientation();
     locator.startGps();
-    el("geo-mode").textContent = "GPS";
+    setGeoLabel("");
     el("geo-explain").textContent = "Ваше место определяет приёмник телефона.";
   } else {
-    el("geo-mode").textContent = "Ручной";
+    setGeoLabel("");
     el("geo-mode").classList.remove("is-warn");
     el("geo-notice").hidden = true;
     el("geo-explain").textContent = "Нажмите «Готово» и коснитесь карты там, где вы стоите.";
     locator.startManual();
+    setGeoLabel("");
     cancelAnimationFrame(animationFrame);
     if (choosingPlace()) routeMap.resetView();
   }

@@ -54,6 +54,7 @@ const ROUTE_ICONS = {
   finish: "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z",
   pickup: "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z",
   warehouse: "M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z",
+  return: "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z",
   pass: "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z",
 };
 
@@ -1024,6 +1025,8 @@ class AirportMap {
       if (stop.kind === "warehouse") {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "warehouse", stop.name || "Склад",
           `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
+      } else if (stop.kind === "return") {
+        this.appendRouteEnd(this.nodesById.get(stop.node_id), "return", "Вернуть машину", "Сюда вернуть прежнюю машину");
       } else if (stop.kind === "pass") {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "pass", stop.name || "Точка",
           `Промежуточная точка${stop.name ? `: ${stop.name}` : ""}`);

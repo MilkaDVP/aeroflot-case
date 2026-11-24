@@ -478,6 +478,12 @@
 .route-end-warehouse .route-end-disc { fill: #8250df; }
 .route-end-pass .route-end-disc { fill: #b7791f; }
 .route-end-icon { fill: #fff; }
+.route-end-return .route-end-disc { fill: #57606a; }
+
+/* Пройденные и оставшиеся точки назначенного вызова. */
+.wp-progress { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--fs-sm); }
+.wp-done { color: var(--ok); }
+.wp-left { color: var(--text-muted); }
 
 /* Выбран вызов: остальное приглушено, чтобы его точки выделялись.
    Люди остаются яркими — их цвет говорит, кого можно послать. */

@@ -172,7 +172,15 @@ def gigachat_summary(items):
     return gigachat.complete(SYSTEM_PROMPT, json.dumps(plan_facts(items), ensure_ascii=False))
 
 
+class AskTurn(BaseModel):
+    """Прошлый вопрос и ответ на него."""
+
+    question: str = Field(max_length=1000)
+    answer: str = Field(max_length=1500)
+
+
 class AskRequest(BaseModel):
+    history: list[AskTurn] = Field(default_factory=list, max_length=10)
     question: str = Field(min_length=1, max_length=500)
 
 
@@ -325,6 +333,9 @@ def ai_ask(
         )
     question = payload.question.strip()
     situation = situation_text(db, context, items, utc_now())
+    if payload.history:
+        talk = "\n".join(f"Диспетчер: {t.question}\nТы: {t.answer}" for t in payload.history)
+        situation += f"\n\nРазговор до этого (обстановка с тех пор могла измениться):\n{talk}"
     answer = gigachat.complete(ASK_PROMPT, f"Обстановка:\n{situation}\n\nВопрос диспетчера: {question}")
     if not answer:
         return AskResponse(

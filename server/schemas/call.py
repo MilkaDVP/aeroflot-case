@@ -21,6 +21,34 @@ class CallCreateRequest(BaseModel):
     waypoints: list[str] = Field(default_factory=list, max_length=10)
 
 
+class TravelPreviewRequest(BaseModel):
+    """
+    Как поедет инженер: путь и время до решения диспетчера.
+
+    Назначение: employee_id и travel. Смена транспорта назначенного:
+    vehicle_id (None — пешком), employee_id не нужен.
+    """
+
+    employee_id: int | None = None
+    travel: str = "auto"
+    vehicle_id: int | None = None
+    # Чья машина, если вторым в машине первого: до назначения её ещё
+    # нет в вызове.
+    lead_vehicle: str | None = None
+
+
+class WaypointPlanRequest(BaseModel):
+    """
+    Точки, для которых нужен лучший порядок.
+
+    Каждая точка — список годных узлов: один названный или все склады,
+    если подойдёт любой. keep_order — порядок задан и менять его нельзя.
+    """
+
+    groups: list[list[str]] = Field(min_length=1, max_length=10)
+    keep_order: bool = False
+
+
 class WaypointsRequest(BaseModel):
     """Промежуточные точки маршрута по вызову — узлы графа по порядку."""
 

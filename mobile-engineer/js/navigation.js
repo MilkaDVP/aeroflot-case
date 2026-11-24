@@ -104,7 +104,9 @@ class LocalNavigation {
       }
       for (const [next,e] of p.links) {
         if (driving ? !e.vehicle_allowed : e.walk_allowed === false) continue;
-        const cost = dist.get(p)+e.distance_m;
+        // Как на сервере: быстрее, а не короче — с ограничениями скорости.
+        const own = driving ? 20 : 5;
+        const cost = dist.get(p)+e.distance_m/Math.min(own, e.speed_kmh || own);
         if (cost >= (dist.get(next) ?? Infinity)) continue;
         dist.set(next,cost); previous.set(next,p);
         if (!queue.includes(next)) queue.push(next);

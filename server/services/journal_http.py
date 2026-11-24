@@ -40,6 +40,9 @@ QUIET_PATTERNS = (
     re.compile(r"^/api/auth/login$"),
     re.compile(r"/suggest$"),
     re.compile(r"^/api/ai/agent/step$"),
+    # Расчёт порядка точек: ничего не меняет.
+    re.compile(r"^/api/calls/\d+/waypoints/plan$"),
+    re.compile(r"^/api/calls/\d+/route-preview$"),
 )
 CLAIM = re.compile(r"/(claim|release)$")
 ENTITY = re.compile(r"^/api/(calls|employees|vehicles|aircraft|users|reports)/(\d+)")
