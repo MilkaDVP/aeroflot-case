@@ -943,3 +943,5 @@ details[open] .detail-label::after { content: " ⌄"; }
 }
 #problem-form .big { width: 100%; margin-bottom: 8px; }
 .problem-send { background: var(--danger-strong); border-color: var(--danger-strong); color: #fff; }
+
+.route-line.route-future { stroke-dasharray: 4 7; opacity: .18; }

@@ -740,7 +740,7 @@ function showCallRoute(call) {
   if (call.status === "assigned" || call.status === "accepted") {
     airportMap.showRoute(
       call.route_node_ids, call.pickup_node_id, call.stand_node_id, undefined, employee,
-      call.tools_taken_at ? [] : call.route_stops
+      [...(call.route_stops || []).filter(s => !(s.kind === "warehouse" && call.tools_taken_at) && !(call.waypoints || []).some(w => w.node_id === s.node_id && w.done_at)), ...(call.waypoints || []).filter(w => !w.done_at)]
     );
   } else if (call.status === "queued") {
     airportMap.showRoute(

@@ -2415,3 +2415,5 @@ svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
 }
 .problem-block b { color: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .call.has-problem { animation: none; } }
+
+.route.route-future { stroke-dasharray: 4 7; opacity: .18; }

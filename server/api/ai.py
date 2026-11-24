@@ -172,7 +172,13 @@ def gigachat_summary(items):
     return gigachat.complete(SYSTEM_PROMPT, json.dumps(plan_facts(items), ensure_ascii=False))
 
 
+class ChatTurn(BaseModel):
+    question: str = Field(max_length=1000)
+    answer: str = Field(max_length=1200)
+
+
 class AskRequest(BaseModel):
+    history: list[ChatTurn] = Field(default_factory=list, max_length=10)
     question: str = Field(min_length=1, max_length=500)
 
 
@@ -325,6 +331,8 @@ def ai_ask(
         )
     question = payload.question.strip()
     situation = situation_text(db, context, items, utc_now())
+    if payload.history:
+        situation += "\nПредыдущие реплики для контекста: " + json.dumps([t.model_dump() for t in payload.history], ensure_ascii=False)
     answer = gigachat.complete(ASK_PROMPT, f"Обстановка:\n{situation}\n\nВопрос диспетчера: {question}")
     if not answer:
         return AskResponse(

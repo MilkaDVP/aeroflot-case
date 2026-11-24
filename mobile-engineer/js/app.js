@@ -920,11 +920,11 @@ function drawRoute(position = state.position) {
     position,
     state.airportPoint,
     state.call ? state.call.vehicle : null,
-    state.call ? state.call.call.pickup_node_id : null,
+    !payload?.instruction && state.call?.vehicle?.pickup ? state.call.call.pickup_node_id : null,
     choosing ? state.airportPoint : null,
-    state.call && !state.call.call.tools_taken_at
+    state.call && !payload.instruction
       ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
-        || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse")?.node_id)
+        || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse" && !state.call.call.tools_taken_at)?.node_id)
       : null,
     remainingLine(payload, points, position)
   );

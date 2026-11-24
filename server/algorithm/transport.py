@@ -229,7 +229,8 @@ class Network:
         """Варианты цепочки точек: выбранные диспетчером, и склад — если нужен."""
         if not self.depots:
             return [self.waypoints]
-        return [[depot] + self.waypoints for depot in self.depots]
+        return [self.waypoints[:i] + [depot] + self.waypoints[i:]
+                for depot in self.depots for i in range(len(self.waypoints) + 1)]
 
 
 def seconds(distance_m, mode, speed_kmh=None):
@@ -379,6 +380,7 @@ def build(net, recipe):
     graph = net.graph
     legs = []
     stops = []
+    prior_nodes = set()
     for step in recipe["steps"]:
         if step[0] == "stop":
             _, kind, node_id, dwell, final = step
@@ -386,9 +388,10 @@ def build(net, recipe):
             continue
         kind, origin, destination, approach, speed = step
         mode = MODE_WALK if kind == "walk" else MODE_VEHICLE
-        route = shortest_path(graph, origin, destination, mode, speed)
+        route = shortest_path(graph, origin, destination, mode, speed, prior_nodes)
         if route is None:
             return None
+        prior_nodes.update(route.node_ids)
         legs.append(Route(route.node_ids, route.distance_m, mode, approach, speed, route.path_seconds))
     return Plan(legs, vehicle=recipe["vehicle"], pickup=recipe["pickup"], stops=stops)
 

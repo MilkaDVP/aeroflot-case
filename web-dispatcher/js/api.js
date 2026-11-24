@@ -199,7 +199,7 @@ const Api = {
   // Ход ИИ-агента: первый — просьба, дальше результаты действий.
   aiAgent: (command, messages, next) =>
     request("POST", next ? "/api/ai/agent/step" : "/api/ai/agent", { command, messages }),
-  aiAsk: (question) => request("POST", "/api/ai/ask", { question }),
+  aiAsk: (question, history = []) => request("POST", "/api/ai/ask", { question, history }),
 
   // Журнал событий: просмотр, типы, целостность, выгрузка файлом.
   events: (params) => request("GET", `/api/events?${new URLSearchParams(params)}`),

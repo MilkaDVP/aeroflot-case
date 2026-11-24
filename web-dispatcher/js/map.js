@@ -968,12 +968,10 @@ class AirportMap {
     }
     const lead = progress ? progress.lead : undefined;
     const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < known.length - 1) {
-      this.appendRouteLine(known.slice(0, split + 1), "route route-walk", lead);
-      this.appendRouteLine(known.slice(split), "route");
-    } else {
-      this.appendRouteLine(known, "route", lead);
-    }
+    const targets = new Set([pickupNodeId, ...(stops || []).filter(s => !s.final).map(s => s.node_id)].filter(Boolean));
+    const end = known.findIndex(id => targets.has(id));
+    if (end >= 0 && end < known.length - 1) this.appendRouteLine(known.slice(end), "route route-future");
+    this.appendRouteLine(end < 0 ? known : known.slice(0,end+1), split >= 0 && end <= split ? "route route-walk" : "route", lead);
 
     // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
     // а силуэт борта на стоянке легко принять за обычный значок карты —
@@ -1096,7 +1094,8 @@ class AirportMap {
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", points.join(" "));
     line.setAttribute("class", className);
-    this.layers.route.append(casing, line);
+    if (!className.includes("route-future")) this.layers.route.append(casing);
+    this.layers.route.append(line);
   }
 
   /** Отметка конца маршрута постоянного экранного размера с буквой внутри. */

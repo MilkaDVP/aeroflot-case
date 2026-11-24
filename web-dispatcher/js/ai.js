@@ -29,6 +29,9 @@ const AiPanel = {
   answers: [],
 
   init(button, root, { onChanged, onOpenCall, onPreview }) {
+    const user = Session.user;
+    this.historyKey = JSON.stringify(["oto.ai", user.login, user.airport_icao, user.shift]);
+    try { this.answers = JSON.parse(sessionStorage.getItem(this.historyKey) || "[]"); } catch { this.answers = []; }
     this.button = button;
     this.root = root;
     this.onChanged = onChanged;
@@ -297,6 +300,7 @@ const AiPanel = {
     if (!question) return;
     input.value = "";
     const entry = { question, answer: null, steps: [] };
+    const previous = this.answers.filter(turn => turn.answer && turn.source !== "error");
     this.answers.push(entry);
     this.answers = this.answers.slice(-10);
     this.setWorking(true);
@@ -311,7 +315,8 @@ const AiPanel = {
           step.kind = kind;
           this.renderAnswers();
         };
-      });
+      }, previous);
+      entry.readExternal = Agent.readExternal;
       entry.source = "gigachat";
       entry.idle = !entry.steps.some((step) => step.kind === "done");
     } catch (error) {
@@ -320,10 +325,11 @@ const AiPanel = {
       // Без GigaChat агент не работает, но план по правилам остаётся.
       if (error.status === 503 && !entry.steps.length) {
         try {
-          entry.answer = (await Api.aiAsk(question.slice(0, 500))).answer;
+          entry.answer = (await Api.aiAsk(question.slice(0, 500), previous.map(({question, answer}) => ({question:question.slice(0,1000), answer:answer.slice(0,1200)})))).answer;
         } catch (again) { /* остаётся исходная ошибка */ }
       }
     }
+    try { sessionStorage.setItem(this.historyKey, JSON.stringify(this.answers)); } catch { /* История остаётся в памяти. */ }
     this.setWorking(false);
     this.renderAnswers(true);
     if (!this.root.hidden) this.load(false);

@@ -361,7 +361,12 @@ class RouteMap {
     this.drawTiles();
 
     if (points.length >= 2) {
-      this.drawLegs(remaining || [], pickupNodeId);
+      const ids = new Set([pickupNodeId, warehouseNodeId].filter(Boolean));
+      const end = remaining?.findIndex(p => ids.has(p.id)) ?? -1;
+      if (end >= 0 && end < remaining.length - 1) {
+        this.drawRoute(remaining.slice(end).map(p => this.project(p)), "route-line route-future");
+        this.drawLegs(remaining.slice(0,end+1), pickupNodeId);
+      } else this.drawLegs(remaining || [], pickupNodeId);
     }
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));
