@@ -48,6 +48,14 @@ const USER_SPAN_MAX_M = 8000;
 // Смещение пальца, после которого касание — уже сдвиг карты, а не «я здесь».
 const TAP_SLOP_PX = 8;
 
+// Период волны вокруг инженера — тот же, что у self-pulse в app.css.
+const SELF_PULSE_MS = 2400;
+
+// Значки меток, сетка 24×24 (Material Design Icons, Apache 2.0).
+const ICON_PLANE = "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z";
+const ICON_CAR = "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z";
+const ICON_WRENCH = "M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z";
+
 const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
@@ -75,6 +83,7 @@ class RouteMap {
     this.userSpan = null;
     this.base = null;
     this.lastArgs = null;
+    this.markers = [];
     this.pointers = new Map();
     this.gesture = null;
     this.suppressTap = false;
@@ -265,6 +274,7 @@ class RouteMap {
       scaleRef: Math.min(width, height),
     };
     this.svg.setAttribute("viewBox", `${this.view.minX} ${this.view.minY} ${width} ${height}`);
+    this.placeMarkers();
     // Подписи стоянок — постоянного экранного размера; издалека их
     // не показываем, иначе сотня номеров сливается в кашу.
     const font = this.view.scaleRef * 0.032;
@@ -385,6 +395,7 @@ class RouteMap {
     }
 
     this.contentLayer.replaceChildren();
+    this.markers = [];
     if (all.length === 0) {
       // Совсем не от чего оттолкнуться: ни вызова, ни координат,
       // ни аэропорта. Пустая карта честнее случайной точки на глобусе.
@@ -583,37 +594,51 @@ class RouteMap {
     this.contentLayer.append(line);
   }
 
-  drawTarget(point) {
-    const marker = document.createElementNS(SVG_NS, "circle");
-    marker.setAttribute("cx", point.x);
-    marker.setAttribute("cy", point.y);
-    marker.setAttribute("r", this.view.scaleRef * 0.035);
-    marker.setAttribute("class", "route-target");
+  /**
+   * Метка постоянного экранного размера: внутри неё единица — пиксель,
+   * начало координат — сама точка. Масштаб пересчитывает applyView,
+   * поэтому метки не растут ни при щипке, ни на большом экране.
+   */
+  addMarker(point, className, parts) {
+    const marker = group(`marker ${className}`);
+    for (const [name, attributes] of parts) marker.append(svgElement(name, attributes));
     this.contentLayer.append(marker);
+    this.markers.push({ marker, point });
+    this.placeMarkers();
+    return marker;
   }
 
-  /** Машина, которую надо забрать: квадрат, как на карте диспетчера. */
+  placeMarkers() {
+    const scale = this.view.width / (this.svg.getBoundingClientRect().width || 320);
+    for (const { marker, point } of this.markers) {
+      marker.setAttribute("transform", `translate(${point.x} ${point.y}) scale(${scale})`);
+    }
+  }
+
+  /** Борт: булавка с самолётом, остриё — на стоянке. */
+  drawTarget(point) {
+    this.addMarker(point, "route-target", [
+      ["ellipse", { class: "marker-shadow", cx: 0, cy: 1, rx: 8, ry: 3 }],
+      ["path", { class: "marker-body", d: "M0 0C-4 -8 -16 -15 -16 -28A16 16 0 0 1 16 -28C16 -15 4 -8 0 0Z" }],
+      ["path", { class: "marker-icon", transform: "translate(-11 -39) scale(.92)", d: ICON_PLANE }],
+    ]);
+  }
+
+  /** Машина, которую надо забрать. */
   drawVehicle(point) {
-    const size = this.view.scaleRef * 0.05;
-    const marker = document.createElementNS(SVG_NS, "rect");
-    marker.setAttribute("x", point.x - size / 2);
-    marker.setAttribute("y", point.y - size / 2);
-    marker.setAttribute("width", size);
-    marker.setAttribute("height", size);
-    marker.setAttribute("rx", size * 0.2);
-    marker.setAttribute("class", "route-vehicle");
-    this.contentLayer.append(marker);
+    this.addBadge(point, "route-vehicle", ICON_CAR);
   }
 
   drawWarehouse(point) {
-    const size = this.view.scaleRef * 0.055;
-    const marker = document.createElementNS(SVG_NS, "rect");
-    marker.setAttribute("x", point.x - size / 2);
-    marker.setAttribute("y", point.y - size / 2);
-    marker.setAttribute("width", size);
-    marker.setAttribute("height", size);
-    marker.setAttribute("class", "route-warehouse");
-    this.contentLayer.append(marker);
+    this.addBadge(point, "route-warehouse", ICON_WRENCH);
+  }
+
+  /** Круглый значок промежуточной точки. */
+  addBadge(point, className, icon) {
+    this.addMarker(point, className, [
+      ["circle", { class: "marker-body", r: 14 }],
+      ["path", { class: "marker-icon", transform: "translate(-9 -9) scale(.75)", d: icon }],
+    ]);
   }
 
   setHeading(value) {
@@ -624,27 +649,19 @@ class RouteMap {
     }
   }
 
+  /** Инженер: точка с белым кольцом, расходящаяся волна и луч направления. */
   drawSelf(point) {
-    const halo = document.createElementNS(SVG_NS, "circle");
-    halo.setAttribute("cx", point.x);
-    halo.setAttribute("cy", point.y);
-    halo.setAttribute("r", this.view.scaleRef * 0.055);
-    halo.setAttribute("class", "route-self-halo");
-
-    const marker = document.createElementNS(SVG_NS, "circle");
-    marker.setAttribute("cx", point.x);
-    marker.setAttribute("cy", point.y);
-    marker.setAttribute("r", this.view.scaleRef * 0.028);
-    marker.setAttribute("class", "route-self");
-
-    const direction = group("route-direction");
-    direction.setAttribute("transform", `translate(${point.x} ${point.y}) scale(${this.view.scaleRef * 0.003})`);
-    this.arrow = document.createElementNS(SVG_NS, "path");
-    this.arrow.setAttribute("d", "M0 -16 L5 -7 L0 -9 L-5 -7 Z");
-    this.arrow.setAttribute("fill", "#00d8ff");
-    direction.append(this.arrow);
+    const marker = this.addMarker(point, "route-self", [
+      ["circle", { class: "self-pulse", r: 22 }],
+      ["path", { class: "self-beam", d: "M0 0L-15 -34A37 37 0 0 1 15 -34Z" }],
+      ["circle", { class: "self-ring", r: 11 }],
+      ["circle", { class: "self-dot", r: 7.5 }],
+    ]);
+    // Метка пересоздаётся при каждой отрисовке — волна продолжается
+    // с той же фазы, а не начинается заново.
+    marker.querySelector(".self-pulse").style.animationDelay = `-${performance.now() % SELF_PULSE_MS}ms`;
+    this.arrow = marker.querySelector(".self-beam");
     this.setHeading(this.heading);
-    this.contentLayer.append(halo, marker, direction);
   }
 
   /** Касание по карте — координаты для режима имитации. */

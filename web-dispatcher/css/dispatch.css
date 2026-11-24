@@ -465,16 +465,23 @@
 }
 
 /* Отметки «А» (начало), «Б» (стоянка) и «М» (забрать машину). */
-.route-end { pointer-events: none; }
+.route-end { pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
 
 .route-end-disc {
-  fill: var(--route);
+  fill: var(--route-strong);
   stroke: #fff;
   stroke-width: 2.5;
 }
 
+.route-end-start .route-end-disc { fill: #1a8f4a; }
 .route-end-finish .route-end-disc { fill: var(--danger-strong); }
-.route-end-pickup .route-end-disc { fill: var(--bg-deep); stroke: var(--route); }
+.route-end-warehouse .route-end-disc { fill: #8250df; }
+.route-end-pass .route-end-disc { fill: #b7791f; }
+.route-end-icon { fill: #fff; }
+
+/* Выбран вызов: остальное приглушено, чтобы его точки выделялись.
+   Люди остаются яркими — их цвет говорит, кого можно послать. */
+.has-route :is(.layer-stands, .layer-aircraft, .layer-vehicles) { opacity: 0.5; }
 
 .route-end-halo {
   fill: var(--danger);
@@ -484,12 +491,15 @@
   transform-box: fill-box;
 }
 
-.route-end-letter {
+.route-end-label {
   fill: #fff;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   text-anchor: middle;
-  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--bg-deep);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 /* Маршрут не построен: пунктирное кольцо вокруг стоянки и подпись. */

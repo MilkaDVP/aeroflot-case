@@ -61,6 +61,20 @@ body {
   overscroll-behavior: none;
 }
 
+/* Приложение, а не документ: с мыши и долгого нажатия текст не выделяется,
+   кроме полей ввода. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 body {
   background: var(--bg-deep);
   color: var(--text);
@@ -444,21 +458,24 @@ button:disabled { opacity: 0.5; }
   vector-effect: non-scaling-stroke;
 }
 
-.route-target {
-  fill: var(--danger);
-  stroke: var(--bg-deep);
-  stroke-width: 1.5px;
-  vector-effect: non-scaling-stroke;
-}
+/* Метки карты: белая обводка читается и на схеме, и на снимке. */
+.marker { pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)); }
+.marker-body { stroke: #fff; stroke-width: 2px; }
+.marker-icon { fill: #fff; }
+.marker-shadow { fill: rgba(0, 0, 0, 0.4); }
+.route-target .marker-body { fill: var(--danger-strong); }
+.route-vehicle .marker-body { fill: var(--route-strong); }
+.route-warehouse .marker-body { fill: #8250df; }
 
-.route-self {
-  fill: var(--ok);
-  stroke: var(--bg-deep);
-  stroke-width: 1.5px;
-  vector-effect: non-scaling-stroke;
+.self-ring { fill: #fff; }
+.self-dot { fill: #1fa855; }
+.self-beam { fill: var(--ok); opacity: 0.45; }
+.self-pulse { fill: var(--ok); opacity: 0.25; animation: self-pulse 2400ms ease-out infinite; }
+@keyframes self-pulse {
+  from { transform: scale(0.45); opacity: 0.55; }
+  to { transform: scale(1.25); opacity: 0; }
 }
-
-.route-self-halo { fill: var(--ok); opacity: 0.25; }
+@media (prefers-reduced-motion: reduce) { .self-pulse { animation: none; } }
 
 /* Предупреждение об очереди: жёлтое, как вызов в очереди у диспетчера. */
 .queue-note {
@@ -489,12 +506,6 @@ button:disabled { opacity: 0.5; }
   stroke-dasharray: 8 7;
 }
 
-.route-vehicle {
-  fill: var(--bg-deep);
-  stroke: var(--route);
-  stroke-width: 3;
-  vector-effect: non-scaling-stroke;
-}
 
 /* --- Всплывающие панели --- */
 
@@ -749,12 +760,6 @@ button:disabled { opacity: 0.5; }
   background: transparent;
   color: inherit;
   font: inherit;
-}
-.route-warehouse {
-  fill: #a371f7;
-  stroke: #0b0f14;
-  stroke-width: 2px;
-  vector-effect: non-scaling-stroke;
 }
 .tools-note { flex-wrap: wrap; }
 .tools-note span { min-width: 60%; }

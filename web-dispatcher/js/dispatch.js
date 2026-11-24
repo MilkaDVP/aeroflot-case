@@ -388,7 +388,9 @@ async function selectCall(call, { keepView = false } = {}) {
 
   if (!keepView) {
     airportMap.focusOn(call.stand_node_id, 4);
+    airportMap.markStand(call.stand_node_id);
   }
+  const viewBefore = airportMap.viewKey();
 
   // Перешёл к другому вызову — прежний освобождается для коллег.
   if (state.claimedCallId !== null && state.claimedCallId !== call.id) {
@@ -398,6 +400,7 @@ async function selectCall(call, { keepView = false } = {}) {
   if (!isAssignable(call)) {
     state.claimedCallId = null;
     showAssignment(call);
+    if (!keepView) airportMap.focusRoute();
     return;
   }
 
@@ -439,6 +442,8 @@ async function selectCall(call, { keepView = false } = {}) {
         undefined,
         suggestion.best.route.stops
       );
+      // Пока шёл подбор, диспетчер мог сдвинуть карту — тогда не дёргаем.
+      if (!keepView && airportMap.viewKey() === viewBefore) airportMap.focusRoute();
       elements.assignButton.disabled = !isAssignable(call);
     } else {
       airportMap.drawRouteMissing(call.stand_node_id, "Маршрут не построен: некого отправить");
@@ -731,8 +736,8 @@ function queueOptions() {
  * Маршрут уже назначенного вызова.
  *
  * Пока исполнитель в пути, маршрут обязан быть: если его нет, на стоянке
- * появляется отметка «маршрут не построен». Когда инженер уже у борта
- * или вызов закрыт, линия не нужна, и карта остаётся чистой.
+ * появляется отметка «маршрут не построен». Когда инженер уже у борта,
+ * линия не нужна — остаётся отметка стоянки; у закрытого вызова карта чистая.
  */
 function showCallRoute(call) {
   // Исполнитель нужен, чтобы маршрут из одной вершины шёл от его места.
@@ -749,8 +754,11 @@ function showCallRoute(call) {
       call.stand_node_id,
       "В очереди: маршрут появится, когда инженер освободится"
     );
-  } else {
+  } else if (call.status === "closed" || call.status === "cancelled") {
     airportMap.clearRoute();
+  } else {
+    airportMap.markStand(call.stand_node_id,
+      call.status === "arrived" ? "Сотрудник уже у борта" : undefined);
   }
 }
 
@@ -773,7 +781,7 @@ function showClaimedByOther(call, detail) {
   state.travel = {};
   elements.assignButton.disabled = true;
   document.getElementById("call-actions").hidden = true;
-  airportMap.clearRoute();
+  airportMap.markStand(call.stand_node_id);
   refreshExecutorMenu();
 
   const who = call.claimed_by_name || "другой диспетчер";

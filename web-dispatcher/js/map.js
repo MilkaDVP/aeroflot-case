@@ -41,6 +41,37 @@ function trailPoint(point) {
   return `${point.x},${point.y}`;
 }
 
+// Период пульса вокруг борта — тот же, что у route-pulse в dispatch.css.
+const ROUTE_PULSE_MS = 1600;
+// Поля вокруг ключевых точек при наведении и предел приближения.
+const ROUTE_FOCUS_PADDING_PX = 110;
+const ROUTE_FOCUS_MAX_ZOOM = 4;
+
+// Значки ключевых точек, сетка 24×24 (Material Design Icons, Apache 2.0) —
+// те же, что в приложении инженера.
+const ROUTE_ICONS = {
+  start: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z",
+  finish: "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z",
+  pickup: "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z",
+  warehouse: "M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z",
+  pass: "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z",
+};
+
+function svgPart(name, attributes) {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+  return element;
+}
+
+function standLabel(node) {
+  return node.ref ? `Борт · ст. ${node.ref}` : "Борт";
+}
+
+/** Фамилия исполнителя, если он известен. */
+function personLabel(employee) {
+  return (employee?.full_name || "").split(" ")[0] || "Инженер";
+}
+
 class AirportMap {
   constructor(svgElement) {
     this.svg = svgElement;
@@ -60,13 +91,13 @@ class AirportMap {
       aircraft: createGroup("layer-aircraft"),
       vehicles: createGroup("layer-vehicles"),
       employees: createGroup("layer-employees"),
-      // Отметки начала и конца маршрута — поверх людей и бортов:
-      // иначе буква «Б» пряталась под силуэтом самолёта на стоянке.
-      routeEnds: createGroup("layer-route-ends"),
       // Слой редактора: точки и связи, которые администратор наносит
       // на карту. На рабочем экране диспетчера остаётся пустым.
       editor: createGroup("layer-editor"),
       labels: createGroup("layer-labels"),
+      // Отметки начала и конца маршрута — поверх людей, бортов и подписей:
+      // иначе они прятались под силуэтом самолёта на стоянке.
+      routeEnds: createGroup("layer-route-ends"),
     };
 
     this.viewport = createGroup("viewport");
@@ -950,10 +981,10 @@ class AirportMap {
       if (employee && employee.lat != null && employee.lon != null) {
         const start = this.projectLatLon(employee.lat, employee.lon);
         this.appendRouteLine(known, "route", start);
-        this.appendRouteEnd(start, "start", "А", "Исполнитель");
-        this.appendRouteEnd(target, "finish", "Б", "Конец маршрута — стоянка борта");
+        this.appendRouteEnd(start, "start", personLabel(employee), "Исполнитель");
+        this.appendRouteEnd(target, "finish", standLabel(target), "Конец маршрута — стоянка борта");
       } else {
-        this.appendRouteEnd(target, "finish", "Б", "Сотрудник уже у борта");
+        this.appendRouteEnd(target, "finish", standLabel(target), "Сотрудник уже у борта");
       }
       this.updateMarkerScale();
       return true;
@@ -968,7 +999,10 @@ class AirportMap {
     }
     const lead = progress ? progress.lead : undefined;
     const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
-    if (split > 0 && split < known.length - 1) {
+    // Машина — следующая точка впереди (split = 0): пеший участок до неё
+    // идёт от места инженера.
+    const pickupAhead = split < known.length - 1 && (split > 0 || (split === 0 && Boolean(lead)));
+    if (pickupAhead) {
       this.appendRouteLine(known.slice(0, split + 1), "route route-walk", lead);
       this.appendRouteLine(known.slice(split), "route");
     } else {
@@ -980,23 +1014,23 @@ class AirportMap {
     // без отметок было непонятно, откуда и куда идёт линия.
     const first = progress ? progress.position : this.nodesById.get(known[0]);
     const last = this.nodesById.get(known[known.length - 1]);
-    if (split > 0 && split < known.length - 1) {
-      this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "М", "Здесь забрать машину");
+    if (pickupAhead) {
+      this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "Машина", "Здесь забрать машину");
     }
     // Промежуточные точки: склад (получить инструмент, 30 с). Посадка
-    // отмечена буквой «М» выше; высадка у борта — это конец маршрута.
+    // отмечена машиной выше; высадка у борта — это конец маршрута.
     for (const stop of stops || []) {
       if (!known.includes(stop.node_id)) continue;
       if (stop.kind === "warehouse") {
-        this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "С",
+        this.appendRouteEnd(this.nodesById.get(stop.node_id), "warehouse", stop.name || "Склад",
           `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
       } else if (stop.kind === "pass") {
-        this.appendRouteEnd(this.nodesById.get(stop.node_id), "pickup", "Т",
+        this.appendRouteEnd(this.nodesById.get(stop.node_id), "pass", stop.name || "Точка",
           `Промежуточная точка${stop.name ? `: ${stop.name}` : ""}`);
       }
     }
-    this.appendRouteEnd(first, "start", "А", "Начало маршрута");
-    this.appendRouteEnd(last, "finish", "Б", "Конец маршрута — стоянка борта");
+    this.appendRouteEnd(first, "start", personLabel(employee), "Начало маршрута — исполнитель");
+    this.appendRouteEnd(last, "finish", standLabel(last), "Конец маршрута — стоянка борта");
     this.updateMarkerScale();
     return true;
   }
@@ -1099,37 +1133,96 @@ class AirportMap {
     this.layers.route.append(casing, line);
   }
 
-  /** Отметка конца маршрута постоянного экранного размера с буквой внутри. */
-  appendRouteEnd(node, kind, letter, hint) {
+  /**
+   * Ключевая точка выбранного вызова: значок постоянного экранного
+   * размера и подпись. Борт — булавка остриём на стоянке, остальное —
+   * круглые значки; вид точки задаёт kind.
+   */
+  appendRouteEnd(node, kind, label, hint) {
     if (!node) {
       return;
     }
+    const pin = kind === "finish";
     const marker = this.createMarker(node.x, node.y);
     marker.classList.add("route-end", `route-end-${kind}`);
 
-    if (kind === "finish") {
-      const halo = document.createElementNS(SVG_NS, "circle");
-      halo.setAttribute("r", 24);
-      halo.setAttribute("class", "route-end-halo");
+    if (pin) {
+      const halo = svgPart("circle", { r: 24, class: "route-end-halo" });
+      // Отметки пересоздаются на каждом опросе: пульс продолжается
+      // с той же фазы, а не начинается заново.
+      halo.style.animationDelay = `-${performance.now() % ROUTE_PULSE_MS}ms`;
       marker.append(halo);
     }
+    marker.append(
+      pin
+        ? svgPart("path", { class: "route-end-disc", d: "M0 0C-5 -10 -19 -18 -19 -34A19 19 0 0 1 19 -34C19 -18 5 -10 0 0Z" })
+        : svgPart("circle", { class: "route-end-disc", r: 16 }),
+      svgPart("path", {
+        class: "route-end-icon",
+        transform: `translate(-11 ${pin ? -46 : -11}) scale(.92)`,
+        d: ROUTE_ICONS[kind],
+      })
+    );
 
-    const disc = document.createElementNS(SVG_NS, "circle");
-    disc.setAttribute("r", kind === "pickup" ? 11 : 14);
-    disc.setAttribute("class", "route-end-disc");
-
-    const text = document.createElementNS(SVG_NS, "text");
-    text.setAttribute("y", 0.5);
-    text.setAttribute("class", "route-end-letter");
-    text.textContent = letter;
-
-    marker.append(disc, text, title(hint));
+    // Подпись борта — над булавкой, остальных — под значком: так они
+    // не накрывают друг друга, когда точки рядом.
+    const text = svgPart("text", { y: pin ? -60 : 31, class: "route-end-label" });
+    text.textContent = label;
+    marker.append(text, title(hint));
     this.layers.routeEnds.append(marker);
+    this.svg.classList.add("has-route");
+  }
+
+  /** Только стоянка выбранного вызова: маршрута ещё или уже нет. */
+  markStand(standNodeId, hint) {
+    this.clearRoute();
+    const node = this.nodesById.get(standNodeId);
+    if (!node) {
+      return;
+    }
+    this.appendRouteEnd(node, "finish", standLabel(node), hint || "Стоянка борта");
+    this.updateMarkerScale();
+  }
+
+  /** Наводит карту так, чтобы все ключевые точки были на экране. */
+  focusRoute() {
+    const points = [...this.layers.routeEnds.children].map((marker) => ({
+      x: Number(marker.dataset.x),
+      y: Number(marker.dataset.y),
+    }));
+    if (!points.length || !this.baseView) {
+      return;
+    }
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const rect = this.visibleRect();
+    const room = (size) => Math.max(size - 2 * ROUTE_FOCUS_PADDING_PX, size / 3) / this.basePxPerMetre;
+    const scale = clamp(
+      Math.min(
+        room(rect.box.width) / Math.max(Math.max(...xs) - Math.min(...xs), 1),
+        room(rect.box.height) / Math.max(Math.max(...ys) - Math.min(...ys), 1),
+        ROUTE_FOCUS_MAX_ZOOM
+      ),
+      MIN_ZOOM,
+      MAX_ZOOM
+    );
+    const centre = this.screenCentre();
+    this.transform.scale = scale;
+    this.transform.x = centre.x - (scale * (Math.max(...xs) + Math.min(...xs))) / 2;
+    this.transform.y = centre.y - (scale * (Math.max(...ys) + Math.min(...ys))) / 2;
+    this.applyTransform();
+  }
+
+  /** Куда сейчас смотрит карта — чтобы заметить, что её сдвинули. */
+  viewKey() {
+    const { x, y, scale } = this.transform;
+    return `${x}/${y}/${scale}`;
   }
 
   clearRoute() {
     this.layers.route.replaceChildren();
     this.layers.routeEnds.replaceChildren();
+    this.svg.classList.remove("has-route");
   }
 
   /**
