@@ -54,11 +54,6 @@ def get_context(token=Depends(get_token), db: Session = Depends(get_db)):
     from services import journal
 
     journal.set_actor(db, session.user)
-    if session.user.employee_id:
-        # Инженер работает в приложении — в учениях сервер его не двигает.
-        from services import drill
-
-        drill.note_app(session.user.employee_id)
     return Context(session, session.user)
 
 

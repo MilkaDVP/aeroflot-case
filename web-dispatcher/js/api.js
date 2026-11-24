@@ -193,9 +193,6 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
-  // Учения: инженеры без приложения движутся сами.
-  drillState: () => request("GET", "/api/drill"),
-  setDrill: (enabled, speed) => request("POST", "/api/drill", { enabled, speed }),
   // Путь и время при выбранном способе поездки, ничего не меняя.
   routePreview: (callId, body) => request("POST", `/api/calls/${callId}/route-preview`, body),
   // Лучший порядок точек; groups — списки годных узлов на каждую точку.

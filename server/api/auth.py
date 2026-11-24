@@ -154,10 +154,6 @@ def logout(db: Session = Depends(get_dispatch_db), context: Context = Depends(ge
         end_shift(db, context.user.employee, "Выход из приложения")
     db.delete(context.session)
     db.commit()
-    if context.user.employee_id:
-        from services import drill
-
-        drill.forget_app(context.user.employee_id)
     return MessageResponse(message="Сессия закрыта")
 
 

@@ -156,60 +156,7 @@ async function start() {
 }
 
 /** Один цикл опроса: данные с сервера, затем перерисовка экрана. */
-/* --- Учения --- */
-
-let drill = { enabled: false, speed: 1 };
-
-/** Отдельным запросом: сбой учений не должен мешать основному экрану. */
-async function refreshDrill() {
-  try {
-    drill = await Api.drillState();
-  } catch (error) {
-    return;
-  }
-  renderDrill();
-}
-
-function renderDrill() {
-  const admin = roleAtLeast(Session.user.role, "local_admin");
-  const badge = document.getElementById("drill-badge");
-  badge.hidden = !drill.enabled;
-  badge.textContent = `Учения${drill.auto ? ` · сами едут: ${drill.auto}` : ""}`;
-  badge.title = "Инженеры, которые не зашли в приложение, действуют сами. " +
-    `Сами: ${drill.auto || 0}, в приложении: ${drill.in_app || 0}`;
-  const speed = document.getElementById("drill-speed");
-  speed.hidden = !admin || !drill.enabled;
-  if (document.activeElement !== speed) speed.value = drill.speed;
-  const toggle = document.getElementById("drill-toggle");
-  toggle.hidden = !admin;
-  toggle.textContent = drill.enabled ? "Завершить учения" : "Начать учения";
-}
-
-async function setDrill(enabled, speed) {
-  try {
-    drill = await Api.setDrill(enabled, speed);
-    renderDrill();
-    await refresh();
-  } catch (error) {
-    showToast(error.detail, true);
-  }
-}
-
-document.getElementById("drill-toggle").addEventListener("click", async () => {
-  if (!drill.enabled && !await askDialog({
-    title: "Начать учения?",
-    text: "Инженеры, которые не зашли в приложение, будут сами принимать вызовы, ехать по маршруту и закрывать работы. Кто в приложении — управляет сам.",
-    confirm: "Начать",
-  })) return;
-  await setDrill(!drill.enabled);
-});
-document.getElementById("drill-speed").addEventListener("change", (event) => {
-  event.target.blur();
-  setDrill(true, Number(event.target.value));
-});
-
 async function refresh() {
-  refreshDrill();
   const version = ++refreshVersion;
   try {
     const [employees, aircraft, calls, vehicles, reports] = await Promise.all([

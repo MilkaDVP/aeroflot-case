@@ -480,20 +480,6 @@
 .route-end-icon { fill: #fff; }
 .route-end-return .route-end-disc { fill: #57606a; }
 
-/* Учения: жёлтый, а не красный — не тревога, но картина учебная. */
-.drill-badge {
-  padding: 3px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
-  background: var(--warn-soft);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.drill-badge[hidden], .drill-speed[hidden] { display: none; }
-.drill-speed { width: auto; padding: 5px 6px; }
-
 /* Пройденные и оставшиеся точки назначенного вызова. */
 .wp-progress { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: var(--fs-sm); }
 .wp-done { color: var(--ok); }

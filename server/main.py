@@ -8,14 +8,12 @@
 
 import asyncio
 import os
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import (
-    drill,
     admin_airports,
     ai,
     airports,
@@ -35,7 +33,6 @@ from database import SessionLocal, begin_dispatch_write, create_all
 from graph_registry import load_from_database, preload_all
 from services.shifts import expire_shifts, initialize_shift_clocks
 from services.defects import ensure_builtin_defects
-from services import drill as drill_service
 from services import journal
 from services.journal_http import JournalMiddleware
 
@@ -63,31 +60,6 @@ def update_shifts():
     except Exception as error:  # такт не должен ронять сервер
         db.rollback()
         print(f"Не удалось обновить смены — {error}")
-    finally:
-        db.close()
-
-
-async def drill_loop():
-    """Учения: такт движения инженеров, которые не зашли в приложение."""
-    last = time.monotonic()
-    while True:
-        await asyncio.sleep(drill_service.TICK_S)
-        now = time.monotonic()
-        # После заминки сервера люди не должны перескакивать через поле.
-        dt_s, last = min(now - last, 5), now
-        if drill_service._active:
-            await asyncio.to_thread(drill_tick, dt_s)
-
-
-def drill_tick(dt_s):
-    db = SessionLocal()
-    try:
-        begin_dispatch_write(db)
-        drill_service.tick(db, dt_s)
-        db.commit()
-    except Exception as error:  # такт не должен ронять сервер
-        db.rollback()
-        print(f"Учения: такт пропущен — {error}")
     finally:
         db.close()
 
@@ -159,7 +131,6 @@ async def lifespan(app: FastAPI):
         print(f"Аэропорты из базы: {', '.join(custom)}")
 
     ticker = asyncio.create_task(shift_loop())
-    driller = asyncio.create_task(drill_loop())
     # Такт журнала: прогнозы прибытия, риски и нарушения норматива.
     watcher = None
     if os.environ.get("JOURNAL_LOOP", "1") == "1":
@@ -167,7 +138,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        tasks = [task for task in (ticker, driller, watcher) if task is not None]
+        tasks = [task for task in (ticker, watcher) if task is not None]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -210,7 +181,6 @@ app.include_router(ai.router)
 app.include_router(events.router)
 app.include_router(users.router)
 app.include_router(track.router)
-app.include_router(drill.router)
 
 
 @app.get("/api/health", tags=["Служебное"], summary="Проверка живости")
