@@ -321,6 +321,88 @@ function openCallById(callId) {
   }
 }
 
+/** Кнопка ждёт файл: повторное нажатие не заказывает второй. */
+async function saveFile(button, load) {
+  const title = button.textContent;
+  button.disabled = true;
+  button.textContent = "Готовлю…";
+  try {
+    await load();
+    return true;
+  } catch (error) {
+    showToast(error.detail || "Не удалось сформировать PDF", true);
+    return false;
+  } finally {
+    button.disabled = false;
+    button.textContent = title;
+  }
+}
+
+/** Значение для поля даты: местное время без пояса. */
+function inputTime(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function reportPeriods() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const back = (hours) => new Date(now.getTime() - hours * 3600000);
+  return [["12 часов (смена)", back(12)], ["Сегодня", today], ["7 дней", back(168)], ["30 дней", back(720)]]
+    .map(([title, from]) => ({ title, from, to: now }));
+}
+
+document.getElementById("report-open").addEventListener("click", () => {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Отчёт в PDF">
+      <h2>Отчёт в PDF</h2>
+      <div class="report-presets"></div>
+      <div class="report-dates">
+        <div><label for="report-from">С</label><input type="datetime-local" id="report-from"></div>
+        <div><label for="report-to">По</label><input type="datetime-local" id="report-to"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" data-act="close">Отмена</button>
+        <button type="button" class="primary" data-act="make">Сформировать</button>
+      </div>
+    </div>`;
+  const from = backdrop.querySelector("#report-from");
+  const to = backdrop.querySelector("#report-to");
+  const presets = backdrop.querySelector(".report-presets");
+  const choose = (period, button) => {
+    from.value = inputTime(period.from);
+    // Минута вперёд: вызов этой минуты тоже входит.
+    to.value = inputTime(new Date(period.to.getTime() + 60000));
+    for (const item of presets.children) item.classList.toggle("active", item === button);
+  };
+  for (const period of reportPeriods()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = period.title;
+    button.addEventListener("click", () => choose(period, button));
+    presets.append(button);
+    if (presets.children.length === 1) choose(period, button);
+  }
+  for (const input of [from, to]) {
+    input.addEventListener("input", () => [...presets.children].forEach((item) => item.classList.remove("active")));
+  }
+  const onKey = (event) => { if (event.key === "Escape") close(); };
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    backdrop.remove();
+  };
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("mousedown", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector('[data-act="close"]').addEventListener("click", close);
+  const make = backdrop.querySelector('[data-act="make"]');
+  make.addEventListener("click", async () => {
+    if (!from.value || !to.value) { showToast("Укажите период", true); return; }
+    if (await saveFile(make, () => Api.reportPdf(new Date(from.value).toISOString(), new Date(to.value).toISOString()))) close();
+  });
+  document.body.append(backdrop);
+});
+
 document.getElementById("call-history").addEventListener("click", async (event) => {
   const anchor = event.currentTarget;
   try {
@@ -331,7 +413,14 @@ document.getElementById("call-history").addEventListener("click", async (event) 
       const row = document.createElement("div");
       row.className = "history-call";
       const date = new Date(call.closed_at).toLocaleString("ru-RU");
-      row.textContent = `${date} · №${call.id} · ${call.board_number} · ст. ${call.stand_ref || "—"} · ${statusTitle(call.status)}`;
+      const label = document.createElement("span");
+      const file = document.createElement("button");
+      file.type = "button";
+      file.textContent = "PDF";
+      file.title = "Карточка вызова в PDF";
+      file.addEventListener("click", () => saveFile(file, () => Api.callPdf(call.id)));
+      label.textContent = `${date} · №${call.id} · ${call.board_number} · ст. ${call.stand_ref || "—"} · ${statusTitle(call.status)}`;
+      row.append(label, file);
       return row;
     });
     openPopover(anchor, "История вызовов", rows.length ? rows : ["Завершённых вызовов нет"]);

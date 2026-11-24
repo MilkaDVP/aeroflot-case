@@ -538,7 +538,14 @@
   .route-end-halo { animation: none; }
 }
 
-.history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); }
+.history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: var(--gap-sm); }
+.history-call button { flex: none; padding: 2px 8px; font-size: var(--fs-xs); }
+
+/* Отчёт: выбор периода. */
+.report-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: var(--gap); }
+.report-presets button.active { border-color: var(--route); background: var(--route-soft); }
+.report-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.report-dates input { color-scheme: dark; }
 
 #call-actions {
   display: flex;

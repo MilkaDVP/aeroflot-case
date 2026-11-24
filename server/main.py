@@ -14,6 +14,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import (
+    analytics,
+    stand,
     admin_airports,
     ai,
     airports,
@@ -31,6 +33,7 @@ from api import (
 )
 from database import SessionLocal, begin_dispatch_write, create_all
 from graph_registry import load_from_database, preload_all
+from services.assignment import accept_pending
 from services.shifts import expire_shifts, initialize_shift_clocks
 from services.defects import ensure_builtin_defects
 from services import journal
@@ -121,6 +124,7 @@ async def lifespan(app: FastAPI):
     try:
         initialize_shift_clocks(db)
         expire_shifts(db)
+        accept_pending(db)
         custom = load_from_database(db)
         db.commit()
     finally:
@@ -179,6 +183,8 @@ app.include_router(vehicles.router)
 app.include_router(admin_airports.router)
 app.include_router(ai.router)
 app.include_router(events.router)
+app.include_router(analytics.router)
+app.include_router(stand.router)
 app.include_router(users.router)
 app.include_router(track.router)
 

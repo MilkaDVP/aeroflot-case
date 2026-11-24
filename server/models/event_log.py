@@ -68,12 +68,13 @@ class EventLog(Base):
 
 
 # Триггеры создаются вместе с таблицей — и в рабочей базе, и в тестовой.
-for _statement in (
+TRIGGERS = (
     "CREATE TRIGGER IF NOT EXISTS event_log_no_update BEFORE UPDATE ON event_log "
     "BEGIN SELECT RAISE(ABORT, 'Журнал событий неизменяем: правка запрещена'); END",
     "CREATE TRIGGER IF NOT EXISTS event_log_no_delete BEFORE DELETE ON event_log "
     "BEGIN SELECT RAISE(ABORT, 'Журнал событий неизменяем: удаление запрещено'); END",
-):
+)
+for _statement in TRIGGERS:
     event.listen(
         EventLog.__table__, "after_create", DDL(_statement).execute_if(dialect="sqlite")
     )

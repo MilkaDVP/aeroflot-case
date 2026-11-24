@@ -765,7 +765,6 @@ button:disabled { opacity: 0.5; }
 .tools-note { flex-wrap: wrap; }
 .tools-note span { min-width: 60%; }
 
-#decline-call { margin: 0 14px 8px; width: calc(100% - 28px); }
 #nav-guidance:not([hidden]) { display: flex; align-items: center; gap: .8rem; padding: .85rem 1rem; border-radius: .75rem; background: #103f49; color: white; }
 #nav-icon { font-size: 2.4rem; line-height: 1; color: #96efce; }
 #nav-distance { font-size: 1.25rem; }
@@ -837,7 +836,7 @@ details[open] .detail-label::after { content: " ⌄"; }
 .work-dock .idle h2 { font-size: 15px; }
 .work-dock .idle p, .work-dock .idle-meta { font-size: 11px; }
 .dock-actions { display: flex; gap: 6px; }
-.dock-actions .big, .dock-actions #decline-call { flex: 1; width: auto; min-width: 0; margin: 0; min-height: 40px; padding: 6px; font-size: 14px; }
+.dock-actions .big { flex: 1; width: auto; min-width: 0; margin: 0; min-height: 40px; padding: 6px; font-size: 14px; }
 .screen:not(.work) input, .chat-form input { min-width: 0; }
 @media (orientation: landscape) and (max-height: 540px) {
   .work-dock { left: auto; width: min(46%,400px); }

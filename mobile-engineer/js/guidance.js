@@ -132,6 +132,13 @@ function updateGuidance(cue) {
     voice.speak(message);
   }
 }
+/** Произносит фразу, если озвучка включена. */
+function announce(words) {
+  if (!voiceEnabled || !voice || !window.SpeechSynthesisUtterance) return;
+  const message = new SpeechSynthesisUtterance(words);
+  message.lang = "ru-RU";
+  voice.speak(message);
+}
 voiceButton.onclick = () => {
   voiceEnabled = !voiceEnabled;
   localStorage.setItem("nav-voice", voiceEnabled ? "on" : "off");

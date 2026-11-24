@@ -39,8 +39,6 @@ let heartbeatTimer = null;
 // Действие инженера: что показывает кнопка и что уходит на сервер.
 // Порядок в жизненном цикле вызова: назначен -> принял -> прибыл -> завершил.
 const ACTIONS = {
-  assigned: { label: "Принять вызов", action: "accepted" },
-
   arrived: { label: "Закрыть вызов", action: "closed" },
 };
 
@@ -261,6 +259,7 @@ async function refreshOnce() {
     const user = await Api.me();
     if (!state.onShift) return;
     Session.user = state.user = user;
+    adoptServerPlace(user);
     if (!user.on_shift) {
       state.onShift = false;
       stopWork();
@@ -281,6 +280,7 @@ async function refreshOnce() {
     state.snapshotAt = Date.now();
     saveSnapshot();
     noticeIfTaken(previous);
+    noticeIfNew(previous);
     renderWork();
   } catch (error) {
     if (error.status === 401) {
@@ -293,6 +293,38 @@ async function refreshOnce() {
     }
     showToast(error.detail, true);
   }
+}
+
+let serverPlaceAt = null;
+
+/**
+ * Место с сервера: там, где инженера видит диспетчер.
+ *
+ * Нужно без GPS и когда точку переставили (диспетчер, сброс полигона).
+ * Свежий GPS и точка, поставленная здесь вручную, важнее: их сервер
+ * знает от этого же телефона. Обратно на сервер место не отправляется.
+ */
+function adoptServerPlace(user) {
+  if (user.lat == null || user.lon == null) return;
+  const moved = user.location_at !== serverPlaceAt;
+  serverPlaceAt = user.location_at;
+  const own = locator.last;
+  if (locator.mode === "gps" && own && Date.now() - own.measuredAt <= ARRIVAL_HOLD_MS) return;
+  if (locator.mode === "simulation" && own) {
+    // Наша точка ещё в пути на сервер или уже там — не новость.
+    if (!moved || Date.now() - state.sentAt < 3000 || haversineM(own.lat, own.lon, user.lat, user.lon) < 2) return;
+    locator.last = null;
+  }
+  const place = { lat: user.lat, lon: user.lon, accuracy: null, heading: null,
+    measuredAt: Date.parse(user.location_at) || Date.now(), source: "server" };
+  const previous = state.position;
+  state.position = place;
+  if (!previous || haversineM(previous.lat, previous.lon, place.lat, place.lon) > 1) {
+    updateDistance();
+    animatePosition(place, previous);
+    if (!state.call) renderIdle();
+  }
+  el("geo-notice").textContent = "Нет GPS · Место с карты диспетчера · Указать вручную";
 }
 
 /* --- Работа без связи --- */
@@ -372,7 +404,7 @@ async function flushOutbox() {
  */
 function applyLocally(action) {
   const call = state.call.call;
-  if (action === "closed" || action === "declined") {
+  if (action === "closed") {
     state.call = null;
     return;
   }
@@ -402,6 +434,21 @@ function noticeIfTaken(previous) {
   showToast(`Вызов ${previous.board_number} снят диспетчером`, true);
 }
 
+/** Вызов закрепляется сразу, без подтверждения — о новом надо сообщить. */
+function noticeIfNew(previous) {
+  const call = state.call?.call;
+  if (!call || call.id === previous?.id || call.status === "arrived") return;
+  // Перезапуск приложения — не новый вызов. Время — на случай, если после
+  // очистки базы номера пошли заново.
+  const key = `${call.id}/${call.created_at}`;
+  if (localStorage.getItem("last-call") === key) return;
+  localStorage.setItem("last-call", key);
+  const words = `Вам назначен вызов: ${call.board_number}${call.stand_ref ? `, стоянка ${call.stand_ref}` : ""}`;
+  showToast(words);
+  navigator.vibrate?.([300, 150, 300]);
+  announce(words);
+}
+
 function renderWork() {
   renderLink();
   const hasCall = Boolean(state.call);
@@ -409,7 +456,6 @@ function renderWork() {
   el("call-block").hidden = !hasCall;
   const current = state.call?.call;
   el("call-action").hidden = !actionStep(current);
-  el("decline-call").hidden = current?.status !== "assigned";
   el("chat-open").hidden = !hasCall;
   if (!hasCall) {
     closeSheet("chat-sheet");
@@ -990,10 +1036,6 @@ async function recordAction(action, fields = {}) {
   } catch (error) { showToast(error.detail || error.message, true); }
   finally { savingAction = false; }
 }
-el("decline-call").onclick = async () => {
-  const id = state.call?.call.id;
-  if (await askConfirm("Вернуть вызов диспетчеру?", "Отказаться") && state.call?.call.id === id && state.call.call.status === "assigned") await recordAction("declined");
-};
 
 let arrivalKey = "", insideSince = 0, arrival = { manual: false, hint: "" };
 
@@ -1449,6 +1491,8 @@ async function logout() {
   state.returnLeg = null;
   state.user = null;
   state.position = null;
+  serverPlaceAt = null;
+  el("geo-notice").textContent = "Нет GPS · Указать место вручную";
   state.sentAt = 0;
   state.call = null;
   closeSheet("menu-sheet");

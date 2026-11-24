@@ -66,6 +66,10 @@ class CurrentUserResponse(BaseModel):
     airport_icao: str | None
     shift: str | None
     employee_id: int | None
+    # Где инженер на карте диспетчера: телефон без GPS показывает его там же.
+    lat: float | None = None
+    lon: float | None = None
+    location_at: str | None = None
 
 
 class SelectAirportRequest(BaseModel):

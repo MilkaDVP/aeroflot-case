@@ -33,6 +33,7 @@
       <button type="button" data-tab="vehicles">Спецтранспорт</button>
       <button type="button" data-tab="aircraft">Борта</button>
       <button type="button" data-tab="journal">Журнал</button>
+      <button type="button" data-tab="stand">Подготовка</button>
     </nav>
 
     <!-- ======================= Аэропорты ======================= -->
@@ -95,6 +96,41 @@
           <div class="admin-note" id="create-note" hidden></div>
         </div>
 
+      </div>
+    </section>
+
+    <!-- ======================= Подготовка стенда ======================= -->
+    <section class="admin-page" id="page-stand" hidden>
+      <div class="admin-columns">
+        <div class="admin-card">
+          <h2>Очистить базу</h2>
+          <p class="muted small">
+            Для всех аэропортов: стираются вызовы, история, переписка, сообщения
+            экипажей, действия и журнал. Люди и машины освобождаются, полигон ВДНХ
+            возвращается к исходным точкам. Учётные записи, аэропорты, борта, люди,
+            машины и справочник неисправностей остаются. Перед очисткой сохраняется
+            копия базы.
+          </p>
+          <button type="button" class="danger-fill" id="stand-clear">Очистить базу</button>
+          <div class="admin-note" id="stand-clear-note" hidden></div>
+        </div>
+        <div class="admin-card">
+          <h2>Случайные данные — <span id="stand-airport">—</span></h2>
+          <p class="muted small">
+            Прошлые вызовы с журналом и перепиской: в срок, с опозданием, отменённые,
+            с переназначением, AOG, ожиданием запчастей. И текущая обстановка: инженеры
+            в пути и у борта, очередь, горящий вызов, входящие сообщения. Добавляется
+            к тому, что уже есть; убрать — «Очистить базу».
+          </p>
+          <div class="admin-form">
+            <div class="admin-row">
+              <div><label for="stand-days">За сколько дней</label><input id="stand-days" type="number" min="1" max="60" value="7"></div>
+              <div><label for="stand-count">Прошлых вызовов</label><input id="stand-count" type="number" min="1" max="300" value="60"></div>
+            </div>
+            <button type="button" class="primary" id="stand-random">Создать случайные данные</button>
+          </div>
+          <div class="admin-note" id="stand-random-note" hidden></div>
+        </div>
       </div>
     </section>
 

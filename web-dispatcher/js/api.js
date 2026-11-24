@@ -140,6 +140,21 @@ function extractDetail(payload, status) {
   return `Ошибка ${status}`;
 }
 
+/** Файл с сервера: сохраняется в «Загрузки». */
+async function downloadFile(path, fallback) {
+  const response = await fetch(CONFIG.apiBase + path, { headers: { Authorization: `Bearer ${Session.token}` } });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new ApiError(response.status, extractDetail(payload, response.status));
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(await response.blob());
+  link.download = (disposition.match(/filename="([^"]+)"/) || [])[1] || fallback;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+}
+
 const Api = {
   changeTransport: (id, vehicle) => request("POST", `/api/calls/${id}/transport${vehicle ? "?vehicle_id=" + vehicle : ""}`),
   login: (login, password) => request("POST", "/api/auth/login", { login, password }),
@@ -193,6 +208,9 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
+  // Подготовка стенда: очистка базы и случайные данные (тех. администратор).
+  clearStand: (confirm) => request("POST", "/api/admin/stand/clear", { confirm }),
+  randomStand: (days, count) => request("POST", "/api/admin/stand/random", { days, count }),
   // Полигон ВДНХ — к исходной расстановке организаторов.
   resetPolygon: () => request("POST", "/api/admin/airports/polygon/reset"),
   // Путь и время при выбранном способе поездки, ничего не меняя.
@@ -212,6 +230,10 @@ const Api = {
   events: (params) => request("GET", `/api/events?${new URLSearchParams(params)}`),
   eventTypes: () => request("GET", "/api/events/types"),
   eventsIntegrity: () => request("GET", "/api/events/integrity"),
+  // Отчёты PDF: за период и по одному вызову.
+  reportPdf: (from, to) => downloadFile(`/api/analytics/report.pdf?${new URLSearchParams({ date_from: from, date_to: to })}`, "report.pdf"),
+  callPdf: (callId) => downloadFile(`/api/analytics/calls/${callId}.pdf`, `call_${callId}.pdf`),
+
   exportEvents: async (params) => {
     const response = await fetch(`${CONFIG.apiBase}/api/events/export?${new URLSearchParams(params)}`, {
       headers: { Authorization: `Bearer ${Session.token}` },

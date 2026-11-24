@@ -38,6 +38,7 @@ const TAB_MIN_ROLE = {
   vehicles: "local_admin",
   aircraft: "local_admin",
   journal: "shift_supervisor",
+  stand: "admin",
 };
 
 let editorMap = null;
@@ -210,9 +211,12 @@ function showTab(name) {
   el("page-vehicles").hidden = name !== "vehicles";
   el("page-aircraft").hidden = name !== "aircraft";
   el("page-journal").hidden = name !== "journal";
+  el("page-stand").hidden = name !== "stand";
   el("page-editor").hidden = true;
 
-  if (name === "users") {
+  if (name === "stand") {
+    el("stand-airport").textContent = state.user.airport_icao || "аэропорт не выбран";
+  } else if (name === "users") {
     loadUsers();
   } else if (name === "shifts") {
     loadShifts();
@@ -224,6 +228,43 @@ function showTab(name) {
     Journal.open(state.user);
   }
 }
+
+/* --- Подготовка стенда --- */
+
+async function runStand(button, note, work) {
+  const title = button.textContent;
+  button.disabled = true;
+  button.textContent = "Выполняю…";
+  note.hidden = true;
+  try {
+    note.textContent = await work();
+  } catch (error) {
+    note.textContent = error.detail || "Не удалось выполнить";
+  } finally {
+    note.hidden = false;
+    button.disabled = false;
+    button.textContent = title;
+  }
+}
+
+document.getElementById("stand-clear").addEventListener("click", () => {
+  const word = window.prompt("Стереть вызовы, историю и журнал во всех аэропортах? Введите ОЧИСТИТЬ");
+  if (word === null) return;
+  runStand(el("stand-clear"), el("stand-clear-note"), async () => {
+    const result = await Api.clearStand(word);
+    // Разговоры с ИИ-диспетчером ссылаются на стёртые вызовы.
+    for (const key of Object.keys(sessionStorage)) if (key.startsWith("oto.ai.talk")) sessionStorage.removeItem(key);
+    return `Очищено: вызовов ${result.calls}, событий журнала ${result.events}, сообщений ${result.reports}. Копия базы: ${result.backup}`;
+  });
+});
+
+document.getElementById("stand-random").addEventListener("click", () => {
+  runStand(el("stand-random"), el("stand-random-note"), async () => {
+    const result = await Api.randomStand(Number(el("stand-days").value), Number(el("stand-count").value));
+    const outcomes = Object.entries(result.outcomes).map(([name, n]) => `${name} — ${n}`).join(", ");
+    return `Прошлых вызовов ${result.history} (${outcomes}), событий журнала ${result.events}. Сейчас: ${result.live.join(", ")}`;
+  });
+});
 
 /* --- Аэропорты --- */
 

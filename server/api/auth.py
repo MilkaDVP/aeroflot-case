@@ -171,6 +171,9 @@ def current_user(context: Context = Depends(get_context), db: Session = Depends(
         airport_icao=context.airport_icao,
         shift=context.shift,
         employee_id=user.employee_id,
+        lat=user.employee.lat if user.employee else None,
+        lon=user.employee.lon if user.employee else None,
+        location_at=to_iso_utc(user.employee.location_at) if user.employee else None,
     )
 
 

@@ -21,3 +21,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.environ['AEROFLOT_TEST_DB']}"
 os.environ["JOURNAL_LOOP"] = "0"
 # Тесты не обращаются к внешнему GigaChat, даже если ключ лежит в server/.env.
 os.environ["GIGACHAT_ENABLED"] = "0"
+
+# Большинство тестов проходит статусы по одному, начиная с «назначен».
+# Закрепление сразу проверяется отдельно (test_auto_accept).
+from services import assignment  # noqa: E402
+
+assignment.AUTO_ACCEPT = False

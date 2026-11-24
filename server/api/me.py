@@ -254,6 +254,9 @@ def update_status(
         raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_NO_ACTIVE_CALL)
     if payload.call_id is not None and payload.call_id != call.id:
         raise HTTPException(status.HTTP_409_CONFLICT, ERROR_OTHER_CALL)
+    # Телефон с прежней версией ещё присылает «принял» — вызов уже закреплён.
+    if payload.action == ACTION_ACCEPTED and call.status == "accepted":
+        return call_to_response(call)
     if payload.action == ACTION_ARRIVED and call.status == CALL_ARRIVED and payload.call_id == call.id:
         return call_to_response(call)
     if call.status not in ACTION_ALLOWED_FROM[payload.action]:

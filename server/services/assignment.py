@@ -39,6 +39,7 @@ from constants import (
     STAGE_REPAIR,
     STAGE_WAITING_PARTS,
     STATUS_ASSIGNED,
+    STATUS_EN_ROUTE,
     STATUS_FREE,
     TRAVEL_CURRENT,
     TRAVEL_WALK,
@@ -49,12 +50,17 @@ from constants import (
     VEHICLE_RESERVED,
 )
 from graph_registry import get_graph
+from models.call import STATUS_ACCEPTED as CALL_ACCEPTED
 from models.call import STATUS_ARRIVED as CALL_ARRIVED
 from models.call import STATUS_ASSIGNED as CALL_ASSIGNED
 from models.call import STATUS_NEW as CALL_NEW
 from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import WORKING_CALL_STATUSES, Call
 from models.vehicle import Vehicle
+
+# Назначенный вызов сразу закреплён за инженером: принять или отказаться
+# ему не предлагается. Снять его может только диспетчер.
+AUTO_ACCEPT = True
 
 WORK_DURATION = timedelta(minutes=DEFAULT_WORK_DURATION_MIN)
 
@@ -341,7 +347,7 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     employee.return_to_waiting = False
     employee.return_vehicle = False
     call.assigned_employee = employee
-    call.status = CALL_ASSIGNED
+    call.status = CALL_ACCEPTED if AUTO_ACCEPT else CALL_ASSIGNED
     call.require_vehicle_pickup = False
     call.eta_minutes = round(plan.minutes, 1)
     call.eta_at = utc_now() + timedelta(minutes=plan.minutes)
@@ -360,7 +366,7 @@ def assign_now(db, call, employee, plan, pickup_vehicle):
     else:
         call.vehicle = employee.vehicle
 
-    employee.status = STATUS_ASSIGNED
+    employee.status = STATUS_EN_ROUTE if AUTO_ACCEPT else STATUS_ASSIGNED
     replan_queue(db, employee)
 
 
@@ -471,8 +477,8 @@ def advance_after_close(db, employee, closed_call, was_working, park_at_stand=Tr
             next_call.eta_at = utc_now() + timedelta(minutes=route.minutes)
             next_call.route_node_ids = route.node_ids
 
-    next_call.status = CALL_ASSIGNED
-    employee.status = STATUS_ASSIGNED
+    next_call.status = CALL_ACCEPTED if AUTO_ACCEPT else CALL_ASSIGNED
+    employee.status = STATUS_EN_ROUTE if AUTO_ACCEPT else STATUS_ASSIGNED
     replan_queue(db, employee)
 
 
@@ -581,6 +587,16 @@ def switch_to(db, working, call, employee, plan):
     working.queued_at = utc_now()
     db.flush()
     assign_now(db, call, employee, plan, None)
+
+
+def accept_pending(db):
+    """Назначенные до обновления вызовы тоже закрепляются."""
+    if not AUTO_ACCEPT:
+        return
+    for call in db.query(Call).filter(Call.status == CALL_ASSIGNED):
+        call.status = CALL_ACCEPTED
+        if call.assigned_employee is not None:
+            call.assigned_employee.status = STATUS_EN_ROUTE
 
 
 def release_vehicle(employee, graph=None, stand_node_id=None):
