@@ -2266,14 +2266,16 @@ svg.is-picking { opacity: 1; pointer-events: auto; cursor: crosshair; }
 .cf-chips .defect-option-new { color: var(--text-muted); border-style: dashed; background: transparent; }
 .cf-chips .defect-empty { display: none; }
 .call-form .defect-picked { border-radius: 8px; }
-.cf-options { display: flex; gap: 8px; margin: 4px 0 8px; }
-.cf-toggle { position: relative; cursor: pointer; }
+/* Обе кнопки — одного размера: сетка, высота и шрифт общие. */
+.cf-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 4px 0 8px; }
+.call-form .cf-options .cf-toggle { position: relative; display: block; margin: 0; cursor: pointer; }
 .cf-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .cf-toggle span,
 .cf-toggle-btn {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  box-sizing: border-box; width: 100%; height: 36px; white-space: nowrap;
   padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
-  background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer;
+  background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; line-height: 1.2; cursor: pointer;
 }
 .cf-toggle input:checked + span { color: #fff; background: var(--danger-strong); border-color: var(--danger-strong); }
 .cf-toggle-btn.is-on { color: var(--text); border-color: var(--route); background: var(--route-soft); }

@@ -230,6 +230,7 @@ function enterWork() {
   // Связь вернулась — досылаем накопленное сразу, не дожидаясь опроса.
   window.addEventListener("online", refresh);
   setGeoMode("gps");
+  routeMap.resetView();
   keepScreenOn();
   document.addEventListener("visibilitychange", keepScreenOn);
   refresh();
@@ -901,6 +902,17 @@ function targetPoint() {
   return points && points.length ? points[points.length - 1] : null;
 }
 
+// Дальше этого от аэропорта человек себя на перроне не увидит.
+const FAR_FROM_AIRPORT_M = 5000;
+
+/** Ручной режим без точки: карту наводим на аэропорт, если человек не в нём. */
+function choosingPlace() {
+  if (locator.mode !== "simulation" || locator.last || !state.airportPoint) return false;
+  const { lat, lon } = state.airportPoint;
+  return !state.position ||
+    haversineM(state.position.lat, state.position.lon, lat, lon) > FAR_FROM_AIRPORT_M;
+}
+
 /**
  * Отрисовка карты.
  *
@@ -912,7 +924,7 @@ function drawRoute(position = state.position) {
   const payload = state.call || state.returnLeg;
   const points = state.offline || Date.now() - state.snapshotAt > CONFIG.pollIntervalMs * 2
     ? localNavigation.route(payload, state.position) : payload?.route_points || [];
-  const choosing = locator.mode === "simulation" && !locator.last && state.airportPoint;
+  const choosing = choosingPlace();
   updateGuidance(nextManeuver(payload, points, state.position));
   routeMap.render(
     points,
@@ -928,7 +940,6 @@ function drawRoute(position = state.position) {
       : null,
     remainingLine(payload, points, position)
   );
-  el("map-hint").hidden = locator.mode !== "simulation";
 }
 
 /* --- Действия инженера --- */
@@ -1216,6 +1227,8 @@ function onMapTap(point) {
     showToast("Указать место пальцем: GPS вверху → «Вручную»");
     return;
   }
+  // Экран стоит на месте — переезжает только точка инженера.
+  routeMap.holdView();
   applySimulated(point.lat, point.lon);
 }
 
@@ -1240,7 +1253,7 @@ function bindEvents() {
   el("chat-form").addEventListener("submit", sendChatMessage);
   el("map-zoom-in").addEventListener("click", () => routeMap.zoomBy(1.6));
   el("map-zoom-out").addEventListener("click", () => routeMap.zoomBy(1 / 1.6));
-  el("map-reset").addEventListener("click", () => routeMap.resetView());
+  el("map-reset").addEventListener("click", () => routeMap.locate());
   el("chat-open").addEventListener("click", openChat);
   el("chat-close").addEventListener("click", () => {
     delete el("report-hint").dataset.ask;
@@ -1321,8 +1334,11 @@ function setGeoMode(mode) {
     el("geo-notice").hidden = true;
     el("geo-explain").textContent = "Нажмите «Готово» и коснитесь карты там, где вы стоите.";
     locator.startManual();
+    cancelAnimationFrame(animationFrame);
+    if (choosingPlace()) routeMap.resetView();
   }
   drawRoute();
+  if (mode === "gps") routeMap.locate();
 }
 
 /**

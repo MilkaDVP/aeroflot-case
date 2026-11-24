@@ -41,11 +41,10 @@ const PADDING_RATIO = 0.14;
 // и их номера.
 const FOLLOW_SPAN_M = 150;
 
-// Масштаб, который инженер задаёт сам (щипок, колесо, кнопки): во сколько
-// раз ближе автоматического вида. Пределы — чтобы не «улететь» в одну
-// стоянку или в целый город.
-const USER_ZOOM_MIN = 0.4;
-const USER_ZOOM_MAX = 12;
+// Пределы масштаба, который инженер задаёт сам (щипок, колесо, кнопки):
+// метры по меньшей стороне карты.
+const USER_SPAN_MIN_M = 16;
+const USER_SPAN_MAX_M = 8000;
 // Смещение пальца, после которого касание — уже сдвиг карты, а не «я здесь».
 const TAP_SLOP_PX = 8;
 
@@ -68,8 +67,12 @@ class RouteMap {
 
     // Свой вид инженера переживает обновления данных: карта больше не
     // возвращается к автоматическому охвату на каждом опросе.
-    this.userZoom = 1;
-    this.userPan = { x: 0, y: 0 };
+    // userCentre — точка на местности (lat/lon), а не сдвиг от инженера:
+    // сдвиг складывался с перемещением точки, и экран улетал.
+    // null — карта едет за инженером. userSpan — метры по меньшей стороне,
+    // null — автоматический охват.
+    this.userCentre = null;
+    this.userSpan = null;
     this.base = null;
     this.lastArgs = null;
     this.pointers = new Map();
@@ -86,6 +89,13 @@ class RouteMap {
   setupGestures() {
     const svg = this.svg;
     svg.addEventListener("pointerdown", (event) => {
+      // Новое касание: следы прошлого жеста больше не действуют, иначе
+      // потерянный палец превратил бы касание в щипок.
+      if (event.isPrimary) {
+        this.pointers.clear();
+        this.gesture = null;
+        this.suppressTap = false;
+      }
       // Захват нужен, чтобы жест не обрывался, когда палец уходит с карты;
       // если браузер отказал — работаем без него.
       try {
@@ -102,12 +112,13 @@ class RouteMap {
       this.moveGesture();
     });
     const end = (event) => {
-      this.pointers.delete(event.pointerId);
+      if (!this.pointers.delete(event.pointerId)) return;
       if (this.pointers.size === 0) {
         if (this.gesture && this.gesture.moved) {
-          // Касание, которым закончился сдвиг, — не «я здесь».
+          // Касание, которым закончился сдвиг, — не «я здесь». На телефоне
+          // click приходит с задержкой, поэтому запрет снимает следующее
+          // касание, а не таймер.
           this.suppressTap = true;
-          setTimeout(() => { this.suppressTap = false; }, 0);
           this.rerender();
         }
         this.gesture = null;
@@ -117,6 +128,7 @@ class RouteMap {
     };
     svg.addEventListener("pointerup", end);
     svg.addEventListener("pointercancel", end);
+    svg.addEventListener("lostpointercapture", end);
     svg.addEventListener("wheel", (event) => {
       event.preventDefault();
       this.zoomAt(event.deltaY < 0 ? 1.25 : 1 / 1.25, event.clientX, event.clientY);
@@ -130,7 +142,6 @@ class RouteMap {
     const moved = this.gesture ? this.gesture.moved : false;
     this.gesture = {
       moved,
-      pan: { x: this.userPan.x, y: this.userPan.y },
       centre: midpoint(points),
       spread: points.length > 1 ? distance(points[0], points[1]) : 0,
     };
@@ -156,63 +167,96 @@ class RouteMap {
       gesture.spread = spread;
       return;
     }
-    // Сдвиг одним пальцем: от положения в начале жеста.
-    this.userPan = { x: gesture.pan.x, y: gesture.pan.y };
-    this.applyView();
     this.panBy(dx, dy);
+    gesture.centre = centre;
   }
 
   /** Сдвиг вида на экранные пиксели (карта едет за пальцем). */
   panBy(dx, dy) {
     const box = this.svg.getBoundingClientRect();
     const mpp = this.view.width / (box.width || 1);
-    this.userPan.x -= dx * mpp;
-    this.userPan.y -= dy * mpp;
-    this.applyView();
+    this.moveCentre(-dx * mpp, -dy * mpp);
   }
 
   /** Масштаб с неподвижной точкой под пальцем или курсором. */
   zoomAt(factor, clientX, clientY) {
     if (!this.view || !this.base) return;
-    const next = Math.min(USER_ZOOM_MAX, Math.max(USER_ZOOM_MIN, this.userZoom * factor));
     const box = this.svg.getBoundingClientRect();
     const fx = (clientX - box.left) / (box.width || 1);
     const fy = (clientY - box.top) / (box.height || 1);
     // Точка под пальцем в метрах — после масштаба она должна остаться там же.
     const px = this.view.minX + fx * this.view.width;
     const py = this.view.minY + fy * this.view.height;
-    this.userZoom = next;
+    this.setSpan(factor);
+    this.moveCentre(
+      px - (this.view.minX + fx * this.view.width),
+      py - (this.view.minY + fy * this.view.height)
+    );
+  }
+
+  /** Меняет масштаб, не трогая центр. */
+  setSpan(factor) {
+    const current = this.view.scaleRef;
+    this.userSpan = Math.min(
+      Math.max(USER_SPAN_MAX_M, current),
+      Math.max(USER_SPAN_MIN_M, current / factor)
+    );
     this.applyView();
-    this.userPan.x += px - (this.view.minX + fx * this.view.width);
-    this.userPan.y += py - (this.view.minY + fy * this.view.height);
+  }
+
+  /** Сдвигает центр вида на метры и отвязывает карту от инженера. */
+  moveCentre(dx, dy) {
+    const view = this.view;
+    this.userCentre = this.unproject(
+      view.minX + view.width / 2 + dx,
+      view.minY + view.height / 2 + dy
+    );
     this.applyView();
   }
 
   /** Кнопки «+» и «−»: масштаб от центра карты. */
   zoomBy(factor) {
-    const box = this.svg.getBoundingClientRect();
-    this.zoomAt(factor, box.left + box.width / 2, box.top + box.height / 2);
+    if (!this.view) return;
+    this.setSpan(factor);
     this.rerender();
   }
 
-  /** «◎» — обратно к крупному плану вокруг инженера. */
+  /** Оставляет на экране ровно то, что видно сейчас, что бы ни сдвинулось. */
+  holdView() {
+    if (!this.view) return;
+    this.userSpan = this.view.scaleRef;
+    this.moveCentre(0, 0);
+  }
+
+  /** «Ко мне»: центр — на инженера, масштаб остаётся прежним. */
+  locate() {
+    if (!this.view || !this.lastArgs) return;
+    const [, , position, , , , centre] = this.lastArgs;
+    this.userSpan = this.view.scaleRef;
+    // Пока карта наведена на аэропорт (centre), следить не за кем.
+    this.userCentre = position && centre ? { lat: position.lat, lon: position.lon } : null;
+    this.rerender();
+  }
+
+  /** Полный сброс к автоматическому виду — новая смена, другой аэропорт. */
   resetView() {
-    this.userZoom = 1;
-    this.userPan = { x: 0, y: 0 };
+    this.userSpan = null;
+    this.userCentre = null;
     this.rerender();
   }
 
   isUserView() {
-    return this.userZoom !== 1 || this.userPan.x !== 0 || this.userPan.y !== 0;
+    return this.userCentre !== null;
   }
 
   /** Автоматический охват плюс масштаб и сдвиг инженера. */
   applyView() {
     if (!this.base) return;
-    const width = this.base.width / this.userZoom;
-    const height = this.base.height / this.userZoom;
-    const cx = this.base.cx + this.userPan.x;
-    const cy = this.base.cy + this.userPan.y;
+    const span = this.userSpan ?? this.base.span;
+    const aspect = this.base.aspect;
+    const width = aspect >= 1 ? span * aspect : span;
+    const height = aspect >= 1 ? span : span / aspect;
+    const { x: cx, y: cy } = this.userCentre ? this.project(this.userCentre) : this.base;
     this.view = {
       minX: cx - width / 2,
       minY: cy - height / 2,
@@ -426,18 +470,15 @@ class RouteMap {
     const span = Math.max(extent, minimum) * (1 + PADDING_RATIO * 2);
 
     // Заданный охват укладывается в меньшую сторону, большая получает
-    // пропорционально больше местности.
+    // пропорционально больше местности (см. applyView).
     const aspect = boxWidth / boxHeight;
-    const width = aspect >= 1 ? span * aspect : span;
-    const height = aspect >= 1 ? span : span / aspect;
-
     const centreX = (Math.max(...xs) + Math.min(...xs)) / 2;
     const centreY = (Math.max(...ys) + Math.min(...ys)) / 2;
 
     // Автоматический охват; поверх него — масштаб и сдвиг инженера.
     // Опорный размер значков (scaleRef) берётся от итогового вида, чтобы
     // они не зависели ни от масштаба, ни от того, насколько вытянут экран.
-    this.base = { cx: centreX, cy: centreY, width, height };
+    this.base = { x: centreX, y: centreY, span, aspect };
     this.applyView();
   }
 

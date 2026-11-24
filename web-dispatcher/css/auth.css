@@ -122,3 +122,32 @@
 
 /* Смена выбрана вручную, не по часам аэропорта. */
 .auth-hint.is-manual { color: var(--warn); }
+
+/* Показ пароля. Значок отражает состояние: открытый глаз — пароль виден,
+   перечёркнутый — скрыт. */
+.password-field { position: relative; display: block; }
+.password-field input { width: 100%; padding-right: 40px; }
+.password-field .password-toggle,
+.password-field .password-toggle:hover {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+}
+.password-field .password-toggle:hover,
+.password-field .password-toggle[aria-pressed="true"] { color: var(--route); }
+.password-field .password-toggle:focus-visible { outline: 2px solid var(--route); outline-offset: -2px; border-radius: 6px; }
+.password-toggle[aria-pressed="false"] .eye-open,
+.password-toggle[aria-pressed="true"] .eye-closed { display: none; }
+/* Встроенный глазок Edge — иначе их было бы два. */
+.password-field input::-ms-reveal { display: none; }

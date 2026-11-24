@@ -587,7 +587,6 @@ function busyStageLine(busy) {
  */
 function callFlags(call) {
   return (
-    (call.missing_tools ? '<span class="flag">Не хватает инструмента</span>' : "") +
     (call.mel_category ? `<span class="flag">MEL ${escapeHtml(call.mel_category)}</span>` : "") +
     (call.aog ? `<span class="flag flag-aog"${term("aog")}>AOG</span>` : "") +
     (call.urgent ? '<span class="flag flag-urgent">срочный</span>' : "") +
@@ -711,19 +710,21 @@ function whoLine(call) {
     }</div>`;
   }
   const name = escapeHtml(call.assigned_employee_name);
+  // Рядом с этапом работ: «ждёт запчасти · не хватает инструмента».
+  const tools = call.missing_tools ? " · не хватает инструмента" : "";
 
   if (call.status === "queued") {
     return (
       `<div class="call-who is-queued">в очереди к <b>${name}</b>` +
       (call.eta_at ? ` · прибытие ~<span class="num">${formatClock(call.eta_at)}</span>` : "") +
-      `</div>`
+      `${tools}</div>`
     );
   }
   if (call.status === "arrived") {
     return (
       `<div class="call-who"><b>${name}</b> у борта` +
       (call.work_stage_title ? ` · ${escapeHtml(call.work_stage_title)}` : "") +
-      `</div>`
+      `${tools}</div>`
     );
   }
 
@@ -732,7 +733,7 @@ function whoLine(call) {
   return (
     `<div class="call-who"><b>${name}</b>${helpers ? ` +${helpers}` : ""} · ${escapeHtml(statusTitle(call.status))}` +
     (forecast ? ` · будет ~<span class="num">${formatClock(forecast)}</span>` : "") +
-    `</div>`
+    `${tools}</div>`
   );
 }
 
