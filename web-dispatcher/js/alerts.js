@@ -68,6 +68,10 @@ function signalNewAlerts(alerts) {
   updateTitle(alerts.length);
   if (fresh.length) {
     playAlarm();
+    // Красное уведомление: что случилось и кто ещё может успеть.
+    const call = alerts.filter((item) => fresh.includes(alertKey(item))).sort(compareByMinutesLeft)[0];
+    const option = call.control.alternative;
+    showToast(`${call.board_number}: ${call.control.reason}${option ? `. ${option.text}` : ""}`, true);
   }
 }
 

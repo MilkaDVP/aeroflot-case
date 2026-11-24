@@ -22,12 +22,15 @@ from models.user import DISPATCH_ROLES, ROLE_ADMIN, ROLE_LOCAL_ADMIN, ROLE_SHIFT
 from schemas.airport import (
     AircraftCreateRequest,
     AircraftMoveRequest,
+    AircraftScheduleRequest,
     AircraftResponse,
     AirportGraphResponse,
 )
 from services.assignment import assigned_route, replan_queue, update_assigned_route
 from schemas.auth import AirportBrief, ShiftScheduleRequest
-from services import shift_clock
+from clock import to_iso_utc
+from datetime import timezone
+from services import journal, shift_clock
 
 router = APIRouter(prefix="/api", tags=["Аэропорты"])
 
@@ -158,7 +161,30 @@ def aircraft_response(graph, item):
         on_stand=on_stand,
         lat=lat,
         lon=lon,
+        scheduled_arrival_at=to_iso_utc(item.scheduled_arrival_at),
     )
+
+
+@router.put("/aircraft/{aircraft_id}/schedule", response_model=AircraftResponse, summary="Прибытие ВС по расписанию")
+def set_schedule(
+    aircraft_id: int,
+    payload: AircraftScheduleRequest,
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles_in_airport(*DISPATCH_ROLES)),
+):
+    """Предполагаемое время прибытия борта; каждое изменение — в журнал."""
+    aircraft = db.get(Aircraft, aircraft_id)
+    if aircraft is None or aircraft.airport_icao != context.airport_icao:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, ERROR_AIRCRAFT_NOT_FOUND)
+    planned = payload.scheduled_arrival_at
+    if planned is not None and planned.tzinfo is not None:
+        planned = planned.astimezone(timezone.utc).replace(tzinfo=None)
+    before = aircraft.scheduled_arrival_at
+    if planned != before:
+        aircraft.scheduled_arrival_at = planned
+        journal.aircraft_schedule(db, aircraft, before)
+        db.commit()
+    return aircraft_response(get_graph(context.airport_icao), aircraft)
 
 
 @router.post(
@@ -280,6 +306,8 @@ def move_aircraft(
         check_stand_available(db, context.airport_icao, target, aircraft.id)
         was_free = aircraft.lat is not None
         aircraft.lat = aircraft.lon = None
+        if was_free:
+            journal.aircraft_parked(db, aircraft, target["ref"])
         if aircraft.stand_node_id == target["id"] and not was_free:
             return aircraft_response(graph, aircraft)
 

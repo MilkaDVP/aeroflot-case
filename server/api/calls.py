@@ -42,7 +42,7 @@ from services.assignment import (
     update_assigned_route,
     waypoint_records,
 )
-from models.user import DISPATCH_ROLES, ROLE_SHIFT_SUPERVISOR, role_at_least
+from models.user import DISPATCH_ROLES, ROLE_DISPATCHER, ROLE_SHIFT_SUPERVISOR, role_at_least
 from schemas.call import (
     AssignRequest,
     CallCreateRequest,
@@ -60,7 +60,7 @@ from schemas.call import (
     WaypointsRequest,
 )
 from services import claim as claims
-from services import journal, mentor, waypoint_plan
+from services import alternatives, journal, mentor, waypoint_plan
 from services.assignment import (
     advance_after_close,
     assign_now,
@@ -400,7 +400,14 @@ def list_calls(
         Call.aog.desc(), Call.urgent.desc(), Call.created_at.desc(), Call.id.desc()
     ).all()
     now = utc_now()
-    return [to_response(call, db, now) for call in calls]
+    responses = [to_response(call, db, now) for call in calls]
+    if role_at_least(context.user.role, ROLE_DISPATCHER):
+        # Вариант решения — тем, кто вправе его принять.
+        for call, response in zip(calls, responses):
+            control = assess(call, now)
+            if control.level in alternatives.LEVELS:
+                response.control.alternative = alternatives.cached(db, call, control, context.shift)
+    return responses
 
 
 @router.post(

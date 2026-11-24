@@ -404,7 +404,7 @@ async function flushOutbox() {
  */
 function applyLocally(action) {
   const call = state.call.call;
-  if (action === "closed") {
+  if (action === "closed" || action === "declined") {
     state.call = null;
     return;
   }
@@ -457,6 +457,8 @@ function renderWork() {
   const current = state.call?.call;
   el("call-action").hidden = !actionStep(current);
   el("chat-open").hidden = !hasCall;
+  // Отменить можно до прибытия: дальше работы начаты.
+  el("cancel-call").hidden = !["assigned", "accepted"].includes(current?.status);
   if (!hasCall) {
     closeSheet("chat-sheet");
     closeSheet("problem-sheet");
@@ -1036,6 +1038,17 @@ async function recordAction(action, fields = {}) {
   } catch (error) { showToast(error.detail || error.message, true); }
   finally { savingAction = false; }
 }
+
+el("cancel-call").addEventListener("click", async () => {
+  const call = state.call?.call;
+  if (!call) return;
+  if (!await askConfirm(`Отменить вызов ${call.board_number}? Он вернётся диспетчеру.`, "Отменить вызов")) return;
+  // Пока спрашивали, вызов могли сменить или прибытие — засчитать.
+  const now = state.call?.call;
+  if (now?.id !== call.id || !["assigned", "accepted"].includes(now.status)) return;
+  await recordAction("declined");
+  showToast("Вызов возвращён диспетчеру");
+});
 
 let arrivalKey = "", insideSince = 0, arrival = { manual: false, hint: "" };
 

@@ -120,6 +120,10 @@ def generate(db, context, days, count):
     defects = db.query(DefectType).filter_by(is_builtin=True).all()
     maker = History(db, context, boards, people, defects)
     maker.build(days, count)
+    # Предполагаемое расписание: часть бортов прибыла, часть ещё ждут.
+    for board in boards:
+        board.scheduled_arrival_at = (utc_now() + timedelta(minutes=random.randint(-180, 240))).replace(second=0, microsecond=0)
+        journal.aircraft_schedule(db, board)
     live = live_situation(db, context, boards, defects)
     db.flush()
     return {"history": maker.made, "outcomes": maker.outcomes, "live": live, "events": len(maker.events)}

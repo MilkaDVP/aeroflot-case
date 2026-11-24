@@ -178,6 +178,7 @@ const Api = {
     request("PATCH", `/api/employees/${employeeId}`, payload),
 
   moveVehicle: (id, point) => request("POST", `/api/vehicles/${id}/location`, point),
+  setSchedule: (id, scheduled_arrival_at) => request("PUT", `/api/aircraft/${id}/schedule`, { scheduled_arrival_at }),
   moveAircraft: (id, point) => request("POST", `/api/aircraft/${id}/location`, point),
   deleteEmployee: (id) => request("DELETE", `/api/employees/${id}`),
 

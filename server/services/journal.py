@@ -66,6 +66,8 @@ EVENT_TYPES = {
     "route_rebuilt": ("route", "Пересчёт маршрута"),
     "forecast": ("forecast", "Прогноз прибытия к ВС"),
     "arrival": ("forecast", "Фактическое прибытие к ВС"),
+    "aircraft_schedule": ("forecast", "Прибытие ВС по расписанию"),
+    "aircraft_arrival": ("forecast", "Фактическое прибытие ВС на стоянку"),
     "deadline_risk": ("deadline", "Предупреждение о риске нарушения норматива"),
     "deadline_violation": ("deadline", "Нарушение норматива"),
     "deadline_met": ("deadline", "Норматив выполнен"),
@@ -349,6 +351,40 @@ def created(db, call, ts, actor):
             "контрольный_срок": to_iso_utc(deadline_at(call)),
         },
     )
+    # По каждой заявке — время прибытия борта из расписания, если оно задано.
+    if call.aircraft is not None and call.aircraft.scheduled_arrival_at is not None:
+        aircraft_schedule(db, call.aircraft, call=call, ts=ts, actor=actor)
+
+
+def local_text(db, icao, value):
+    from models.airport import Airport
+    from services.shift_clock import local_now
+
+    airport = db.get(Airport, icao)
+    return local_now(airport, value).strftime("%d.%m.%Y %H:%M") if airport else value.strftime("%d.%m.%Y %H:%M UTC")
+
+
+def aircraft_schedule(db, aircraft, before=None, **extra):
+    """Прибытие ВС по предполагаемому расписанию: задано, изменено или убрано."""
+    planned = aircraft.scheduled_arrival_at
+    words = (f"Прибытие ВС {aircraft.board_number} по расписанию: {local_text(db, aircraft.airport_icao, planned)}"
+             if planned else f"ВС {aircraft.board_number} убрано из расписания")
+    record(db, "aircraft_schedule", words, airport_icao=aircraft.airport_icao, board=aircraft.board_number,
+           params={"по_расписанию": to_iso_utc(planned), "было": to_iso_utc(before)}, **extra)
+
+
+def aircraft_parked(db, aircraft, stand_ref):
+    """Борт встал на стоянку: фактическое время и отклонение от расписания."""
+    now = utc_now()
+    planned = aircraft.scheduled_arrival_at
+    delay = round((now - planned).total_seconds() / 60, 1) if planned else None
+    words = f"ВС {aircraft.board_number} прибыло на стоянку {stand_ref}"
+    if delay is not None:
+        words += (f", по расписанию {local_text(db, aircraft.airport_icao, planned)}"
+                  f" ({'позже' if delay >= 0 else 'раньше'} на {minutes(abs(delay))} мин)")
+    record(db, "aircraft_arrival", words, ts=now, airport_icao=aircraft.airport_icao, board=aircraft.board_number,
+           params={"прибыло": to_iso_utc(now), "по_расписанию": to_iso_utc(planned),
+                   "отклонение_мин": delay, "стоянка": stand_ref})
 
 
 def changed(db, call, changes, ts, actor):
@@ -585,6 +621,7 @@ def watch(db, now=None):
         LEVEL_WARN,
         assess,
     )
+    from services import alternatives
     from services.support import first_arrival
 
     now = now or utc_now()
@@ -609,14 +646,22 @@ def watch(db, now=None):
         if control.level in risky and not arrived:
             key = f"risk:{call.id}:{control.level}:{employee.id if employee else 0}"
             if not already(db, key):
+                try:
+                    option = alternatives.cached(db, call, control)
+                except Exception:  # предупреждение важнее подсказки к нему
+                    option = None
                 record(
                     db, "deadline_risk",
-                    f"Риск нарушения норматива: {control.reason}",
+                    f"Риск нарушения норматива: {control.reason}"
+                    + (f". Вариант решения: {option['text']}" if option else ""),
                     call=call, employee=employee, ts=now, actor=None, dedup_key=key,
                     params={
                         "уровень": control.level,
                         "причина": control.reason,
                         "решение": control.advice,
+                        "вариант_решения": option["text"] if option else None,
+                        "кто_успеет": option.get("name") if option else None,
+                        "запас_мин": option.get("margin_min") if option else None,
                         "осталось_мин": control.minutes_left,
                         "прогноз_прибытия": to_iso_utc(control.forecast_at),
                         "контрольный_срок": to_iso_utc(control.deadline_at),

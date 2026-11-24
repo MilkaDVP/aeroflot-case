@@ -1,5 +1,7 @@
 """Схемы графа аэропорта и воздушных судов."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -168,6 +170,14 @@ class AircraftResponse(BaseModel):
     on_stand: bool = True
     lat: float | None = None
     lon: float | None = None
+    # Прибытие ВС по предполагаемому расписанию.
+    scheduled_arrival_at: str | None = None
+
+
+class AircraftScheduleRequest(BaseModel):
+    """Прибытие ВС по расписанию; пусто — убрать из расписания."""
+
+    scheduled_arrival_at: datetime | None = None
 
 
 class AircraftMoveRequest(BaseModel):

@@ -541,6 +541,16 @@
 .history-call { padding: var(--gap-sm) 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: var(--gap-sm); }
 .history-call button { flex: none; padding: 2px 8px; font-size: var(--fs-xs); }
 
+.schedule-editor { display: flex; align-items: end; gap: 6px; margin-top: var(--gap-sm); }
+.schedule-editor label { flex: 1; margin: 0; }
+.schedule-editor input { color-scheme: dark; margin-top: 3px; text-transform: none; }
+
+/* Кто ещё может успеть. */
+.call-alt { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: var(--fs-sm); color: var(--text); }
+.call-alt span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.call-alt.is-ok span { color: var(--ok); }
+.alt-send { flex: none; padding: 4px 10px; border-color: var(--ok); color: var(--ok); }
+
 /* Отчёт: выбор периода. */
 .report-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: var(--gap); }
 .report-presets button.active { border-color: var(--route); background: var(--route-soft); }

@@ -1130,6 +1130,48 @@ async function switchOnto(busy) {
  * вызов сразу открывается заново — уже с новым подбором, чтобы диспетчер
  * не искал его в списке руками.
  */
+let altBusy = false;
+
+/** Предложенный вариант одним действием: снять, подобрать, назначить. */
+async function sendAlternative(callId) {
+  const call = state.calls.find((item) => item.id === callId);
+  const option = call?.control?.alternative;
+  if (altBusy || !option?.employee_id) return;
+  const replacing = Boolean(call.assigned_employee_id);
+  if (!await askDialog({
+    title: `${replacing ? "Переназначить" : "Назначить"} на ${call.board_number}: ${option.name}?`,
+    text: option.text + (replacing ? `. ${call.assigned_employee_name} будет снят с вызова.` : ""),
+    confirm: replacing ? "Переназначить" : "Назначить",
+  })) return;
+  altBusy = true;
+  try {
+    // Обстановка могла измениться, пока окно было открыто.
+    const fresh = (await Api.calls()).find((item) => item.id === callId);
+    if (!fresh || fresh.control?.alternative?.employee_id !== option.employee_id
+        || fresh.assigned_employee_id !== call.assigned_employee_id) {
+      showToast("Обстановка изменилась — посмотрите новый вариант", true);
+      await refresh();
+      return;
+    }
+    if (replacing) await Api.unassign(callId, `Не успевает: ${option.name} доедет быстрее`);
+    await Api.claimCall(callId);
+    const { best } = await Api.suggest(callId);
+    const reason = best?.employee_id === option.employee_id ? null : "Вариант решения из предупреждения о сроке";
+    await Api.assign(callId, option.employee_id, reason, false, "auto");
+    showToast(`${call.board_number}: отправлен ${option.name}`);
+  } catch (error) {
+    showToast(error.detail || "Не удалось назначить", true);
+  } finally {
+    altBusy = false;
+  }
+  await afterAction(callId);
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest?.(".alt-send");
+  if (button) sendAlternative(Number(button.dataset.altCall));
+});
+
 async function unassignSelected() {
   const call = state.selectedCall;
   if (!call || workStartedRefusal(call, true)) {
@@ -1350,6 +1392,31 @@ elements.callsList.addEventListener("click", (event) => {
 });
 
 /** Щелчок по борту: кто это и кнопка регистрации вызова на него. */
+/** Прибытие борта по предполагаемому расписанию; пусто — убрать. */
+function scheduleEditor(aircraft) {
+  const box = document.createElement("div");
+  box.className = "schedule-editor";
+  box.innerHTML = `
+    <label>Прибытие по расписанию<input type="datetime-local"></label>
+    <button type="button">Сохранить</button>`;
+  const input = box.querySelector("input");
+  const button = box.querySelector("button");
+  if (aircraft.scheduled_arrival_at) input.value = inputTime(new Date(aircraft.scheduled_arrival_at));
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await Api.setSchedule(aircraft.id, input.value ? new Date(input.value).toISOString() : null);
+      closePopover();
+      await refresh();
+      showToast(input.value ? `${aircraft.board_number}: расписание сохранено` : `${aircraft.board_number}: убран из расписания`);
+    } catch (error) {
+      showToast(error.detail, true);
+      button.disabled = false;
+    }
+  });
+  return box;
+}
+
 function showAircraftCard(aircraft, marker) {
   const open = state.calls.find((call) => call.aircraft_id === aircraft.id);
   const items = [
@@ -1364,6 +1431,7 @@ function showAircraftCard(aircraft, marker) {
       selectCall(open);
     }));
   }
+  items.push(scheduleEditor(aircraft));
   openPopover(
     marker,
     `${aircraft.board_number} · ${aircraft.aircraft_type} · ${

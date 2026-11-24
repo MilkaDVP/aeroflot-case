@@ -915,6 +915,8 @@ details[open] .detail-label::after { content: " ⌄"; }
 /* --- Кнопка и окно «Сообщить» --- */
 .report-open { position: relative; flex: 0 0 auto !important; display: inline-flex; align-items: center; justify-content: center; width: 60px; padding: 6px !important; background: transparent; }
 .report-open[hidden] { display: none; }
+#cancel-call { color: var(--danger-text); border-color: var(--danger); background: transparent; }
+#cancel-call[hidden] { display: none; }
 .report-open .chip-badge { top: -6px; right: -6px; }
 .report-marks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .report-marks .mel-switch { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; }

@@ -224,7 +224,10 @@ function buildCallCard(call, selectedId, onSelect) {
     ? `Экипаж: «${call.defect_description}»`
     : "";
 
-  item.addEventListener("click", () => onSelect(call));
+  item.addEventListener("click", (event) => {
+    // Кнопка на карточке — действие, а не выбор вызова.
+    if (!event.target.closest(".alt-send")) onSelect(call);
+  });
   return item;
 }
 
@@ -1030,10 +1033,23 @@ function messageFlag(call) {
  */
 function compactNote(call) {
   const control = call.control;
-  if (!control || !NOTE_WITH_REASON.includes(control.level) || !control.reason) {
-    return "";
-  }
-  return `<div class="call-note level-${escapeHtml(control.level)}">${escapeHtml(control.reason)}</div>`;
+  if (!control) return "";
+  const reason = NOTE_WITH_REASON.includes(control.level) ? control.reason : "";
+  const option = control.alternative;
+  if (!reason && !option) return "";
+  return `<div class="call-note level-${escapeHtml(control.level)}">${reason ? `<div>${escapeHtml(reason)}</div>` : ""}${
+    alternativeBlock(call)}</div>`;
+}
+
+/** Кто ещё может успеть — и кнопка, чтобы отправить его сразу. */
+function alternativeBlock(call) {
+  const option = call.control?.alternative;
+  if (!option) return "";
+  const button = option.kind === "free"
+    ? `<button type="button" class="alt-send" data-alt-call="${call.id}">${
+        call.assigned_employee_id ? "Переназначить" : "Назначить"}</button>`
+    : "";
+  return `<div class="call-alt ${option.in_time ? "is-ok" : ""}"><span>${escapeHtml(option.text)}</span>${button}</div>`;
 }
 
 /** Последнее сообщение инженера — на карточке: диспетчер видит его, не открывая вызов. */
@@ -1087,6 +1103,7 @@ function buildAssignmentBlock(call) {
     ${["arrived", "closed"].includes(call.status) ? "" : routeChain(pendingStops(call), call.vehicle_call_sign)}
     ${waypointProgress(call)}
     <div class="eta-message ${verdict.cls}">${escapeHtml(verdict.text)}</div>
+    ${alternativeBlock(call)}
     ${
       call.override_reason
         ? `<div class="assignment-reason">Причина решения: ${escapeHtml(call.override_reason)}</div>`

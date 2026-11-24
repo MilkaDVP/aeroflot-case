@@ -70,6 +70,8 @@ class CallControl(BaseModel):
     alert: bool
     reason: str
     advice: str | None = None
+    # Кто ещё может успеть: вариант решения для вызова под угрозой.
+    alternative: dict | None = None
     deadline_at: str
     minutes_left: float
     forecast_at: str | None = None

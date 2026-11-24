@@ -1,6 +1,8 @@
 """Воздушное судно на стоянке."""
 
-from sqlalchemy import Float, ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -28,3 +30,6 @@ class Aircraft(Base):
     # которой строится маршрут инженера. Пусто — борт стоит на стоянке.
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Прибытие ВС по предполагаемому расписанию, UTC; пусто — не задано.
+    scheduled_arrival_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

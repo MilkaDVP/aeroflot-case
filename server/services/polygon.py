@@ -137,7 +137,7 @@ def reset_aircraft(db):
         # Вершина стоянки стоит ровно в точке борта из этого же слоя.
         stand = min(graph.nodes_of_type("stand"), key=lambda n: haversine_m(lat, lon, n["lat"], n["lon"]))
         aircraft.stand_node_id = stand["id"]
-        aircraft.lat = aircraft.lon = None
+        aircraft.lat = aircraft.lon = aircraft.scheduled_arrival_at = None
     for extra in boards.values():
         # Как кнопка удаления борта: завершённые вызовы остаются в истории.
         db.delete(extra)

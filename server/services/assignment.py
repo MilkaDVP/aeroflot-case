@@ -58,8 +58,8 @@ from models.call import STATUS_QUEUED as CALL_QUEUED
 from models.call import WORKING_CALL_STATUSES, Call
 from models.vehicle import Vehicle
 
-# Назначенный вызов сразу закреплён за инженером: принять или отказаться
-# ему не предлагается. Снять его может только диспетчер.
+# Назначенный вызов сразу закреплён за инженером: принимать его не нужно.
+# До прибытия инженер может отменить его — вызов вернётся диспетчеру.
 AUTO_ACCEPT = True
 
 WORK_DURATION = timedelta(minutes=DEFAULT_WORK_DURATION_MIN)

@@ -292,9 +292,12 @@ def _apply_aircraft(db, aircraft, point):
     # места — борт остаётся там, где был.
     savepoint = db.begin_nested()
     try:
+        landed = parked and aircraft.lat is not None
         aircraft.lat, aircraft.lon = place
         if not same_target:
             apply_aircraft_move(db, graph, aircraft, target)
+        if landed:
+            journal.aircraft_parked(db, aircraft, target["ref"])
         db.flush()
     except HTTPException:
         savepoint.rollback()

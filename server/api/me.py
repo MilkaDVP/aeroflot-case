@@ -60,7 +60,8 @@ ACTION_CLOSED = "closed"
 # без связи, приходят пачкой, и каждое обязано лечь на своё место.
 ACTION_ALLOWED_FROM = {
     "checkpoint": ("accepted",),
-    "declined": ("assigned",),
+    # Отказ — пока не прибыл: начатые работы снимает начальник смены.
+    "declined": ("assigned", "accepted"),
     "assessment": ("arrived",),
     "equipment": ("arrived",),
     ACTION_ACCEPTED: ("assigned",),
