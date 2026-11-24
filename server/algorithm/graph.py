@@ -119,11 +119,11 @@ class AirportGraph:
         return [node for node in self.nodes.values() if node["type"] == node_type]
 
     def find_stand(self, ref):
-        """Стоянка по её номеру на перроне, например «31» или «102A»."""
-        for node in self.nodes.values():
-            if node["type"] == "stand" and node["ref"] == ref:
-                return node
-        return None
+        """Стоянка по её номеру на перроне, например «31» или «102A»; «9» — это и «мс-09»."""
+        stands = self.nodes_of_type("stand")
+        return next((node for node in stands if node["ref"] == ref), None) or next(
+            (node for node in stands if (node["ref"] or "").startswith("мс-")
+             and node["ref"][3:].lstrip("0") == str(ref).lstrip("0")), None)
 
     def nearest_node(self, lat, lon, mode):
         """

@@ -76,6 +76,13 @@ def read_layer(directory, name):
         return json.load(handle)["features"]
 
 
+def read_points(directory, name):
+    """Точечный слой, если он есть: [(широта, долгота)]."""
+    if not (Path(directory) / f"{name}.geojson").exists():
+        return []
+    return [(f["geometry"]["coordinates"][1], f["geometry"]["coordinates"][0]) for f in read_layer(directory, name)]
+
+
 def polygons_of(geometry):
     """Кольца полигона в [[lat, lon], ...]; MultiPolygon разворачивается."""
     coordinates = geometry["coordinates"]
@@ -90,18 +97,22 @@ def polygons_of(geometry):
 
 def centroid(ring):
     """Центр тяжести кольца [[lat, lon]] (плоское приближение)."""
+    # Считаем от первой точки: в полных градусах площадь зоны в 15 м тонула
+    # в погрешности, и «центр» оказывался вне зоны.
+    y0, x0 = ring[0]
+    local = [(y - y0, x - x0) for y, x in ring]
     area = cx = cy = 0.0
-    for (y1, x1), (y2, x2) in zip(ring, ring[1:] + ring[:1]):
+    for (y1, x1), (y2, x2) in zip(local, local[1:] + local[:1]):
         cross = x1 * y2 - x2 * y1
         area += cross
         cx += (x1 + x2) * cross
         cy += (y1 + y2) * cross
-    if abs(area) < 1e-18:
+    if abs(area) < 1e-20:
         lats = [p[0] for p in ring]
         lons = [p[1] for p in ring]
         return sum(lats) / len(lats), sum(lons) / len(lons)
     area *= 0.5
-    return cy / (6 * area), cx / (6 * area)
+    return y0 + cy / (6 * area), x0 + cx / (6 * area)
 
 
 def point_in_ring(lat, lon, ring):
@@ -316,16 +327,19 @@ def build_payload(directory, icao, name, city):
     snapped = snap_dangling(lines, local)
     nodes, edges = build_network(lines)
 
-    # Зоны обслуживания ВС — стоянки. Вершина стоянки — в центре зоны,
-    # подъезд — от ближайшей дороги агентов.
+    # Зоны обслуживания ВС — стоянки. Вершина стоянки — место борта в зоне,
+    # если оно задано, иначе центр зоны; подъезд — от ближайшей дороги агентов.
     zones = []
+    boards = read_points(directory, "aircrafts_positions")
     for feature in read_layer(directory, "service_zones"):
-        ref = str(feature["properties"].get("id"))
+        number = str(feature["properties"].get("id"))
+        ref = feature["properties"].get("name") or number
         rings = polygons_of(feature["geometry"])
         lat, lon = centroid(rings[0])
         if not point_in_ring(lat, lon, rings[0]):
             lat, lon = rings[0][0]
-        node = {"id": f"stand_{ref}", "type": "stand", "ref": ref, "lat": round(lat, 8), "lon": round(lon, 8)}
+        lat, lon = next((p for p in boards if point_in_ring(*p, rings[0])), (lat, lon))
+        node = {"id": f"stand_{number}", "type": "stand", "ref": ref, "lat": round(lat, 8), "lon": round(lon, 8)}
         nodes.append(node)
         attach(nodes, edges, node)
         zones.append({"ref": ref, "node_id": node["id"], "rings_ll": rings})

@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server/ ./
 # Графы аэропортов, подготовленные офлайн. Сервер в интернет не ходит.
 COPY data/airports/ /data/airports/
+COPY data/geodata/ /data/geodata/
 
 ENV AIRPORTS_DIR=/data/airports \
     DATABASE_URL=sqlite:////app/data/aeroflot.db \

@@ -215,7 +215,7 @@ class TestTrackApi(ApiTestCase):
 
         name = self.objects["e-01"]["name"]
         with SessionLocal() as db:
-            board = db.query(Aircraft).filter_by(board_number="RA-73001", airport_icao="VDNH").one()
+            board = db.query(Aircraft).filter_by(board_number="RA-73106", airport_icao="VDNH").one()
             engineer = db.query(Employee).filter_by(full_name=name, airport_icao="VDNH").one()
             engineer.status = "en_route"
             call = Call(airport_icao="VDNH", aircraft_id=board.id, stand_node_id=board.stand_node_id,

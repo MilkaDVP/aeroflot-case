@@ -193,6 +193,8 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
+  // Полигон ВДНХ — к исходной расстановке организаторов.
+  resetPolygon: () => request("POST", "/api/admin/airports/polygon/reset"),
   // Путь и время при выбранном способе поездки, ничего не меняя.
   routePreview: (callId, body) => request("POST", `/api/calls/${callId}/route-preview`, body),
   // Лучший порядок точек; groups — списки годных узлов на каждую точку.

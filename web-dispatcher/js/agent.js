@@ -85,7 +85,10 @@ function agentReport(query) {
 
 function agentPlace(query) {
   const name = String(query).replace(/^\s*(стоянк[аиуе]|ст\.?)\s+/i, "");
-  return agentFind(state.graph.nodes.filter((node) => node.type !== "junction" && node.ref), name, "Место", (node) => node.ref);
+  const places = state.graph.nodes.filter((node) => node.type !== "junction" && node.ref);
+  // «Стоянка 9» — это «мс-09».
+  const short = /^\d+$/.test(name.trim()) && places.find((node) => node.ref === `мс-${name.trim().padStart(2, "0")}`);
+  return short || agentFind(places, name, "Место", (node) => node.ref);
 }
 
 /**

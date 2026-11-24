@@ -90,6 +90,8 @@ async function start() {
       shiftLabel.classList.add("is-off-schedule");
     }
     document.getElementById("ctx-user").textContent = user.full_name;
+    document.getElementById("polygon-reset").hidden =
+      user.airport_icao !== "VDNH" || !roleAtLeast(user.role, "local_admin");
 
     document.getElementById("admin-link").hidden = !roleAtLeast(user.role, "shift_supervisor");
 
@@ -749,6 +751,23 @@ function refreshWaypointsDrawer(after) {
 function fillExecutorDrawer(box) {
   box.querySelector(".drawer-inner").replaceChildren(...executorNodes());
 }
+
+document.getElementById("polygon-reset").addEventListener("click", async () => {
+  if (!await askDialog({
+    title: "Сбросить полигон к исходным точкам?",
+    text: "Инженеры, машины и борта вернутся на места из геоданных организаторов. Незавершённые вызовы отменятся, входящие сообщения отклонятся, добавленные вручную борта, люди и машины уберутся.",
+    confirm: "Сбросить",
+    danger: true,
+  })) return;
+  try {
+    const counts = await Api.resetPolygon();
+    deselectCall();
+    await refresh();
+    showToast(`Полигон сброшен: инженеров ${counts.engineers}, машин ${counts.vehicles}, бортов ${counts.aircraft}`);
+  } catch (error) {
+    showToast(error.detail, true);
+  }
+});
 
 document.getElementById("cancel-call").addEventListener("click", async () => {
   const call = state.selectedCall;

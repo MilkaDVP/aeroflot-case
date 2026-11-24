@@ -98,7 +98,7 @@ class TestPolygonGraph(unittest.TestCase):
         stand = self.graph.find_stand("3")
         zone = self.graph.zone_at(stand["lat"], stand["lon"])
         self.assertIsNotNone(zone)
-        self.assertEqual(zone["ref"], "3")
+        self.assertEqual(zone["ref"], "мс-03")
 
 
 def fork_graph():
@@ -259,7 +259,7 @@ class TestPolygonApi(ApiTestCase):
 
     def test_вызов_с_инструментом_от_подбора_до_склада(self):
         aircraft = next(item for item in self.client.get(
-            "/api/aircraft", headers=auth_header(self.dispatcher)).json() if item["board_number"] == "RA-73004")
+            "/api/aircraft", headers=auth_header(self.dispatcher)).json() if item["board_number"] == "RA-73101")
         call = self.client.post(
             "/api/calls",
             json={"aircraft_id": aircraft["id"], "defect_code": "hydraulic_leak", "needs_tools": True},
@@ -306,7 +306,7 @@ class TestPolygonApi(ApiTestCase):
         depot = sorted(warehouses(graph))[0]
         call = self.client.post(
             "/api/calls",
-            json={"aircraft_id": self.board("RA-73004")["id"], "defect_code": "hydraulic_leak",
+            json={"aircraft_id": self.board("RA-73101")["id"], "defect_code": "hydraulic_leak",
                   "waypoints": [depot]},
             headers=auth_header(self.dispatcher),
         ).json()
@@ -359,7 +359,7 @@ class TestPolygonApi(ApiTestCase):
     def test_точка_вне_карты_отклоняется(self):
         response = self.client.post(
             "/api/calls",
-            json={"aircraft_id": self.board("RA-73001")["id"], "defect_code": "hydraulic_leak",
+            json={"aircraft_id": self.board("RA-73106")["id"], "defect_code": "hydraulic_leak",
                   "waypoints": ["нет-такой"]},
             headers=auth_header(self.dispatcher),
         )
@@ -370,7 +370,7 @@ class TestPolygonApi(ApiTestCase):
         depot = sorted(warehouses(graph))[0]
         call = self.client.post(
             "/api/calls",
-            json={"aircraft_id": self.board("RA-73001")["id"], "defect_code": "hydraulic_leak",
+            json={"aircraft_id": self.board("RA-73106")["id"], "defect_code": "hydraulic_leak",
                   "waypoints": [depot]},
             headers=auth_header(self.dispatcher),
         ).json()

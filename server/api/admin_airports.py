@@ -15,13 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 import graph_registry
-from auth.dependencies import Context, require_roles
-from database import get_db
+from auth.dependencies import Context, require_roles, require_roles_in_airport
+from constants import SHIFT_DAY
+from database import get_db, get_dispatch_db
 from models.airport import SOURCE_MANUAL, SOURCE_OSM, Airport
 from models.aircraft import Aircraft
 from models.call import Call
 from models.employee import RouteParticipant
-from models.user import ROLE_ADMIN, User
+from models.user import ROLE_ADMIN, ROLE_LOCAL_ADMIN, User
 from models.vehicle import Vehicle
 from schemas.airport import (
     AirportCreateRequest,
@@ -258,6 +259,26 @@ def save_graph(
 
     graph_registry.register(graph_payload)
     return to_summary(airport)
+
+
+@router.post("/polygon/reset", summary="Вернуть полигон к исходной расстановке")
+def reset_polygon(
+    db: Session = Depends(get_dispatch_db),
+    context: Context = Depends(require_roles_in_airport(ROLE_LOCAL_ADMIN)),
+):
+    """
+    Инженеры, машины и борта — точно как в геоданных организаторов.
+    Незавершённые вызовы отменяются, лишние борта, люди и машины убираются.
+    """
+    from seed import ensure_polygon_users
+    from services import polygon
+
+    if context.airport_icao != polygon.ICAO:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Сбросить можно только полигон ВДНХ")
+    counts = polygon.reset(db, context.shift or SHIFT_DAY)
+    ensure_polygon_users(db, db.get(Airport, polygon.ICAO))
+    db.commit()
+    return counts
 
 
 @router.delete(

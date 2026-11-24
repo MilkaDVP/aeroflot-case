@@ -58,9 +58,11 @@ def parse_mark(text):
 
     if value.startswith("B1."):
         return Mark("B1", int(value[3:]))
-    if value.startswith("A") and len(value) > 1:
+    if value.startswith("A") and value[1:].isdigit():
         return Mark("A", int(value[1:]))
-    if value in ("B2", "C", "A", "B1"):
+    # AM (стажёр) и CAB (интерьер) встречаются в данных людей, но
+    # самостоятельного допуска к работам ни одной категории не дают.
+    if value in ("B2", "C", "A", "B1", "AM", "CAB"):
         return Mark(value, None)
 
     raise ValueError(f"не удаётся разобрать квалификационную отметку: {text!r}")

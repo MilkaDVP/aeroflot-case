@@ -65,6 +65,11 @@ _last_points = {}
 _logged = {}
 
 
+def forget_points():
+    """Забыть прежние места: объекты расставлены заново."""
+    _last_points.clear()
+
+
 class BadPoint(ValueError):
     """Точка синтаксически некорректна — accepted: false / HTTP 400."""
 
@@ -134,6 +139,10 @@ def resolve(db, obj):
     for vehicle in vehicles:
         if not vehicle.archived and _normalize(vehicle.call_sign) == code:
             return KIND_VEHICLE, vehicle
+    # Табельный номер — первое слово имени: «AT-0001 · Инженер».
+    for person in db.query(Employee).filter_by(airport_icao=icao, archived=False):
+        if _normalize(person.full_name.split(" ")[0]) == code:
+            return KIND_ENGINEER, person
     match = re.fullmatch(r"([EV])(\d+)", code)
     if match:
         kind = KIND_ENGINEER if match.group(1) == "E" else KIND_VEHICLE

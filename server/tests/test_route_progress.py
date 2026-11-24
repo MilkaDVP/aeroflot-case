@@ -69,7 +69,7 @@ class TestTravelChoice(ApiTestCase):
 
     def test_посадка_и_предпросмотр_транспорта(self):
         head = auth_header(self.dispatcher)
-        call = self.client.post("/api/calls", json={"aircraft_id": self.board("RA-73004")["id"],
+        call = self.client.post("/api/calls", json={"aircraft_id": self.board("RA-73101")["id"],
                                                     "defect_code": "hydraulic_leak"}, headers=head).json()
         best = self.client.post(f"/api/calls/{call['id']}/suggest", headers=head).json()["best"]
         employee = best["employee_id"]
