@@ -913,7 +913,9 @@ function drawRoute(position = state.position) {
   const points = state.offline || Date.now() - state.snapshotAt > CONFIG.pollIntervalMs * 2
     ? localNavigation.route(payload, state.position) : payload?.route_points || [];
   const choosing = locator.mode === "simulation" && !locator.last && state.airportPoint;
-  updateGuidance(nextManeuver(payload, points, state.position));
+  const end = currentLegEnd(payload, points);
+  const active = end < 0 ? points : points.slice(0, end + 1);
+  updateGuidance(nextManeuver(payload, active, state.position));
   routeMap.render(
     points,
     targetPoint(),
@@ -926,7 +928,7 @@ function drawRoute(position = state.position) {
       ? ((state.call.call.waypoints || []).find((point) => !point.done_at)?.node_id
         || (state.call.call.route_stops || []).find((stop) => stop.kind === "warehouse" && !state.call.call.tools_taken_at)?.node_id)
       : null,
-    remainingLine(payload, points, position)
+    remainingLine(payload, active, position), end < 0 ? [] : points.slice(end)
   );
   el("map-hint").hidden = locator.mode !== "simulation";
 }

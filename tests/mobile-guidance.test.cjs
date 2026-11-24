@@ -68,3 +68,13 @@ test("a later crossing cannot skip a pending waypoint; travelled metres disappea
   assert.equal(remainder[1].id, "b");
   assert.equal(context.nextManeuver(payload,crossing,halfway).action, "Пройдите точку Склад 2");
 });
+
+test("outbound and return share a road: an implicit stop bounds positioning until completed", () => {
+  const {context} = setup();
+  const payload = {call:{...job.call,route_stops:[{kind:"warehouse",node_id:"b"},{final:true,node_id:"c"}]}};
+  const route = [a,b,a,c];
+  assert.equal(context.currentLegEnd(payload,route),1);
+  assert.equal(context.remainingLine(payload,route.slice(0,2),a).at(-1).id,"b");
+  payload.call.tools_taken_at = "done";
+  assert.equal(context.currentLegEnd(payload,[b,a,c]),-1);
+});

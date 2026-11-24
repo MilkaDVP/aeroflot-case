@@ -319,8 +319,8 @@ class RouteMap {
    * @param {Object} position текущее место инженера, либо null
    * @param {Object} fallback опорная точка аэропорта, если места ещё нет
    */
-  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining = routePoints) {
-    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining];
+  render(routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining = routePoints, future = []) {
+    this.lastArgs = [routePoints, target, position, fallback, vehicle, pickupNodeId, centre, warehouseNodeId, remaining, future];
     const points = routePoints || [];
     const all = [...points];
     if (target) {
@@ -361,12 +361,34 @@ class RouteMap {
     this.drawTiles();
 
     if (points.length >= 2) {
-      const ids = new Set([pickupNodeId, warehouseNodeId].filter(Boolean));
-      const end = remaining?.findIndex(p => ids.has(p.id)) ?? -1;
-      if (end >= 0 && end < remaining.length - 1) {
-        this.drawRoute(remaining.slice(end).map(p => this.project(p)), "route-line route-future");
-        this.drawLegs(remaining.slice(0,end+1), pickupNodeId);
-      } else this.drawLegs(remaining || [], pickupNodeId);
+      const active = remaining || [];
+      if (future.length > 1) {
+        this.drawRoute(future.map(p => this.project(p)), "route-line route-future");
+        // Не смешиваем обратный пунктир с активной дорогой, даже если она тоже пунктирная.
+        const line = this.contentLayer.lastElementChild;
+        if (active.length > 1) {
+          const mask = document.createElementNS(SVG_NS, "mask");
+          mask.id = "engineer-active-road";
+          mask.setAttribute("maskUnits", "userSpaceOnUse");
+          const area = document.createElementNS(SVG_NS, "rect");
+          const view = this.svg.viewBox.baseVal;
+          for (const attr of ["x", "y", "width", "height"]) {
+            mask.setAttribute(attr, view[attr]);
+            area.setAttribute(attr, view[attr]);
+          }
+          area.setAttribute("fill", "white");
+          const road = document.createElementNS(SVG_NS, "polyline");
+          road.setAttribute("points", active.map(p => { const {x,y} = this.project(p); return `${x},${y}`; }).join(" "));
+          road.setAttribute("fill", "none");
+          road.setAttribute("stroke", "black");
+          road.setAttribute("stroke-width", "7");
+          road.setAttribute("vector-effect", "non-scaling-stroke");
+          mask.append(area, road);
+          this.contentLayer.append(mask);
+          line.setAttribute("mask", "url(#engineer-active-road)");
+        }
+      }
+      this.drawLegs(active, pickupNodeId);
     }
     if (pickupVehicle) {
       this.drawVehicle(this.project(pickupVehicle));

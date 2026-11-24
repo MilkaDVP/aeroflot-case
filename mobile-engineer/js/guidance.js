@@ -6,12 +6,24 @@ const STOP_GUIDANCE = {
   pass: ["●", "Пройдите контрольную точку"],
 };
 
-function remainingLine(payload, path, pos) {
-  if (!pos || path.length < 2) return path;
+function currentLegEnd(payload, path) {
+  if (payload?.instruction) return -1;
   const call = payload?.call;
   const waypoint = call?.waypoints?.find(w => !w.done_at);
   const pending = new Set(payload?.instruction ? [] : [waypoint?.node_id, payload?.vehicle?.pickup && call?.pickup_node_id].filter(Boolean));
-  const stop = path.findIndex(p => pending.has(p.id));
+  for (const stop of call?.route_stops || []) {
+    if (stop.final || (stop.kind === "board" && !payload.vehicle?.pickup) ||
+        (stop.kind === "warehouse" && call.tools_taken_at) ||
+        call.waypoints?.some(w => w.node_id === stop.node_id && w.done_at)) continue;
+    pending.add(stop.node_id);
+    break;
+  }
+  return path.findIndex(p => p.id != null && pending.has(p.id));
+}
+
+function remainingLine(payload, path, pos) {
+  if (!pos || path.length < 2) return path;
+  const stop = currentLegEnd(payload, path);
   const limit = stop < 0 ? path.length - 1 : stop;
   let next = 0, first = path[0], closest = Infinity;
   const scale = Math.cos(pos.lat * Math.PI / 180);
