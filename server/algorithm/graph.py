@@ -20,6 +20,7 @@
 """
 
 import json
+import math
 from collections import defaultdict
 
 from constants import AIRPORTS_DIR, MODE_VEHICLE
@@ -44,6 +45,7 @@ class AirportGraph:
         self.nodes = {node["id"]: node for node in payload["nodes"]}
         self.edges = payload["edges"]
         self._adjacency = build_adjacency(payload["edges"])
+        self._bends = build_bends(payload["edges"], self.ref_point)
         self.objects = payload.get("objects", [])
         self.zones = payload.get("zones", [])
         self.boundary = payload.get("boundary", [])
@@ -87,6 +89,15 @@ class AirportGraph:
         return [
             (link[0], link[3], link[4]) for link in self._adjacency[node_id] if link[index]
         ]
+
+    def bends(self, start_id, end_id):
+        """
+        Изгибы дороги между соседними вершинами — точки (широта, долгота).
+
+        Без них путь по дуге выглядел бы прямой через здания, а идущий
+        по дороге инженер казался бы ушедшим с маршрута.
+        """
+        return self._bends.get((start_id, end_id), [])
 
     def neighbours(self, node_id, mode):
         """
@@ -156,6 +167,37 @@ def build_adjacency(edges):
         adjacency[edge["from_id"]].append((edge["to_id"], vehicle, walk, distance, limit))
         adjacency[edge["to_id"]].append((edge["from_id"], vehicle, walk, distance, limit))
     return adjacency
+
+
+def build_bends(edges, ref_point):
+    """
+    (вершина, вершина) → изгибы в порядке движения.
+
+    Между двумя вершинами бывает несколько дорог: берётся самая быстрая —
+    по ней же строится маршрут.
+    """
+    earth_m = 6371008.8
+    lat0, lon0 = ref_point["lat"], ref_point["lon"]
+    best = {}
+    for edge in edges:
+        if not (edge["vehicle_allowed"] or edge.get("walk_allowed", True)):
+            continue
+        cost = edge["distance_m"] / min(20, edge.get("speed_kmh") or 20)
+        key = (edge["from_id"], edge["to_id"])
+        if key in best and best[key][0] <= cost:
+            continue
+        best[key] = best[key[::-1]] = (cost, edge)
+    result = {}
+    for _, edge in best.values():
+        line = [
+            (lat0 - math.degrees(y / earth_m),
+             lon0 + math.degrees(x / (earth_m * math.cos(math.radians(lat0)))))
+            for x, y in edge.get("points") or []
+        ]
+        if line:
+            result[(edge["from_id"], edge["to_id"])] = line
+            result[(edge["to_id"], edge["from_id"])] = line[::-1]
+    return result
 
 
 def point_in_ring(lat, lon, ring):

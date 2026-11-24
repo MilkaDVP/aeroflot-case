@@ -678,13 +678,23 @@ def navigation_leg(employee):
     points = [{"lat": employee.lat, "lon": employee.lon}]
     if not route:
         return {"instruction": instruction + " — нет доступного маршрута", "route_points": []}
-    points.extend(graph.node(n) for n in route.node_ids)
+    points.extend(with_bends(graph, [graph.node(n) for n in route.node_ids]))
     points.append({"lat": lat, "lon": lon})
     return {"instruction": instruction, "route_points": points}
 
 
+def with_bends(graph, nodes):
+    """Вершины маршрута вместе с изгибами дорог между ними."""
+    line = []
+    for node in nodes:
+        if line:
+            line.extend({"id": None, "lat": lat, "lon": lon} for lat, lon in graph.bends(line[-1].get("id"), node.get("id")))
+        line.append(node)
+    return line
+
+
 def route_geometry(call, graph):
-    nodes = [node for key in call.route_node_ids or [] if (node := graph.node(key))]
+    nodes = with_bends(graph, [node for key in call.route_node_ids or [] if (node := graph.node(key))])
     if nodes and call.route_start_lat is not None and call.route_start_lon is not None:
         start = {"id": None, "lat": call.route_start_lat, "lon": call.route_start_lon}
         if haversine_m(start["lat"], start["lon"], nodes[0]["lat"], nodes[0]["lon"]) > 0.1:

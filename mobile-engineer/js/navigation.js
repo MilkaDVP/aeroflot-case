@@ -23,10 +23,19 @@ class LocalNavigation {
     for (const e of graph.edges) {
       const a = this.nodes.get(e.from_id), b = this.nodes.get(e.to_id);
       if (a && b) {
-        a.links.push([b,e]); b.links.push([a,e]);
+        // Изгибы дороги — в градусах и в порядке движения.
+        const bends = this.bends(e.points, graph.ref_point);
+        a.links.push([b,e,bends]); b.links.push([a,e,[...bends].reverse()]);
       }
     }
     this.path = null;
+  }
+
+  bends(points, ref) {
+    if (!ref) return [];
+    const metres = Math.PI / 180 * 6371008.8;
+    return (points || []).map(([x, y]) => ({id:null, lat:ref.lat - y / metres,
+      lon:ref.lon + x / (metres * Math.cos(ref.lat * Math.PI / 180))}));
   }
 
   route(payload, pos) {
@@ -99,16 +108,20 @@ class LocalNavigation {
       const p = queue.pop();
       if (p === goal) {
         const path = [p];
-        while (previous.has(path.at(-1))) path.push(previous.get(path.at(-1)));
+        for (let at = p; previous.has(at);) {
+          const [from, bends] = previous.get(at);
+          path.push(...[...bends].reverse(), from);
+          at = from;
+        }
         return path.reverse();
       }
-      for (const [next,e] of p.links) {
+      for (const [next,e,bends] of p.links) {
         if (driving ? !e.vehicle_allowed : e.walk_allowed === false) continue;
         // Как на сервере: быстрее, а не короче — с ограничениями скорости.
         const own = driving ? 20 : 5;
         const cost = dist.get(p)+e.distance_m/Math.min(own, e.speed_kmh || own);
         if (cost >= (dist.get(next) ?? Infinity)) continue;
-        dist.set(next,cost); previous.set(next,p);
+        dist.set(next,cost); previous.set(next,[p,bends]);
         if (!queue.includes(next)) queue.push(next);
       }
     }

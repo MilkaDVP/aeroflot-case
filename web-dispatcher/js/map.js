@@ -78,6 +78,7 @@ class AirportMap {
     this.svg = svgElement;
     this.graph = null;
     this.nodesById = new Map();
+    this.bends = new Map();
 
     // Слои: порядок добавления определяет порядок отрисовки. Снимок
     // в самом низу, маршрут и люди — всегда поверх рулёжек.
@@ -193,6 +194,7 @@ class AirportMap {
 
   /** Загружает граф и рисует неизменяемую основу: рулёжки и стоянки. */
   render(graph) {
+    this.bends = edgeBends(graph.edges);
     this.graph = graph;
     this.nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
 
@@ -981,7 +983,7 @@ class AirportMap {
       const target = this.nodesById.get(known[0]);
       if (employee && employee.lat != null && employee.lon != null) {
         const start = this.projectLatLon(employee.lat, employee.lon);
-        this.appendRouteLine(known, "route", start);
+        this.appendRouteLine(this.routeLine(known), "route", start);
         this.appendRouteEnd(start, "start", personLabel(employee), "Исполнитель");
         this.appendRouteEnd(target, "finish", standLabel(target), "Конец маршрута — стоянка борта");
       } else {
@@ -993,10 +995,13 @@ class AirportMap {
 
     // Как у инженера на телефоне: пройденная часть исчезает, линия
     // начинается от его текущего места.
-    const progress = this.routeProgress(known, employee, pickupNodeId, stops);
+    // Линия идёт по изгибам дорог, а не напрямую между перекрёстками.
+    let line = this.routeLine(known);
+    const progress = this.routeProgress(line, employee, pickupNodeId, stops);
     if (progress) {
-      if (known.indexOf(pickupNodeId) < progress.index) pickupNodeId = null;
-      known = known.slice(progress.index);
+      if (line.findIndex((point) => point.id === pickupNodeId) < progress.index) pickupNodeId = null;
+      line = line.slice(progress.index);
+      known = line.filter((point) => point.id).map((point) => point.id);
     }
     const lead = progress ? progress.lead : undefined;
     const split = pickupNodeId ? known.indexOf(pickupNodeId) : -1;
@@ -1004,10 +1009,11 @@ class AirportMap {
     // идёт от места инженера.
     const pickupAhead = split < known.length - 1 && (split > 0 || (split === 0 && Boolean(lead)));
     if (pickupAhead) {
-      this.appendRouteLine(known.slice(0, split + 1), "route route-walk", lead);
-      this.appendRouteLine(known.slice(split), "route");
+      const at = line.findIndex((point) => point.id === pickupNodeId);
+      this.appendRouteLine(line.slice(0, at + 1), "route route-walk", lead);
+      this.appendRouteLine(line.slice(at), "route");
     } else {
-      this.appendRouteLine(known, "route", lead);
+      this.appendRouteLine(line, "route", lead);
     }
 
     // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
@@ -1046,16 +1052,16 @@ class AirportMap {
    * Возвращает {index, lead, position} или null: index — следующая
    * вершина впереди, lead — начало линии (место инженера и его проекция).
    */
-  routeProgress(known, employee, pickupNodeId, stops) {
-    if (!employee || employee.lat == null || employee.lon == null || known.length < 2) return null;
+  routeProgress(line, employee, pickupNodeId, stops) {
+    if (!employee || employee.lat == null || employee.lon == null || line.length < 2) return null;
     const position = this.projectLatLon(employee.lat, employee.lon);
     const pending = [pickupNodeId, ...(stops || []).map((stop) => stop.node_id)]
-      .map((id) => known.indexOf(id)).filter((index) => index > 0);
-    const limit = pending.length ? Math.min(...pending) : known.length - 1;
+      .filter(Boolean).map((id) => line.findIndex((point) => point.id === id)).filter((index) => index > 0);
+    const limit = pending.length ? Math.min(...pending) : line.length - 1;
     let best = null;
     for (let i = 1; i <= limit; i += 1) {
-      const a = this.nodesById.get(known[i - 1]);
-      const b = this.nodesById.get(known[i]);
+      const a = line[i - 1];
+      const b = line[i];
       const dx = b.x - a.x, dy = b.y - a.y;
       const length = dx * dx + dy * dy;
       const t = length ? Math.max(0, Math.min(1, ((position.x - a.x) * dx + (position.y - a.y) * dy) / length)) : 0;
@@ -1111,12 +1117,23 @@ class AirportMap {
     this.updateMarkerScale();
   }
 
-  /** Одна ломаная маршрута по вершинам графа. */
-  appendRouteLine(nodeIds, className, start) {
-    const points = nodeIds
-      .map((id) => this.nodesById.get(id))
-      .filter(Boolean)
-      .map((node) => `${node.x},${node.y}`);
+  /** Вершины маршрута с изгибами дорог между ними; у изгибов нет id. */
+  routeLine(nodeIds) {
+    const line = [];
+    let previous = null;
+    for (const id of nodeIds) {
+      const node = this.nodesById.get(id);
+      if (!node) continue;
+      for (const [x, y] of (previous && this.bends.get(`${previous}|${id}`)) || []) line.push({ x, y });
+      line.push({ id, x: node.x, y: node.y });
+      previous = id;
+    }
+    return line;
+  }
+
+  /** Одна ломаная маршрута. */
+  appendRouteLine(route, className, start) {
+    const points = route.map((point) => `${point.x},${point.y}`);
 
     // start — точка или несколько точек перед первой вершиной.
     if (start) points.unshift(...[].concat(start).map((p) => `${p.x},${p.y}`));
@@ -1604,6 +1621,24 @@ function title(text) {
   const element = document.createElementNS(SVG_NS, "title");
   element.textContent = text;
   return element;
+}
+
+/**
+ * «вершина|вершина» → изгибы дороги в порядке движения. Дорог между двумя
+ * вершинами бывает несколько — берётся самая быстрая, как на сервере.
+ */
+function edgeBends(edges) {
+  const best = new Map();
+  for (const edge of edges) {
+    if (!edge.vehicle_allowed && edge.walk_allowed === false) continue;
+    const cost = edge.distance_m / Math.min(20, edge.speed_kmh || 20);
+    const key = `${edge.from_id}|${edge.to_id}`;
+    if (best.has(key) && best.get(key).cost <= cost) continue;
+    const points = edge.points || [];
+    best.set(key, { cost, points });
+    best.set(`${edge.to_id}|${edge.from_id}`, { cost, points: [...points].reverse() });
+  }
+  return new Map([...best].map(([key, item]) => [key, item.points]));
 }
 
 function edgePath(from, to, points) {

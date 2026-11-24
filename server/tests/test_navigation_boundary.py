@@ -18,7 +18,7 @@ class TestRouteBoundary(unittest.TestCase):
 
     def check_replan(self, expected):
         with (patch.object(service, "working_call_of", return_value=self.call),
-              patch.object(service, "get_graph", return_value=Obj(node=self.nodes.get)),
+              patch.object(service, "get_graph", return_value=Obj(bends=lambda a, b: [], node=self.nodes.get)),
               patch.object(service, "assigned_route") as plan,
               patch.object(service, "update_assigned_route") as update):
             service.refresh_navigation(None, self.person)
