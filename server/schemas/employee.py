@@ -1,6 +1,8 @@
 """Схемы сотрудников, их квалификаций и местоположения."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from algorithm.qualification import parse_mark
 
 
 class QualificationSchema(BaseModel):
@@ -9,6 +11,16 @@ class QualificationSchema(BaseModel):
     category: str = Field(description="Отметка: A1..A4, B1.1..B1.4, B2, C")
     aircraft_types: list[str] = Field(description="Типы ВС, на которые есть допуск")
     valid_until: str = Field(description="Срок действия отметки, ГГГГ-ММ-ДД")
+
+
+class QualificationInput(QualificationSchema):
+    """Отметка из формы: неизвестную или пустую не сохраняем."""
+
+    @field_validator("category")
+    @classmethod
+    def known_mark(cls, value):
+        parse_mark(value)
+        return value.strip()
 
 
 class EmployeeResponse(BaseModel):
@@ -46,7 +58,7 @@ class EmployeeCreateRequest(BaseModel):
     full_name: str = Field(min_length=1)
     airport_icao: str
     shift: str
-    qualifications: list[QualificationSchema] = []
+    qualifications: list[QualificationInput] = []
     speed_kmh: float | None = None
     lat: float | None = None
     lon: float | None = None
@@ -68,7 +80,7 @@ class EmployeeUpdateRequest(BaseModel):
     password: str | None = None
     status: str | None = None
     speed_kmh: float | None = None
-    qualifications: list[QualificationSchema] | None = None
+    qualifications: list[QualificationInput] | None = None
 
 
 class LocationRequest(BaseModel):

@@ -229,6 +229,7 @@ function enterWork() {
   window.addEventListener("online", refresh);
   setGeoMode("gps");
   routeMap.resetView();
+  startProximity();
   keepScreenOn();
   document.addEventListener("visibilitychange", keepScreenOn);
   refresh();
@@ -242,7 +243,7 @@ function enterWork() {
   }
   tick();
   countdownTimer = setInterval(tick, 1000);
-  heartbeatTimer = setInterval(sendHeartbeat, CONFIG.locationIntervalMs);
+  heartbeatTimer = setInterval(sendHeartbeat, CONFIG.heartbeatMs);
 }
 
 /* --- Опрос вызова --- */
@@ -326,6 +327,25 @@ function adoptServerPlace(user) {
   }
   el("geo-notice").textContent = "Нет GPS · Место с карты диспетчера · Указать вручную";
 }
+
+let placeBusy = false;
+
+/** Без своего GPS место с сервера обновляется так же часто, как у диспетчера. */
+async function pollServerPlace() {
+  const own = locator.last;
+  const fresh = locator.mode === "gps" && own && Date.now() - own.measuredAt <= ARRIVAL_HOLD_MS;
+  if (placeBusy || fresh || !state.onShift || document.hidden) return;
+  placeBusy = true;
+  try {
+    const place = await Api.position();
+    if (state.onShift) adoptServerPlace(place);
+  } catch (error) {
+    // Нет связи — место остаётся прежним.
+  } finally {
+    placeBusy = false;
+  }
+}
+setInterval(pollServerPlace, 500);
 
 /* --- Работа без связи --- */
 
@@ -1230,7 +1250,12 @@ function onPosition(position) {
  * обновляют намеренно, а GPS-фиксация, которой больше полутора минут, — уже
  * повод для тревоги у диспетчера.
  */
+let sendingPosition = false;
+
 function sendPosition(position) {
+  // При медленной связи точки не копятся: уходит следующая, свежая.
+  if (sendingPosition && position.source === "gps") return;
+  sendingPosition = true;
   state.sentAt = Date.now();
   const fixAgeS = Math.max(0, (Date.now() - position.measuredAt) / 1000);
   Api.sendLocation(
@@ -1238,11 +1263,13 @@ function sendPosition(position) {
     position.lat,
     position.lon,
     position.source,
-    Math.round(fixAgeS),
+    // Без округления до секунд: иначе соседние точки выглядели бы
+    // одновременными и сервер их отбрасывал.
+    Number(fixAgeS.toFixed(2)),
     position.accuracy
   ).catch(() => {
     // Молча: связь на перроне пропадает, следующая отправка пройдёт.
-  });
+  }).finally(() => { sendingPosition = false; });
 }
 
 /**
@@ -1253,7 +1280,7 @@ function sendPosition(position) {
  * так сервер отличает «на связи, но GPS потерян» от «на связи и стоит».
  */
 function sendHeartbeat() {
-  if (locator.last?.source === "gps" && Date.now() - state.sentAt >= CONFIG.locationIntervalMs) {
+  if (locator.last?.source === "gps" && Date.now() - state.sentAt >= CONFIG.heartbeatMs) {
     sendPosition(locator.last);
   }
 }
@@ -1526,6 +1553,7 @@ async function keepScreenOn() {
 }
 
 function stopWork() {
+  stopProximity();
   document.removeEventListener("visibilitychange", keepScreenOn);
   wakeLock?.release().catch(() => {});
   wakeLock = null;

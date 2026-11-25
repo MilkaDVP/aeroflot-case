@@ -230,6 +230,61 @@ function showTab(name) {
   }
 }
 
+/* --- Свой пароль --- */
+
+document.getElementById("change-password").addEventListener("click", () => {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <form class="modal" role="dialog" aria-label="Сменить пароль" novalidate>
+      <h2>Сменить пароль</h2>
+      <p class="muted small"></p>
+      <label>Нынешний пароль<input type="password" name="current" autocomplete="current-password"></label>
+      <label>Новый пароль, от 8 символов<input type="password" name="fresh" autocomplete="new-password"></label>
+      <label>Новый пароль ещё раз<input type="password" name="again" autocomplete="new-password"></label>
+      <div class="error" hidden></div>
+      <div class="modal-actions">
+        <button type="button" data-act="close">Отмена</button>
+        <button type="submit" class="primary">Сменить</button>
+      </div>
+    </form>`;
+  const form = backdrop.querySelector("form");
+  const error = backdrop.querySelector(".error");
+  form.querySelector("p").textContent = `Учётная запись ${state.user.login}`;
+  const fail = (text) => {
+    error.textContent = text;
+    error.hidden = false;
+  };
+  const onKey = (event) => { if (event.key === "Escape") close(); };
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    backdrop.remove();
+  };
+  document.addEventListener("keydown", onKey);
+  backdrop.querySelector('[data-act="close"]').addEventListener("click", close);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const { current, fresh, again } = form.elements;
+    error.hidden = true;
+    if (!current.value) return fail("Введите нынешний пароль");
+    if (fresh.value.length < 8) return fail("Новый пароль — не короче 8 символов");
+    if (fresh.value !== again.value) return fail("Новые пароли не совпадают");
+    const button = form.querySelector(".primary");
+    button.disabled = true;
+    try {
+      await Api.changePassword(current.value, fresh.value);
+      form.querySelector("h2").textContent = "Пароль изменён";
+      for (const part of form.querySelectorAll("label, p, .primary")) part.remove();
+      form.querySelector('[data-act="close"]').textContent = "Закрыть";
+    } catch (problem) {
+      fail(problem.detail || "Не удалось сменить пароль");
+      button.disabled = false;
+    }
+  });
+  document.body.append(backdrop);
+  form.elements.current.focus();
+});
+
 /* --- Оформление --- */
 
 function paintStyle(style) {
@@ -944,6 +999,10 @@ async function startEngineerEdit(employee, account) {
   el("user-shift").value = employee.shift;
   const mark = employee.qualifications[0] || null;
   if (mark) {
+    // Отметка, которой нет в списке, не должна теряться при сохранении.
+    if (![...el("user-mark").options].some((option) => option.value === mark.category)) {
+      el("user-mark").add(new Option(mark.category, mark.category));
+    }
     el("user-mark").value = mark.category;
     el("user-types").value = mark.aircraft_types.join(", ");
     el("user-valid").value = mark.valid_until;

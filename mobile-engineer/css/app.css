@@ -458,6 +458,18 @@ button:disabled { opacity: 0.5; }
   vector-effect: non-scaling-stroke;
 }
 
+/* Приближение ВС. */
+.proximity { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: #b3122a; color: #fff; border: 2px solid #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, .45); }
+.proximity[hidden] { display: none; }
+.proximity svg { flex: none; }
+.proximity strong { font-size: 16px; line-height: 1.2; }
+.proximity.is-urgent { animation: proximity-flash 0.7s steps(2, jump-none) infinite; }
+@keyframes proximity-flash { from { background: #b3122a; } to { background: #5c0715; } }
+@media (prefers-reduced-motion: reduce) { .proximity.is-urgent { animation: none; } }
+.aircraft-path { fill: none; stroke: #ff4d5e; stroke-width: 4px; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; }
+.aircraft-near .marker-body, .aircraft-conflict .marker-body { fill: #b3122a; }
+
 /* Метки карты: белая обводка читается и на схеме, и на снимке. */
 .marker { pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)); }
 .marker-body { stroke: #fff; stroke-width: 2px; }

@@ -209,6 +209,8 @@ const Api = {
   createCall: (aircraft_id, defect_code, description, urgent, waypoints = []) =>
     request("POST", "/api/calls", { aircraft_id, defect_code, description, urgent, waypoints }),
   setWaypoints: (callId, node_ids) => request("POST", `/api/calls/${callId}/waypoints`, { node_ids }),
+  changePassword: (current_password, new_password) =>
+    request("POST", "/api/auth/password", { current_password, new_password }),
   // Стиль оформления системы — меняет технический администратор.
   uiStyle: () => request("GET", "/api/ui"),
   setUiStyle: (style) => request("PUT", "/api/ui", { style }),
@@ -217,6 +219,10 @@ const Api = {
   randomStand: (days, count) => request("POST", "/api/admin/stand/random", { days, count }),
   // Полигон ВДНХ — к исходной расстановке организаторов.
   resetPolygon: () => request("POST", "/api/admin/airports/polygon/reset"),
+  // Только координаты людей, машин и бортов — для карты.
+  positions: () => request("GET", "/api/positions"),
+  // Приближения ВС к инженерам аэропорта.
+  proximity: () => request("GET", "/api/proximity"),
   // Учения: инженеры без приложения движутся сами.
   drillState: () => request("GET", "/api/drill"),
   setDrill: (enabled, speed) => request("POST", "/api/drill", { enabled, speed }),

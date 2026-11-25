@@ -35,7 +35,7 @@ from services.assignment import (
     working_call_of,
 )
 
-TICK_S = 2
+TICK_S = 0.5
 SPEEDS = (1, 2, 4, 8, 16, 32)
 # Приложение опрашивает сервер раз в 5 с. Молчит дольше этого — человек
 # в нём не работает.

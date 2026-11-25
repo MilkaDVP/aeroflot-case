@@ -48,6 +48,7 @@ CATEGORY_TITLES = {
     "route": "Маршрут",
     "forecast": "Прибытие",
     "deadline": "Норматив",
+    "safety": "Безопасность",
     "error": "Ошибка",
     "user": "Действие пользователя",
 }
@@ -71,6 +72,7 @@ EVENT_TYPES = {
     "deadline_risk": ("deadline", "Предупреждение о риске нарушения норматива"),
     "deadline_violation": ("deadline", "Нарушение норматива"),
     "deadline_met": ("deadline", "Норматив выполнен"),
+    "aircraft_proximity": ("safety", "Предупреждение о приближении ВС"),
     "data_error": ("error", "Ошибка приёма данных"),
     "action_rejected": ("error", "Действие отклонено"),
     "server_error": ("error", "Ошибка сервера"),

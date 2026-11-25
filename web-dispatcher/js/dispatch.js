@@ -210,6 +210,86 @@ document.getElementById("drill-speed").addEventListener("change", (event) => {
   setDrill(true, Number(event.target.value));
 });
 
+/* --- Приближение ВС --- */
+
+let positionsBusy = false;
+
+/** Точки на карте: двигаются дважды в секунду, остальное — общим опросом. */
+async function refreshPositions() {
+  if (positionsBusy || !state.graph || document.hidden) return;
+  positionsBusy = true;
+  // Пока шёл запрос, мог пройти общий опрос или перенос метки.
+  const version = appliedRefresh;
+  try {
+    const places = await Api.positions();
+    if (version !== appliedRefresh) return;
+    const lists = { employee: state.employees, vehicle: state.vehicles, aircraft: state.aircraft };
+    let executor = false;
+    for (const [kind, list] of Object.entries(lists)) {
+      const known = new Map(list.map((item) => [item.id, item]));
+      for (const [id, lat, lon] of places[kind]) {
+        const item = known.get(id);
+        if (!item || lat === null || lon === null || (item.lat === lat && item.lon === lon)) continue;
+        item.lat = lat;
+        item.lon = lon;
+        airportMap.moveMarker(kind, id, lat, lon);
+        if (kind === "employee" && id === state.selectedCall?.assigned_employee_id) executor = true;
+      }
+    }
+    if (executor && ["assigned", "accepted"].includes(state.selectedCall.status)) {
+      showCallRoute(state.selectedCall);
+      airportMap.drawCallTrails(state.allCalls, state.employees, state.selectedCall.id);
+    }
+  } catch (error) {
+    // Точки догонит общий опрос.
+  } finally {
+    positionsBusy = false;
+  }
+}
+
+setInterval(refreshPositions, CONFIG.positionsIntervalMs || 500);
+
+const PROXIMITY_MS = 2000;
+let proximitySeen = new Set();
+
+/** Чаще общего опроса: от прогноза до сближения — до минуты. */
+async function refreshProximity() {
+  if (!state.graph) return;
+  let list;
+  try {
+    list = await Api.proximity();
+  } catch (error) {
+    return;
+  }
+  const feed = document.getElementById("proximity-feed");
+  feed.hidden = !list.length;
+  feed.replaceChildren(...list.map((warning) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "proximity-item";
+    const title = document.createElement("b");
+    title.textContent = `ВС ${warning.board_number} → ${warning.employee_name}`;
+    const note = document.createElement("span");
+    note.textContent = `${warning.crosses ? "пересечёт маршрут" : "сближение"} ${
+      warning.seconds <= 3 ? "сейчас" : `через ${warning.seconds} с`}, до борта ${warning.distance_m} м, ${warning.speed_kmh} км/ч`;
+    item.append(title, note);
+    item.addEventListener("click", () => {
+      const spot = airportMap.projectLatLon(warning.point.lat, warning.point.lon);
+      airportMap.focusOnPoint(spot.x, spot.y, 4);
+    });
+    return item;
+  }));
+  airportMap.drawProximity(list);
+  const fresh = list.filter((warning) => !proximitySeen.has(warning.id));
+  proximitySeen = new Set(list.map((warning) => warning.id));
+  if (fresh.length) {
+    playAlarm();
+    showToast(`Приближение ВС ${fresh[0].board_number} к инженеру ${fresh[0].employee_name}`, true);
+  }
+}
+
+setInterval(refreshProximity, PROXIMITY_MS);
+
 async function refresh() {
   refreshDrill();
   const version = ++refreshVersion;

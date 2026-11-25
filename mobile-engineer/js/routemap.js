@@ -80,6 +80,7 @@ class RouteMap {
     // сдвиг складывался с перемещением точки, и экран улетал.
     // null — карта едет за инженером. userSpan — метры по меньшей стороне,
     // null — автоматический охват.
+    this.aircraft = [];
     this.userCentre = null;
     this.userSpan = null;
     this.base = null;
@@ -432,9 +433,24 @@ class RouteMap {
     if (target) {
       this.drawTarget(this.project(target));
     }
+    for (const warning of this.aircraft) this.drawAircraft(warning);
     if (position) {
       this.drawSelf(this.project(position));
     }
+  }
+
+  /** Приближающиеся борта: где они, куда едут и где сблизятся с инженером. */
+  setAircraft(list) {
+    if (!list.length && !this.aircraft.length) return;
+    this.aircraft = list;
+    this.rerender();
+  }
+
+  drawAircraft(warning) {
+    this.drawRoute(warning.path.map((point) => this.project(point)), "aircraft-path");
+    this.addMarker(this.project(warning.point), "aircraft-conflict", [["circle", { class: "marker-body", r: 11 }],
+      ["path", { class: "marker-icon", d: "M-1.500 -6h3l-.5 7h-2zM-1.500 3h3v3h-3z" }]]);
+    this.addBadge(this.project(warning), "aircraft-near", ICON_PLANE);
   }
 
   /** Линейная проекция в метры от опорной точки. */
