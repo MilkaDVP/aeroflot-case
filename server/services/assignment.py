@@ -630,10 +630,6 @@ def parking_point(employee, graph, stand_node_id):
     return employee.lat, employee.lon
 
 
-# Опорные точки для расчёта скорости: инженер → (широта, долгота, момент).
-_speed_ref = {}
-
-
 def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_speed=True):
     """
     Новые координаты сотрудника.
@@ -652,17 +648,8 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_
         if seconds <= 0:
             employee.seen_at = now
             return False
-        # Точки приходят чаще раза в секунду, и по соседним скорость — шум:
-        # считаем от опорной точки, с которой прошло не меньше двух секунд.
-        key = getattr(employee, "id", None)
-        ref = _speed_ref.get(key)
-        if ref is None or not 0 < (now - age - ref[2]).total_seconds() <= 90:
-            ref = (employee.lat, employee.lon, employee.location_at)
-        span = (now - age - ref[2]).total_seconds()
-        if key is not None:
-            _speed_ref[key] = ref if span < 2 else (lat, lon, now - age)
-        if learn_speed and 2 <= span <= 90 and ref[0] is not None:
-            speed = haversine_m(ref[0], ref[1], lat, lon) * 3.6 / span
+        if learn_speed and 2 <= seconds <= 90 and employee.lat is not None:
+            speed = haversine_m(employee.lat, employee.lon, lat, lon) * 3.6 / seconds
             # Почти стоящий человек — не «медленный»: дрожание GPS давало
             # 1 км/ч и прогноз в разы больше настоящего. Прежняя скорость
             # меняется плавно: один рывок не должен перевернуть прогноз.
@@ -670,9 +657,6 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_
                 employee.vehicle.speed_kmh = smooth(employee.vehicle.speed_kmh, speed)
             elif not employee.has_vehicle and 2.5 <= speed <= 12:
                 employee.speed_kmh = smooth(employee.speed_kmh, speed)
-    if source != LOCATION_GPS:
-        # Точку поставили вручную: путь до неё — не перемещение.
-        _speed_ref.pop(getattr(employee, "id", None), None)
     employee.lat = lat
     employee.lon = lon
     employee.location_source = source

@@ -29,12 +29,13 @@ function detectApiBase() {
 const CONFIG = {
   apiBase: detectApiBase(),
 
-  pollIntervalMs: 1000,
+  // Опрос вызова. Реже, чем у диспетчера: телефон в кармане, экономим
+  // батарею и мобильный трафик, а вызов приходит не каждую секунду.
+  pollIntervalMs: 5000,
 
-  // Как часто отправлять новые координаты. Телефон сам отдаёт их около
-  // раза в секунду; неизменное место повторяется реже (heartbeatMs).
-  locationIntervalMs: 500,
-  heartbeatMs: 5000,
+  // Как часто отправлять координаты. Чаще нет смысла: пешком за пять
+  // секунд человек проходит около семи метров.
+  locationIntervalMs: 5000,
 
   // Норматив прибытия. На клиенте нужен только для обратного отсчёта
   // и цвета; решение всегда принимает сервер.
@@ -120,8 +121,6 @@ function extractDetail(payload, status) {
 }
 
 const Api = {
-  position: () => request("GET", "/api/me/position"),
-  proximity: () => request("GET", "/api/me/proximity"),
   login: (login, password) => request("POST", "/api/auth/login", { login, password }),
   logout: () => request("POST", "/api/auth/logout"),
   me: () => request("GET", "/api/auth/me"),

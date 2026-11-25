@@ -19,7 +19,6 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.environ['AEROFLOT_TEST_DB']}"
 # Такт журнала в тестах выключен: прогнозы и нарушения проверяются
 # прямым вызовом с заданным временем.
 os.environ["JOURNAL_LOOP"] = "0"
-os.environ["PROXIMITY_LOOP"] = "0"
 # Тесты не обращаются к внешнему GigaChat, даже если ключ лежит в server/.env.
 os.environ["GIGACHAT_ENABLED"] = "0"
 

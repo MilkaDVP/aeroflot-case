@@ -406,10 +406,7 @@ def list_calls(
         for call, response in zip(calls, responses):
             control = assess(call, now)
             if control.level in alternatives.LEVELS:
-                try:
-                    response.control.alternative = alternatives.cached(db, call, control, context.shift)
-                except Exception as error:  # список вызовов важнее подсказки к одному из них
-                    print(f"Вариант решения по вызову {call.id} не посчитан — {error!r}")
+                response.control.alternative = alternatives.cached(db, call, control, context.shift)
     return responses
 
 

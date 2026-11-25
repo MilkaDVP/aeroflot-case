@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from auth.dependencies import Context, get_context
-from auth.security import hash_password, new_token, session_expiry, verify_password
+from auth.security import new_token, session_expiry, verify_password
 from clock import to_iso_utc
 from services.shifts import end_shift, start_clock
 from constants import SHIFT_DAY, SHIFT_NIGHT, STATUS_FREE, STATUS_OFFLINE
@@ -25,7 +25,6 @@ from services import journal
 from services import shift_clock
 from schemas.auth import (
     AirportBrief,
-    ChangePasswordRequest,
     CurrentUserResponse,
     LoginRequest,
     LoginResponse,
@@ -160,30 +159,6 @@ def logout(db: Session = Depends(get_dispatch_db), context: Context = Depends(ge
 
         drill.forget_app(context.user.employee_id)
     return MessageResponse(message="Сессия закрыта")
-
-
-@router.post("/auth/password", response_model=MessageResponse, summary="Сменить свой пароль")
-def change_password(
-    payload: ChangePasswordRequest,
-    db: Session = Depends(get_dispatch_db),
-    context: Context = Depends(get_context),
-):
-    """
-    Нынешний пароль проверяется: открытый чужой экран не даёт его сменить.
-    Остальные сеансы этой записи завершаются — в них вход был по старому.
-    """
-    user = db.get(User, context.user.id)
-    if not verify_password(payload.current_password, user.password_hash):
-        # Не 401: сеанс действителен, выбрасывать на экран входа незачем.
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нынешний пароль неверен")
-    if payload.new_password == payload.current_password:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Новый пароль совпадает с нынешним")
-    user.password_hash = hash_password(payload.new_password)
-    db.query(AuthSession).filter(
-        AuthSession.user_id == user.id, AuthSession.token != context.session.token
-    ).delete(synchronize_session=False)
-    db.commit()
-    return MessageResponse(message="Пароль изменён")
 
 
 @router.get("/auth/me", response_model=CurrentUserResponse, summary="Текущий пользователь")

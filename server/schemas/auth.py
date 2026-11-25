@@ -72,13 +72,6 @@ class CurrentUserResponse(BaseModel):
     location_at: str | None = None
 
 
-class ChangePasswordRequest(BaseModel):
-    """Смена своего пароля: нынешний обязателен."""
-
-    current_password: str = Field(max_length=200)
-    new_password: str = Field(min_length=8, max_length=200)
-
-
 class SelectAirportRequest(BaseModel):
     """Выбор аэропорта и смены как контекста сессии."""
 

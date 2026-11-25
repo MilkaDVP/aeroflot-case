@@ -559,16 +559,6 @@
 .schedule-editor label { flex: 1; margin: 0; }
 .schedule-editor input { color-scheme: dark; margin-top: 3px; text-transform: none; }
 
-/* Приближение ВС к инженеру. */
-.proximity-feed { padding: 8px; display: grid; gap: 6px; border-bottom: 1px solid var(--border); }
-.proximity-feed[hidden] { display: none; }
-.proximity-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: var(--radius);
-  background: #b3122a; color: #fff; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
-.proximity-item:hover:not(:disabled) { background: #8f0e22; }
-.proximity-item b { display: block; }
-.aircraft-path { fill: none; stroke: #ff4d5e; stroke-width: 4px; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; pointer-events: none; }
-.aircraft-conflict { fill: rgba(242, 86, 77, 0.35); stroke: #ff4d5e; stroke-width: 2px; pointer-events: none; }
-
 /* Кто ещё может успеть. */
 .call-alt { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: var(--fs-sm); color: var(--text); }
 .call-alt span { flex: 1; min-width: 0; overflow-wrap: anywhere; }

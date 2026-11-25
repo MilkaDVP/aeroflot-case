@@ -41,9 +41,6 @@ function trailPoint(point) {
   return `${point.x},${point.y}`;
 }
 
-// Метка едет к новой точке столько, сколько ждать следующую.
-const GLIDE_MS = 550;
-
 // Период пульса вокруг борта — тот же, что у route-pulse в dispatch.css.
 const ROUTE_PULSE_MS = 1600;
 // Поля вокруг ключевых точек при наведении и предел приближения.
@@ -102,8 +99,6 @@ class AirportMap {
       labels: createGroup("layer-labels"),
       // Отметки начала и конца маршрута — поверх людей, бортов и подписей:
       // иначе они прятались под силуэтом самолёта на стоянке.
-      // Приближение ВС к инженеру: путь борта и место сближения.
-      proximity: createGroup("layer-proximity"),
       routeEnds: createGroup("layer-route-ends"),
     };
 
@@ -1196,59 +1191,6 @@ class AirportMap {
     marker.append(text, title(hint));
     this.layers.routeEnds.append(marker);
     this.svg.classList.add("has-route");
-  }
-
-  /**
-   * Переставляет уже нарисованную метку. Перерисовывать слой дважды
-   * в секунду нельзя: метка менялась бы между нажатием и щелчком.
-   */
-  moveMarker(kind, id, lat, lon) {
-    if (this.overrides.has(`${kind}:${id}`)) return;
-    const drag = this.drag;
-    if (drag && drag.kind === kind && drag.item?.id === id) return;
-    const layer = { employee: "employees", vehicle: "vehicles", aircraft: "aircraft" }[kind];
-    const marker = [...this.layers[layer].children].find((item) => item.dataset[`${kind}Id`] === String(id));
-    if (!marker) return;
-    this.glide(marker, this.projectLatLon(lat, lon));
-  }
-
-  /**
-   * Плавно ведёт метку к новому месту за время до следующей точки.
-   * Скачок дальше 60 м — перестановка, а не движение: сразу на место.
-   */
-  glide(marker, target) {
-    const from = { x: Number(marker.dataset.x), y: Number(marker.dataset.y) };
-    const token = {};
-    marker.glideToken = token;
-    const span = Math.hypot(target.x - from.x, target.y - from.y);
-    if (span > 60 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      this.placeMarker(marker, target.x, target.y);
-      return;
-    }
-    const start = performance.now();
-    const frame = (now) => {
-      // Метку взяли мышью, перерисовали или повели к следующей точке.
-      if (marker.glideToken !== token || !marker.isConnected || this.drag?.marker === marker) return;
-      const k = Math.min(1, (now - start) / GLIDE_MS);
-      this.placeMarker(marker, from.x + (target.x - from.x) * k, from.y + (target.y - from.y) * k);
-      if (k < 1) requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  }
-
-  /** Приближения ВС: прогноз пути борта и место сближения. */
-  drawProximity(list) {
-    const layer = this.layers.proximity;
-    layer.replaceChildren();
-    for (const warning of list) {
-      const points = warning.path.map((point) => this.projectLatLon(point.lat, point.lon));
-      layer.append(svgPart("polyline", { points: points.map((p) => `${p.x},${p.y}`).join(" "), class: "aircraft-path" }));
-      const spot = this.projectLatLon(warning.point.lat, warning.point.lon);
-      const marker = this.createMarker(spot.x, spot.y);
-      marker.append(svgPart("circle", { r: 16, class: "aircraft-conflict" }));
-      layer.append(marker);
-    }
-    if (list.length) this.updateMarkerScale();
   }
 
   /** Только стоянка выбранного вызова: маршрута ещё или уже нет. */

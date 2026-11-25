@@ -26,7 +26,7 @@ from constants import LOCATION_GPS, MODE_WALK, VEHICLE_IN_USE
 from graph_registry import get_graph
 from models.aircraft import Aircraft
 from models.employee import Employee
-from services import journal, proximity
+from services import journal
 from models.vehicle import Vehicle
 
 KIND_ENGINEER = "engineer"
@@ -68,7 +68,6 @@ _logged = {}
 def forget_points():
     """Забыть прежние места: объекты расставлены заново."""
     _last_points.clear()
-    proximity.forget()
 
 
 class BadPoint(ValueError):
@@ -346,8 +345,6 @@ def ingest(db, point, now=None):
     else:
         applied = _apply_aircraft(db, record, point)
     if applied:
-        if kind == KIND_AIRCRAFT:
-            proximity.note_aircraft(record, point, _last_points.get((kind, record.id)), now)
         _last_points[(kind, record.id)] = (point["t"], point["lat"], point["lon"], now)
     else:
         _reject(db, point, record, "нет маршрута до нового места" if kind == KIND_AIRCRAFT else "точка старее уже принятой", now)
@@ -378,7 +375,6 @@ def known_objects(db):
 def reset_memory():
     """Для тестов: забыть последние точки."""
     _last_points.clear()
-    proximity.forget()
     _logged.clear()
     _from_vehicle.clear()
 

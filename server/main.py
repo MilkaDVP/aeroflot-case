@@ -16,8 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api import (
     analytics,
-    positions,
-    proximity,
     stand,
     ui,
     drill,
@@ -42,7 +40,6 @@ from services.assignment import accept_pending
 from services.shifts import expire_shifts, initialize_shift_clocks
 from services.defects import ensure_builtin_defects
 from services import drill as drill_service
-from services import proximity as proximity_service
 from services import journal
 from services.journal_http import JournalMiddleware
 
@@ -76,12 +73,9 @@ def update_shifts():
 
 async def drill_loop():
     """Учения: такт движения инженеров, которые не зашли в приложение."""
-    last = due = time.monotonic()
+    last = time.monotonic()
     while True:
-        # По часам, а не «пауза после такта»: иначе шаг растягивался бы
-        # на длительность самого расчёта.
-        due = max(due + drill_service.TICK_S, time.monotonic())
-        await asyncio.sleep(due - time.monotonic())
+        await asyncio.sleep(drill_service.TICK_S)
         now = time.monotonic()
         # После заминки сервера люди не должны перескакивать через поле.
         dt_s, last = min(now - last, 5), now
@@ -98,26 +92,6 @@ def drill_tick(dt_s):
     except Exception as error:  # такт не должен ронять сервер
         db.rollback()
         print(f"Учения: такт пропущен — {error}")
-    finally:
-        db.close()
-
-
-async def proximity_loop():
-    """Приближение ВС к инженерам — раз в секунду, пока борта движутся."""
-    while True:
-        await asyncio.sleep(proximity_service.TICK_S)
-        if proximity_service.busy():
-            await asyncio.to_thread(proximity_tick)
-
-
-def proximity_tick():
-    db = SessionLocal()
-    try:
-        proximity_service.tick(db)
-        db.commit()
-    except Exception as error:  # такт не должен ронять сервер
-        db.rollback()
-        print(f"Приближение ВС: такт пропущен — {error}")
     finally:
         db.close()
 
@@ -191,9 +165,6 @@ async def lifespan(app: FastAPI):
 
     ticker = asyncio.create_task(shift_loop())
     driller = asyncio.create_task(drill_loop())
-    guard = None
-    if os.environ.get("PROXIMITY_LOOP", "1") == "1":
-        guard = asyncio.create_task(proximity_loop())
     # Такт журнала: прогнозы прибытия, риски и нарушения норматива.
     watcher = None
     if os.environ.get("JOURNAL_LOOP", "1") == "1":
@@ -201,7 +172,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        tasks = [task for task in (ticker, driller, guard, watcher) if task is not None]
+        tasks = [task for task in (ticker, driller, watcher) if task is not None]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -245,8 +216,6 @@ app.include_router(events.router)
 app.include_router(analytics.router)
 app.include_router(stand.router)
 app.include_router(ui.router)
-app.include_router(proximity.router)
-app.include_router(positions.router)
 app.include_router(users.router)
 app.include_router(track.router)
 app.include_router(drill.router)
