@@ -9,6 +9,7 @@ from models.aircraft import Aircraft
 from models.call import Call
 from models.employee import Employee
 from models.event_log import EventLog
+from models.user import User
 from services.assignment import check_aircraft_arrival
 from tests.test_api import ApiTestCase, auth_header
 
@@ -17,8 +18,8 @@ class TestArrival(ApiTestCase):
     def setUp(self):
         self.reset_database()
         with SessionLocal() as db:
-            board = db.query(Aircraft).filter_by(board_number="RA-73001", airport_icao="VDNH").one()
-            engineer = db.query(Employee).filter_by(full_name="Орлов В. С.", airport_icao="VDNH").one()
+            board = db.query(Aircraft).filter_by(stand_node_id="stand_1", airport_icao="VDNH").one()
+            engineer = db.query(Employee).filter_by(airport_icao="VDNH").order_by(Employee.id).first()
             engineer.status = "en_route"
             call = Call(airport_icao="VDNH", aircraft_id=board.id, stand_node_id=board.stand_node_id,
                         defect_code="hydraulic_leak", required_mark="B1.1", status="accepted",
@@ -27,7 +28,9 @@ class TestArrival(ApiTestCase):
             db.commit()
             self.call_id, self.engineer_id = call.id, engineer.id
         self.stand = get_graph("VDNH").node("stand_1")
-        self.token = self.login("orlov", "engineer", airport="VDNH")
+        with SessionLocal() as db:
+            login = db.query(User).filter_by(employee_id=self.engineer_id).one().login
+        self.token = self.login(login, "engineer", airport="VDNH")
 
     def stay(self, accuracy, seconds, d_lat=0.0):
         """Инженер стоит у борта: точка каждые 5 секунд."""

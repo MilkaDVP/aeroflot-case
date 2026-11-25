@@ -1202,8 +1202,8 @@ function onPosition(position) {
       (position.source !== "gps" || (position.accuracy <= 25 && Date.now() - position.measuredAt <= 15000))) {
     const wp = payload.call.waypoints?.find(p => !p.done_at);
     const node = wp && localNavigation.nodes?.get(wp.node_id);
-    const near = p => p && haversineM(position.lat, position.lon, p.lat, p.lon) <= 25;
-    const id = payload.vehicle?.pickup && near(payload.vehicle) ? "vehicle" : near(node) ? wp.node_id : null;
+    const near = (p, reach = 25) => p && haversineM(position.lat, position.lon, p.lat, p.lon) <= reach;
+    const id = payload.vehicle?.pickup && near(payload.vehicle, approachRadius(position)) ? "vehicle" : near(node) ? wp.node_id : null;
     if (id) recordAction("checkpoint", {checkpoint_id: id, lat: position.lat, lon: position.lon});
   }
   if (position.source === "gps" && sensorHeading === null) routeMap.setHeading(position.heading);

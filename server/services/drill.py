@@ -15,8 +15,12 @@ import time
 
 from algorithm.geo import haversine_m
 from algorithm.routing import agent_speed, edge_seconds
+from algorithm.transport import STOP_BOARD, STOP_RETURN
 from clock import utc_now
-from constants import LOCATION_GPS, LOCATION_MANUAL, MODE_VEHICLE, STATUS_BUSY, STATUS_EN_ROUTE
+from constants import (
+    LOCATION_GPS, LOCATION_MANUAL, MODE_VEHICLE, STATUS_BUSY, STATUS_EN_ROUTE, VEHICLE_BOARDING_S, VEHICLE_IN_USE,
+    VEHICLE_RESERVED,
+)
 from graph_registry import get_graph
 from models.call import STATUS_ACCEPTED, STATUS_ARRIVED, STATUS_ASSIGNED, STATUS_CLOSED, Call
 from models.employee import Employee
@@ -188,8 +192,13 @@ def move(db, person, call, seconds, now):
             break
 
     if (lat, lon) != (person.lat, person.lon):
+        waiting = person.vehicle is not None and person.vehicle.status == VEHICLE_RESERVED
         record_position(person, lat, lon, LOCATION_MANUAL, now=now, learn_speed=False)
         refresh_navigation(db, person)
+        if waiting and person.vehicle is not None and person.vehicle.status == VEHICLE_IN_USE:
+            # Сел в машину: сначала посадка, потом путь заново — уже за рулём.
+            path = trip["path"] = [(person.lat, person.lon, VEHICLE_BOARDING_S, False)]
+            trip["key"] = None
     trip["at"] = (person.lat, person.lon)
     if call is not None and not path and path_key(person, call) == trip["key"]:
         arrive(db, person, call, now)
@@ -244,6 +253,12 @@ def build_path(person, call):
             lat, lon, previous = node["lat"], node["lon"], node_id
         dwell, here = 0, False
         while stops and stops[0]["node_id"] == previous:
+            # Машина стоит в стороне от дороги — последние метры до неё самой.
+            car = car_at(stops[0], plan, person, call)
+            if car is not None:
+                length = haversine_m(lat, lon, car.lat, car.lon)
+                lat, lon = car.lat, car.lon
+                path.append((lat, lon, edge_seconds(length, None, agent_speed(leg.mode, leg.speed_kmh)), True))
             dwell += stops.pop(0)["dwell_s"]
             here = True
         if here:
@@ -254,9 +269,19 @@ def build_path(person, call):
     return path
 
 
+def car_at(stop, plan, person, call):
+    """Машина, к которой ведёт остановка: сесть в неё или вернуть её."""
+    if stop["kind"] == STOP_RETURN:
+        return person.vehicle
+    if stop["kind"] == STOP_BOARD and plan.pickup and stop["node_id"] == plan.pickup_node_id:
+        return call.vehicle
+    return None
+
+
 def link(graph, start_id, end_id, mode):
     """Длина и ограничение скорости ребра; (None, None) — ребра нет."""
     if start_id is not None:
+        graph = graph.with_points((start_id, end_id))
         for neighbour, length, limit in graph.links(start_id, mode):
             if neighbour == end_id:
                 return length, limit

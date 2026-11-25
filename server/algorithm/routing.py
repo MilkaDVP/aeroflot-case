@@ -17,7 +17,7 @@
 
 import heapq
 
-from constants import MODE_WALK, SPEED_KMH_BY_MODE
+from constants import MODE_VEHICLE, MODE_WALK, SPEED_KMH_BY_MODE
 
 
 def agent_speed(mode, speed_kmh=None):
@@ -86,7 +86,10 @@ def shortest_path(graph, start_id, goal_id, mode=MODE_WALK, speed_kmh=None, avoi
     но при равном времени выбирается путь, где их меньше.
     """
     if start_id not in graph.nodes or goal_id not in graph.nodes:
-        return None
+        # Точка посреди дороги — или такой вершины нет.
+        if graph.node(start_id) is None or graph.node(goal_id) is None:
+            return None
+        graph = graph.with_points((start_id, goal_id))
 
     if start_id == goal_id:
         return Route([start_id], 0.0, mode, 0.0, speed_kmh, 0.0)
@@ -145,7 +148,8 @@ def route_from_point(graph, lat, lon, goal_id, mode=MODE_WALK, speed_kmh=None):
     поэтому сначала ищем ближайшую доступную вершину, а расстояние до неё
     добавляем к длине маршрута как подход.
     """
-    entry_node, approach_m = graph.nearest_node(lat, lon, mode)
+    # Едет — с того места дороги, где машина; пешком — от ближайшей вершины.
+    entry_node, approach_m = (graph.nearest_road if mode == MODE_VEHICLE else graph.nearest_node)(lat, lon, mode)
     if entry_node is None:
         return None
 
@@ -166,7 +170,7 @@ def shortest_paths_from(graph, start_id, mode=MODE_WALK, speed_kmh=None):
     так получает время ходьбы кандидата сразу до всех машин и складов,
     а время езды — от всех машин до стоянки.
     """
-    if start_id not in graph.nodes:
+    if start_id not in graph.nodes and graph.node(start_id) is None:
         return {}
 
     speed = agent_speed(mode, speed_kmh)

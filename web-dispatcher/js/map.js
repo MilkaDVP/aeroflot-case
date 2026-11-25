@@ -973,14 +973,14 @@ class AirportMap {
   drawRoute(nodeIds, pickupNodeId, employee, stops) {
     this.clearRoute();
 
-    let known = (nodeIds || []).filter((id) => this.nodesById.has(id));
+    let known = (nodeIds || []).filter((id) => this.routeNode(id));
     if (known.length === 0) {
       return false;
     }
     // Маршрут из одной вершины. Если известно, где исполнитель, линия
     // идёт от его текущего места; иначе он уже у борта — отмечен конец.
     if (known.length === 1) {
-      const target = this.nodesById.get(known[0]);
+      const target = this.routeNode(known[0]);
       if (employee && employee.lat != null && employee.lon != null) {
         const start = this.projectLatLon(employee.lat, employee.lon);
         this.appendRouteLine(this.routeLine(known), "route", start);
@@ -1010,8 +1010,15 @@ class AirportMap {
     const pickupAhead = split < known.length - 1 && (split > 0 || (split === 0 && Boolean(lead)));
     if (pickupAhead) {
       const at = line.findIndex((point) => point.id === pickupNodeId);
-      this.appendRouteLine(line.slice(0, at + 1), "route route-walk", lead);
-      this.appendRouteLine(line.slice(at), "route");
+      // Машина стоит в стороне от дороги — линия доходит до неё самой.
+      const walk = line.slice(0, at + 1), drive = line.slice(at);
+      const car = this.parkedNear(line[at]);
+      if (car) {
+        walk.push(car);
+        drive.unshift(car);
+      }
+      this.appendRouteLine(walk, "route route-walk", lead);
+      this.appendRouteLine(drive, "route");
     } else {
       this.appendRouteLine(line, "route", lead);
     }
@@ -1019,10 +1026,11 @@ class AirportMap {
     // Концы маршрута отмечены отдельно и крупно: точка сотрудника мелкая,
     // а силуэт борта на стоянке легко принять за обычный значок карты —
     // без отметок было непонятно, откуда и куда идёт линия.
-    const first = progress ? progress.position : this.nodesById.get(known[0]);
-    const last = this.nodesById.get(known[known.length - 1]);
+    const first = progress ? progress.position : this.routeNode(known[0]);
+    const last = this.routeNode(known[known.length - 1]);
     if (pickupAhead) {
-      this.appendRouteEnd(this.nodesById.get(known[split]), "pickup", "Машина", "Здесь забрать машину");
+      const spot = this.routeNode(known[split]);
+      this.appendRouteEnd(this.parkedNear(spot) || spot, "pickup", "Машина", "Здесь забрать машину");
     }
     // Промежуточные точки: склад (получить инструмент, 30 с). Посадка
     // отмечена машиной выше; высадка у борта — это конец маршрута.
@@ -1032,7 +1040,7 @@ class AirportMap {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "warehouse", stop.name || "Склад",
           `${stop.name || "Склад"}: получить инструмент (${stop.dwell_s} с)`);
       } else if (stop.kind === "return") {
-        this.appendRouteEnd(this.nodesById.get(stop.node_id), "return", "Вернуть машину", "Сюда вернуть прежнюю машину");
+        this.appendRouteEnd(this.routeNode(stop.node_id), "return", "Вернуть машину", "Сюда вернуть прежнюю машину");
       } else if (stop.kind === "pass") {
         this.appendRouteEnd(this.nodesById.get(stop.node_id), "pass", stop.name || "Точка",
           `Промежуточная точка${stop.name ? `: ${stop.name}` : ""}`);
@@ -1042,6 +1050,18 @@ class AirportMap {
     this.appendRouteEnd(last, "finish", standLabel(last), "Конец маршрута — стоянка борта");
     this.updateMarkerScale();
     return true;
+  }
+
+  /** Стоящая машина, которой принадлежит эта точка посадки. */
+  parkedNear(point) {
+    let best = null;
+    for (const vehicle of this.lastDraw.vehicle?.[0] || []) {
+      if (vehicle.status === "in_use" || vehicle.lat == null) continue;
+      const spot = this.projectLatLon(vehicle.lat, vehicle.lon);
+      const distance = Math.hypot(spot.x - point.x, spot.y - point.y);
+      if (distance <= 40 && (!best || distance < best.distance)) best = { ...spot, distance };
+    }
+    return best && { x: best.x, y: best.y };
   }
 
   /**
@@ -1117,14 +1137,66 @@ class AirportMap {
     this.updateMarkerScale();
   }
 
+  /** Вершина графа или точка посреди дороги. */
+  routeNode(id) {
+    return this.nodesById.get(id) || this.roadPoint(id)?.node || null;
+  }
+
+  /**
+   * Точка посреди дороги: «~вершина~вершина~длина, см~от первой, см».
+   * Разбор тот же, что на сервере (algorithm/graph.py).
+   */
+  roadPoint(id) {
+    const parts = String(id ?? "").split("~");
+    if (parts.length !== 5 || parts[0] !== "") return null;
+    const [, start, end, length, along] = parts;
+    const edge = this.graph.edges.find((e) => e.from_id === start && e.to_id === end &&
+      Math.abs(e.distance_m * 100 - Number(length)) < 1);
+    const a = this.nodesById.get(start), b = this.nodesById.get(end);
+    if (!edge || !a || !b) return null;
+    const line = [[a.x, a.y], ...(edge.points || []), [b.x, b.y]];
+    const spans = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+    let left = Number(along) / 100 / edge.distance_m * spans.reduce((sum, span) => sum + span, 0);
+    let index = 0;
+    while (index < spans.length - 1 && left > spans[index]) {
+      left -= spans[index];
+      index += 1;
+    }
+    const k = spans[index] ? Math.min(1, left / spans[index]) : 0;
+    const [from, to] = [line[index], line[index + 1]];
+    return {
+      edge, line, index, along: Number(along),
+      node: { id, type: "junction", ref: null, x: from[0] + (to[0] - from[0]) * k, y: from[1] + (to[1] - from[1]) * k },
+    };
+  }
+
+  /** Изгибы дороги между соседними точками маршрута, в порядке движения. */
+  roadBends(start, end) {
+    const known = this.bends.get(`${start}|${end}`);
+    if (known) return known;
+    const a = this.roadPoint(start), b = this.roadPoint(end);
+    if (a && b) {
+      if (a.edge !== b.edge) return [];
+      return b.along >= a.along ? a.line.slice(a.index + 1, b.index + 1)
+        : a.line.slice(b.index + 1, a.index + 1).reverse();
+    }
+    const point = a || b;
+    if (!point) return [];
+    const other = a ? end : start;
+    // От точки к концу ребра; в обратную сторону — перевернуть.
+    const part = other === point.edge.from_id ? point.line.slice(1, point.index + 1).reverse()
+      : other === point.edge.to_id ? point.line.slice(point.index + 1, -1) : [];
+    return a ? part : part.reverse();
+  }
+
   /** Вершины маршрута с изгибами дорог между ними; у изгибов нет id. */
   routeLine(nodeIds) {
     const line = [];
     let previous = null;
     for (const id of nodeIds) {
-      const node = this.nodesById.get(id);
+      const node = this.routeNode(id);
       if (!node) continue;
-      for (const [x, y] of (previous && this.bends.get(`${previous}|${id}`)) || []) line.push({ x, y });
+      for (const [x, y] of previous ? this.roadBends(previous, id) : []) line.push({ x, y });
       line.push({ id, x: node.x, y: node.y });
       previous = id;
     }

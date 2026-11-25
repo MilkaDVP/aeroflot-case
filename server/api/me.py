@@ -284,7 +284,7 @@ def update_status(
     elif payload.action == "checkpoint":
         from algorithm.geo import haversine_m
         from services.assignment import mark_waypoint_done, remaining_waypoints, assigned_route, update_assigned_route
-        from constants import VEHICLE_IN_USE
+        from constants import APPROACH_GPS_MAX_M, VEHICLE_IN_USE
         graph = get_graph(call.airport_icao)
         if payload.lat is None or payload.lon is None or employee.return_vehicle:
             raise HTTPException(409, "Нельзя подтвердить точку маршрута")
@@ -292,7 +292,7 @@ def update_status(
             vehicle = call.vehicle
             if not vehicle or vehicle.employee_id != employee.id or vehicle.status != VEHICLE_RESERVED:
                 raise HTTPException(409, "Назначение транспорта изменилось")
-            if haversine_m(payload.lat, payload.lon, vehicle.lat, vehicle.lon) > 25:
+            if haversine_m(payload.lat, payload.lon, vehicle.lat, vehicle.lon) > APPROACH_GPS_MAX_M:
                 raise HTTPException(409, "Точка вне стоянки транспорта")
             vehicle.status = VEHICLE_IN_USE
         else:

@@ -169,13 +169,13 @@ def prepare_vehicles(graph, vehicles):
     """
     Посадка свободных машин на граф — один раз на весь подбор.
 
-    Машина стоит в произвольной точке; ей нужна ближайшая вершина, куда
-    может заехать транспорт. Считать это для каждого кандидата заново
+    Машина стоит в произвольной точке; ей нужно ближайшее место дороги,
+    куда может и заехать транспорт, и дойти инженер. Считать это для каждого кандидата заново
     незачем: машины от кандидатов не зависят.
     """
     prepared = []
     for vehicle in vehicles:
-        node, offset_m = graph.nearest_node(vehicle["lat"], vehicle["lon"], MODE_VEHICLE)
+        node, offset_m = graph.nearest_road(vehicle["lat"], vehicle["lon"], MODE_VEHICLE, MODE_WALK)
         if node is not None:
             prepared.append({"vehicle": vehicle, "node_id": node["id"], "offset_m": offset_m})
     return prepared
@@ -228,7 +228,9 @@ class Network:
     def times(self, start_id, mode, speed_kmh=None):
         key = (start_id, mode, agent_speed(mode, speed_kmh))
         if key not in self._maps:
-            self._maps[key] = shortest_paths_from(self.graph, start_id, mode, speed_kmh)
+            # Машины стоят и посреди дорог — до этих мест тоже нужен путь.
+            graph = self.graph.with_points([item["node_id"] for item in self.prepared])
+            self._maps[key] = shortest_paths_from(graph, start_id, mode, speed_kmh)
         return self._maps[key]
 
     def chains(self):
@@ -270,7 +272,7 @@ def best_chain(net, employee, chain, allow_fleet=True, fleet_only=False):
     # Состояние: ключ (FOOT или идентификатор машины) → (секунды, шаги, машина, пересадка?).
     if own is not None:
         speed = own.get("speed_kmh")
-        entry, offset = graph.nearest_node(employee["lat"], employee["lon"], MODE_VEHICLE)
+        entry, offset = graph.nearest_road(employee["lat"], employee["lon"], MODE_VEHICLE)
         if entry is None:
             return None
         states = {("own",): (seconds(offset, MODE_VEHICLE, speed), [], own, False, entry["id"], offset)}
@@ -449,7 +451,7 @@ def plan_after_return(graph, employee, vehicle, home, build_plan):
     на месте — участка возврата нет.
     """
     lat, lon = home
-    node, offset = graph.nearest_node(lat, lon, MODE_VEHICLE)
+    node, offset = graph.nearest_road(lat, lon, MODE_VEHICLE)
     if node is None:
         return None
     base = build_plan({**employee, "lat": lat, "lon": lon, "vehicle": None})

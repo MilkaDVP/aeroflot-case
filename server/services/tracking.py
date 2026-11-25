@@ -231,7 +231,8 @@ def _apply_engineer(db, employee, point, now):
     age = max(0.0, (now - moment).total_seconds())
     # Скорость из точек не выводится: нормативные скорости положения
     # фиксированы, а имитатор может идти в ускоренном времени.
-    changed = record_position(employee, point["lat"], point["lon"], LOCATION_GPS, age, now=now, learn_speed=False)
+    changed = record_position(employee, point["lat"], point["lon"], LOCATION_GPS, age, now=now, learn_speed=False,
+                              accuracy_m=point["acc"])
     if changed:
         refresh_navigation(db, employee)
         check_aircraft_arrival(db, employee, point["acc"], max_gap_s=ARRIVAL_MAX_GAP_S)

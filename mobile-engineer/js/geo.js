@@ -125,7 +125,10 @@ class Locator {
 
 /* --- Прибытие к борту --- */
 
-const ARRIVAL_RADIUS_M = 25;
+const APPROACH_EXACT_M = 3;
+const APPROACH_GPS_M = 15;
+const APPROACH_GPS_MAX_M = 30;
+const APPROACH_GPS_UNKNOWN_M = 20;
 // Посредственный GPS: засчитываем, если простоять дольше и рядом нет
 // стоянки ближе. Хуже — только кнопкой: соседние борта в 45 метрах.
 const ARRIVAL_GOOD_M = 25;
@@ -143,6 +146,13 @@ const ARRIVAL_MANUAL_M = 100;
  * since — с какого момента инженер у борта (0 — не у борта).
  * Возвращает { since, done, left, manual, hint }.
  */
+/** С какого расстояния инженер подошёл вплотную — как на сервере. */
+function approachRadius(pos) {
+  if (pos.source !== "gps") return APPROACH_EXACT_M;
+  if (!Number.isFinite(pos.accuracy)) return APPROACH_GPS_UNKNOWN_M;
+  return Math.min(APPROACH_GPS_MAX_M, APPROACH_GPS_M + pos.accuracy);
+}
+
 function arrivalCheck(pos, target, since, now, isNearest = true) {
   const none = (manual, hint) => ({ since: 0, done: false, left: null, manual, hint });
   if (!target) return none(true, "");
@@ -157,7 +167,7 @@ function arrivalCheck(pos, target, since, now, isNearest = true) {
   if (accuracy > ARRIVAL_FAIR_M) {
     return none(true, Number.isFinite(accuracy) ? `GPS неточный: ±${Math.round(accuracy)} м` : "GPS неточный");
   }
-  if (distance > ARRIVAL_RADIUS_M) return none(true, `До борта ${Math.round(distance)} м`);
+  if (distance > approachRadius(pos)) return none(true, `До борта ${Math.round(distance)} м`);
   const fair = accuracy > ARRIVAL_GOOD_M;
   if (fair && !isNearest) return none(true, `GPS неточный: ±${Math.round(accuracy)} м`);
   const start = since || now;

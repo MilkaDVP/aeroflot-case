@@ -599,14 +599,10 @@ def route_map(icao, row, canvas, width, height):
     canvas.saveState()
     base_map(canvas, graph, place, width, height)
     nodes = [n for key in row.call.route_node_ids or [] if (n := graph.node(key))]
-    bends = {}
-    for edge in graph.edges:
-        bends[(edge["from_id"], edge["to_id"])] = edge.get("points") or []
-        bends[(edge["to_id"], edge["from_id"])] = (edge.get("points") or [])[::-1]
     if len(nodes) > 1:
         points = [place(nodes[0]["x"], nodes[0]["y"])]
         for a, b in zip(nodes, nodes[1:]):
-            points += [place(*p) for p in bends.get((a["id"], b["id"]), [])] + [place(b["x"], b["y"])]
+            points += [place(*graph._xy(*p)) for p in graph.bends(a["id"], b["id"])] + [place(b["x"], b["y"])]
         canvas.setStrokeColor(BLUE)
         canvas.setLineWidth(2)
         polyline(canvas, points)

@@ -33,7 +33,10 @@ from constants import (
     LOCATION_GPS,
     MODE_VEHICLE,
     MODE_WALK,
-    PICKUP_RADIUS_M,
+    APPROACH_EXACT_M,
+    APPROACH_GPS_M,
+    APPROACH_GPS_MAX_M,
+    APPROACH_GPS_UNKNOWN_M,
     ROUTE_DEVIATION_M,
     STAGE_INSPECTION,
     STAGE_REPAIR,
@@ -296,7 +299,7 @@ def plan_with(employee, call, graph, vehicle, riding):
 
     own = employee.vehicle
     if (own is not None and own is not vehicle and own.status == VEHICLE_IN_USE
-            and haversine_m(employee.lat, employee.lon, own.lat, own.lon) > PICKUP_RADIUS_M):
+            and haversine_m(employee.lat, employee.lon, own.lat, own.lon) > approach_radius(employee)):
         return plan_after_return(graph, person, own.as_algorithm_dict(), (own.lat, own.lon), build_plan)
     return build_plan({**person, "vehicle": None})
 
@@ -630,7 +633,19 @@ def parking_point(employee, graph, stand_node_id):
     return employee.lat, employee.lon
 
 
-def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_speed=True):
+def approach_radius(employee, accuracy_m=None):
+    """С какого расстояния считать, что инженер подошёл вплотную."""
+    if employee.location_source != LOCATION_GPS:
+        return APPROACH_EXACT_M
+    if accuracy_m is None:
+        # Точность последней принятой точки.
+        accuracy_m = getattr(employee, "fix_accuracy_m", None)
+    if accuracy_m is None:
+        return APPROACH_GPS_UNKNOWN_M
+    return min(APPROACH_GPS_MAX_M, APPROACH_GPS_M + accuracy_m)
+
+
+def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_speed=True, accuracy_m=None):
     """
     Новые координаты сотрудника.
 
@@ -663,6 +678,7 @@ def record_position(employee, lat, lon, source, fix_age_s=None, now=None, learn_
     employee.location_at = now - age
     employee.seen_at = now
     employee.updated_at = now
+    employee.fix_accuracy_m = accuracy_m if source == LOCATION_GPS else None
 
     if pick_up_if_near(employee):
         employee.just_picked_up = True
@@ -689,7 +705,7 @@ def navigation_leg(employee):
         return None
     lat, lon, mode, instruction = target
     graph = get_graph(employee.airport_icao)
-    node, _ = graph.nearest_node(lat, lon, mode)
+    node, _ = graph.nearest_road(lat, lon, mode)
     route = route_from_point(graph, employee.lat, employee.lon, node["id"], mode) if node else None
     points = [{"lat": employee.lat, "lon": employee.lon}]
     if not route:
@@ -754,14 +770,15 @@ def check_aircraft_arrival(db, employee, accuracy_m=None, max_gap_s=30):
     point, on_stand = aircraft_place(call, graph)
     at = employee.location_at
     # Борт на стоянке с размеченной зоной обслуживания — прибытие по её
-    # контуру; где зоны нет или борт вне стоянки — по радиусу.
+    # контуру; иначе — вплотную к борту (approach_radius).
     zone = graph.zone_at(employee.lat, employee.lon) if on_stand and employee.lat is not None else None
     inside = bool(zone and zone.get("node_id") == call.stand_node_id)
     if (not point or not at or (utc_now() - at).total_seconds() > max_gap_s or employee.return_vehicle
             or (accuracy_m is not None and accuracy_m > ARRIVAL_FAIR_M)
             or any(not w.get("done_at") for w in call.waypoints or [])
             or (call.vehicle and call.vehicle.status == VEHICLE_RESERVED)
-            or not (inside or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"]) <= WAYPOINT_DONE_RADIUS_M)):
+            or not (inside or haversine_m(employee.lat, employee.lon, point["lat"], point["lon"])
+                    <= approach_radius(employee, accuracy_m))):
         call.near_aircraft_since = call.last_aircraft_fix = None
         return
     fair = accuracy_m is not None and accuracy_m > ARRIVAL_GOOD_M
@@ -787,7 +804,7 @@ def refresh_navigation(db, employee):
     target = return_destination(employee)
     call = working_call_of(db, employee)
     if target:
-        if haversine_m(employee.lat, employee.lon, *target[:2]) > PICKUP_RADIUS_M:
+        if haversine_m(employee.lat, employee.lon, *target[:2]) > approach_radius(employee):
             return
         if employee.return_vehicle and employee.vehicle:
             old = employee.vehicle
@@ -832,7 +849,7 @@ def pick_up_if_near(employee):
         return False
     if None in (employee.lat, employee.lon, vehicle.lat, vehicle.lon):
         return False
-    if haversine_m(employee.lat, employee.lon, vehicle.lat, vehicle.lon) > PICKUP_RADIUS_M:
+    if haversine_m(employee.lat, employee.lon, vehicle.lat, vehicle.lon) > approach_radius(employee):
         return False
     vehicle.status = VEHICLE_IN_USE
     return True
