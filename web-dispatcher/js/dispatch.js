@@ -151,7 +151,16 @@ async function start() {
     const call = state.calls.find((item) => item.id === saved);
     if (call) await selectCall(call);
     startClock();
-    pollTimer = setInterval(refresh, CONFIG.pollIntervalMs);
+    let polling = false;
+    pollTimer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        await refresh();
+      } finally {
+        polling = false;
+      }
+    }, CONFIG.pollIntervalMs);
   } catch (error) {
     elements.suggestBody.innerHTML = `<div class="error">${error.detail}</div>`;
   }

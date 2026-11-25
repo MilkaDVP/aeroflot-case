@@ -154,7 +154,12 @@ def find_qualification(employee, required, aircraft_type, on_date):
     best_rank = -1
 
     for qualification in employee.get("qualifications", []):
-        mark = parse_mark(qualification["category"])
+        try:
+            mark = parse_mark(qualification.get("category") or "")
+        except ValueError:
+            # Испорченная отметка одного человека допуска не даёт, но и не
+            # должна останавливать подбор по всем остальным.
+            continue
 
         if not mark_satisfies(mark, required):
             continue

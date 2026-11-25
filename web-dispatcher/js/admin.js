@@ -944,6 +944,10 @@ async function startEngineerEdit(employee, account) {
   el("user-shift").value = employee.shift;
   const mark = employee.qualifications[0] || null;
   if (mark) {
+    // Отметка, которой нет в списке, не должна теряться при сохранении.
+    if (![...el("user-mark").options].some((option) => option.value === mark.category)) {
+      el("user-mark").add(new Option(mark.category, mark.category));
+    }
     el("user-mark").value = mark.category;
     el("user-types").value = mark.aircraft_types.join(", ");
     el("user-valid").value = mark.valid_until;
