@@ -30,9 +30,7 @@ function detectApiBase() {
 const CONFIG = {
   apiBase: detectApiBase(),
 
-  // Опрос данных с сервера. ТЗ допускает 3–5 секунд: WebSocket для
-  // демонстрации не нужен, а polling проще и надёжнее.
-  pollIntervalMs: 4000,
+  pollIntervalMs: 1000,
 
   // Точки на карте — отдельным лёгким запросом, дважды в секунду.
   positionsIntervalMs: 500,
